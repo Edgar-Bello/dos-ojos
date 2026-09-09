@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dosojos-sat"
+version = "0.1.0"
+description = "Sentinel-2 crop-stress triage for Rio Grande Valley fields"
+requires-python = ">=3.11,<3.13"
+dynamic = ["dependencies"]
+
+[project.scripts]
+dosojos-sat = "dosojos_sat.cli:cli"
+
+[tool.setuptools]
+packages = ["dosojos_sat"]
+package-dir = { "dosojos_sat" = "src" }
+
+[tool.setuptools.dynamic]
+dependencies = { file = ["requirements.txt"] }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

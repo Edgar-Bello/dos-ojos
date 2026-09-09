@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Cache and outputs are reproducible; the demo ships its own copy if needed.
+cache/*.sqlite
+cache/*.sqlite-wal
+cache/*.sqlite-shm
+cache/clips/
+out/
+fetch.log
