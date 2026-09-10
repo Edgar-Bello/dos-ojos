@@ -11,7 +11,7 @@ from typing import Sequence
 
 import click
 
-from . import video, viz
+from . import odm_runner, video, viz
 from .config import (
     Flight,
     ManifestError,
@@ -415,4 +415,145 @@ def _format_video_ingest(result) -> str:
     ]
     for reason, count in sorted(reasons.items(), key=lambda kv: -kv[1]):
         lines.append(f"  dropped          {count} - {reason}")
+    return "\n".join(lines)
+
+
+# --------------------------------------------------------------------------- #
+# ODM
+# --------------------------------------------------------------------------- #
+
+
+@cli.command("doctor")
+@click.option("--images", type=int, default=None,
+              help="Check whether this machine can handle N images.")
+def doctor_cmd(images: int | None) -> None:
+    """Check Docker, memory and the ODM image before committing to a run."""
+    status = odm_runner.check_docker()
+    rows = [
+        ("docker", "yes" if status.available else "NO"),
+        ("version", status.version or "-"),
+        ("container memory", f"{status.memory_gb:.1f} GB" if status.memory_gb else "-"),
+        ("container cpus", str(status.cpus) if status.cpus else "-"),
+        ("odm image", "present" if status.has_image else "NOT PULLED"),
+    ]
+    width = max(len(label) for label, _ in rows)
+    for label, value in rows:
+        click.echo(f"  {label:<{width}}  {value}")
+
+    problems = list(status.problems)
+    if status.available and not status.has_image:
+        problems.append(
+            f"the ODM image is not pulled yet. Run: docker pull {odm_runner.ODM_IMAGE}"
+        )
+    if images:
+        problems.extend(odm_runner.memory_advice(images, status.memory_bytes))
+
+    click.echo()
+    if problems:
+        for problem in problems:
+            click.secho(f"WARNING: {problem}", fg="yellow")
+    else:
+        click.secho("Ready to run ODM.", fg="green")
+
+
+@cli.command("odm")
+@click.argument("flight_id")
+@click.option("--orthophoto-resolution", type=float, default=2.0, show_default=True,
+              help="Orthophoto resolution in cm/pixel.")
+@click.option("--dem-resolution", type=float, default=5.0, show_default=True,
+              help="DSM and DTM resolution in cm/pixel.")
+@click.option("--feature-quality", default="medium", show_default=True,
+              type=click.Choice(["ultra", "high", "medium", "low", "lowest"]),
+              help="Feature extraction detail.")
+@click.option("--pc-quality", default="medium", show_default=True,
+              type=click.Choice(["ultra", "high", "medium", "low", "lowest"]),
+              help="Point cloud density. The main driver of memory and time.")
+@click.option("--max-concurrency", type=int, default=None,
+              help="Parallel workers  [default: ODM decides from container CPUs]")
+@click.option("--rerun-from", default=None,
+              type=click.Choice(list(odm_runner.ODM_STAGES)),
+              help="Resume from a stage instead of starting over.")
+@click.option("--fast-orthophoto", is_flag=True,
+              help="Skip meshing for a quicker, rougher orthophoto.")
+@click.option("--dry-run", is_flag=True,
+              help="Stage images and print the command without running it.")
+@click.pass_obj
+def odm_cmd(
+    settings: Settings,
+    flight_id: str,
+    orthophoto_resolution: float,
+    dem_resolution: float,
+    feature_quality: str,
+    pc_quality: str,
+    max_concurrency: int | None,
+    rerun_from: str | None,
+    fast_orthophoto: bool,
+    dry_run: bool,
+) -> None:
+    """Run OpenDroneMap on a flight, producing orthophoto, DSM, DTM and point cloud."""
+    config = odm_runner.OdmConfig(
+        orthophoto_resolution_cm=orthophoto_resolution,
+        dem_resolution_cm=dem_resolution,
+        feature_quality=feature_quality,
+        pc_quality=pc_quality,
+        max_concurrency=max_concurrency,
+        rerun_from=rerun_from,
+        fast_orthophoto=fast_orthophoto,
+    )
+    settings.ensure_dirs(flight_id)
+    raw_dir = settings.flight_raw(flight_id)
+
+    if dry_run:
+        try:
+            config.validate()
+            staged = odm_runner.stage_images(raw_dir, settings.flight_odm(flight_id))
+        except odm_runner.OdmError as exc:
+            raise click.ClickException(str(exc)) from exc
+        command = odm_runner.build_command(settings.odm_dir, flight_id, config)
+        click.echo(f"Staged {staged} image(s). Command:\n")
+        click.echo(odm_runner.as_shell(command))
+        return
+
+    click.echo(
+        "ODM will take a while: expect hours on a laptop for a few hundred images. "
+        "The full command is written to the project folder if you want to run it "
+        "by hand.\n"
+    )
+    try:
+        result = odm_runner.run_odm(flight_id, raw_dir, settings.odm_dir, config)
+    except odm_runner.OdmError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    click.echo()
+    click.echo(_format_odm_result(result))
+    if not result.ok:
+        raise SystemExit(1)
+
+
+def _format_odm_result(result) -> str:
+    """Report what a run produced, or where it broke and what to check."""
+    minutes = result.duration_s / 60
+    lines = [
+        f"  flight           {result.flight_id}",
+        f"  duration         {minutes:.1f} min",
+        f"  exit code        {result.returncode}",
+        f"  log              {result.log_path}",
+    ]
+    for name in odm_runner.EXPECTED_OUTPUTS:
+        path = result.outputs.get(name)
+        lines.append(f"  {name:<16} {path if path else 'MISSING'}")
+
+    if result.ok:
+        lines.append("")
+        lines.append("  All products present and georeferenced.")
+        return "\n".join(lines)
+
+    lines.append("")
+    if result.failed_stage:
+        lines.append(f"  FAILED during the '{result.failed_stage}' stage.")
+    else:
+        lines.append("  FAILED before any stage completed.")
+    if result.advice:
+        lines.append(f"  {result.advice}")
+    lines.append(f"  Full log: {result.log_path}")
     return "\n".join(lines)

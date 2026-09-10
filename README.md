@@ -13,7 +13,7 @@ be confirmed or dismissed from 60 metres.
 |---|---|---|
 | 1 | Ingest, EXIF validation, coverage quicklook | done |
 | 2 | Video fallback (MP4 + DJI SRT → geotagged JPEGs) | done |
-| 3 | ODM run via Docker | **needs Docker installed** |
+| 3 | ODM run via Docker | done |
 | 4 | Canopy height model (DSM − DTM) | not started |
 | 5 | Plant/row detection | not started |
 | 6 | Per-plant metrics and RGB indices | not started |
@@ -32,10 +32,19 @@ Python 3.11 or 3.12. ffmpeg ships with the project via `imageio-ffmpeg`, so the
 video path needs no system install; a system ffmpeg on PATH is preferred if
 present.
 
-**Docker is required for step 3** and is not yet installed on this machine. WSL2
-is present and on version 2, so Docker Desktop should install straight onto it.
-Give it at least 12 GB of memory in `.wslconfig` before running ODM on a few
-hundred images.
+**Docker is required for step 3.** Check it with `dosojos-drone doctor`. On this
+machine Docker Desktop runs on the WSL2 backend with 10 GB and 10 CPUs, set in
+`%USERPROFILE%\.wslconfig`:
+
+```ini
+[wsl2]
+memory=10GB
+processors=10
+swap=16GB
+```
+
+The swap matters. ODM spikes during dense reconstruction, and swap turns an
+out-of-memory kill four hours in into something merely slow.
 
 ## Normal workflow
 
@@ -81,6 +90,53 @@ inferred ground level from the lowest altitude in the survey and reported a fals
 **Coverage is worth planning around.** At 60 m with standard 80/70 overlap, 200
 frames cover roughly 45% of a 40-acre field. Full coverage needs about 500 frames,
 or a higher flight at coarser resolution.
+
+## Photogrammetry
+
+```bash
+dosojos-drone doctor --images 200      # Docker, memory, ODM image
+dosojos-drone odm demo-001 --dry-run   # stage images, print the command
+dosojos-drone odm demo-001
+```
+
+Produces orthophoto, DSM, DTM and point cloud under `data/odm/<flight_id>/`.
+Expect hours on a laptop for a few hundred images.
+
+Images are hard-linked into `<project>/images`, which is the layout ODM insists
+on, so staging costs no extra disk. The exact docker command is written to
+`<project>/odm_command.txt` and logged, so any run can be repeated by hand
+without this tool. Full output goes to `<project>/odm_run.log` with ODM's colour
+codes stripped.
+
+`--rerun-from <stage>` resumes rather than starting over, which matters when a
+run fails late. Stages are `dataset`, `split`, `merge`, `opensfm`, `openmvs`,
+`odm_filterpoints`, `odm_meshing`, `mvs_texturing`, `odm_georeferencing`,
+`odm_dem`, `odm_orthophoto`, `odm_report`, `odm_postprocess`.
+
+**Outputs are verified before the next step trusts them.** A product counts only
+if it exists, is non-empty, and carries a CRS. That last check matters because
+ODM will happily produce an orthophoto in an arbitrary local frame when GPS is
+missing, and such an output cannot be joined to a field or compared against
+satellite imagery.
+
+**Failures name the stage.** Rather than leaving you with a forty thousand line
+log, a failed run reports where it stopped and what to do:
+
+```
+  FAILED during the 'opensfm' stage.
+  Features were found in individual images but none matched across them, so
+  nothing could be triangulated. That means either too little overlap, images
+  from more than one area, heavy motion blur, or a surface too self-similar to
+  match (bare soil, water, or uniform canopy).
+```
+
+Recognised signatures cover no cross-image matches, no reconstruction, thin
+overlap, too few matched images, an empty images directory, missing
+georeference, and out-of-memory (including a bare exit code 137).
+
+**Memory sizing** is checked before a run starts, since ODM tends to fail late.
+Rough guidance at medium quality: 100 images want 4 GB, 250 want 8 GB, 500 want
+16 GB, 1500 want 32 GB.
 
 ## Video fallback
 
@@ -143,7 +199,7 @@ unaffected by that, but reported GSD is coarser than the real camera's.
 ./.venv/Scripts/python.exe -m pytest -q
 ```
 
-54 tests, none needing Docker, a network, or real imagery.
+82 tests, none needing Docker, a network, or real imagery.
 
 ## Layout
 
@@ -155,6 +211,7 @@ out/<flight>/         quicklook, survey.json, later the crowns and overlays
 src/
   config.py           paths, settings, flight manifest
   ingest.py           EXIF reading, survey geometry, coverage, pre-flight checks
+  odm_runner.py       docker invocation, staging, verification, diagnosis
   video.py            MP4 + SRT -> geotagged JPEGs
   viz.py              quicklook now, overlays and histograms later
   cli.py              click commands
