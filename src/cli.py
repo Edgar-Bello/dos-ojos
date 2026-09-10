@@ -12,6 +12,7 @@ from typing import Sequence
 import click
 
 from . import chm as chm_mod
+from . import crowns
 from . import odm_runner, video, viz
 from .config import (
     Flight,
@@ -661,5 +662,141 @@ def _format_chm(stats, n_in_field: int | None) -> str:
     ]
     if n_in_field is not None:
         rows.append(("inside field", f"{n_in_field} px"))
+    width = max(len(label) for label, _ in rows)
+    return "\n".join(f"  {label:<{width}}  {value}" for label, value in rows)
+
+
+# --------------------------------------------------------------------------- #
+# Detection
+# --------------------------------------------------------------------------- #
+
+
+@cli.command("detect")
+@click.argument("flight_id")
+@click.option("--method", type=click.Choice(list(crowns.METHODS)), default="rows",
+              show_default=True,
+              help="rows for sorghum and cane, watershed for orchards, "
+                   "deepforest for citrus from RGB.")
+@click.option("--segment", type=float, default=crowns.DEFAULT_SEGMENT_M,
+              show_default=True, help="Row segment length in metres.")
+@click.option("--row-width", type=float, default=None,
+              help="Segment width in metres  [default: the detected row spacing]")
+@click.option("--min-spacing", type=float, default=crowns.DEFAULT_MIN_SPACING_M,
+              show_default=True, help="Smallest row spacing to search for.")
+@click.option("--max-spacing", type=float, default=crowns.DEFAULT_MAX_SPACING_M,
+              show_default=True, help="Largest row spacing to search for.")
+@click.option("--min-height", type=float, default=crowns.DEFAULT_MIN_CROWN_HEIGHT_M,
+              show_default=True, help="Watershed: canopy below this is ground.")
+@click.option("--min-distance", type=float, default=1.5, show_default=True,
+              help="Watershed: minimum metres between crown peaks.")
+@click.option("--clip-field/--no-clip-field", default=True, show_default=True,
+              help="Drop units falling mostly outside the field.")
+@click.pass_obj
+def detect_cmd(
+    settings: Settings,
+    flight_id: str,
+    method: str,
+    segment: float,
+    row_width: float | None,
+    min_spacing: float,
+    max_spacing: float,
+    min_height: float,
+    min_distance: float,
+    clip_field: bool,
+) -> None:
+    """Detect the units later steps measure: row segments or crowns."""
+    out_dir = settings.flight_out(flight_id)
+    settings.ensure_dirs(flight_id)
+    chm_path = out_dir / "chm.tif"
+    if not chm_path.exists():
+        raise click.ClickException(
+            f"no canopy model at {chm_path}. Run 'dosojos-drone chm {flight_id}' first."
+        )
+
+    surface = chm_mod.load_surface(chm_path)
+    resolution = float(surface.resolution_m[0])
+    geometry = None
+
+    try:
+        if method == "rows":
+            geometry = crowns.estimate_row_geometry(
+                surface.data, resolution,
+                min_spacing_m=min_spacing, max_spacing_m=max_spacing,
+            )
+            units = crowns.build_row_segments(
+                surface.data, resolution, geometry,
+                segment_m=segment, width_m=row_width,
+            )
+        elif method == "watershed":
+            units = crowns.detect_crowns_watershed(
+                surface.data, resolution,
+                min_height_m=min_height, min_distance_m=min_distance,
+            )
+        else:
+            raise click.ClickException(
+                "deepforest runs on the orthophoto, not the canopy model, and is "
+                "not wired into this command yet. For row crops use --method rows."
+            )
+    except crowns.DetectionError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    frame = crowns.to_geodataframe(
+        units, surface.transform, surface.crs, method=method, geometry=geometry
+    )
+
+    flight = None
+    try:
+        flight = get_flight(settings.manifest_path, flight_id)
+    except ManifestError:
+        pass
+    if clip_field and flight:
+        field = _load_field(settings, flight.field_id)
+        if field is not None:
+            frame = crowns.clip_units(frame, field)
+
+    if frame.empty:
+        raise click.ClickException("no units survived clipping to the field outline")
+
+    path = out_dir / f"units_{method}.geojson"
+    frame.to_file(path, driver="GeoJSON")
+
+    overlay = viz.save_units_overlay(
+        surface.data, frame, out_dir / f"units_{method}.png",
+        transform=surface.transform, resolution_m=resolution,
+        title=f"{flight_id} - detected "
+              f"{'row segments' if method == 'rows' else 'crowns'}",
+        subtitle=(
+            f"{len(frame)} units"
+            + (
+                f"  -  rows {geometry.spacing_m:.2f} m apart at "
+                f"{geometry.direction_deg:.0f} deg"
+                if geometry
+                else ""
+            )
+        ),
+    )
+
+    click.echo(_format_detection(frame, geometry, method, resolution))
+    click.echo(f"\n  {path}\n  {overlay}")
+
+
+def _format_detection(frame, geometry, method: str, resolution: float) -> str:
+    """Report what was detected and, for rows, the planting pattern behind it."""
+    areas = frame.geometry.area
+    rows = [
+        ("method", method),
+        ("units", str(len(frame))),
+        ("resolution", f"{resolution * 100:.0f} cm/px"),
+        ("median unit area", f"{areas.median():.2f} m2"),
+        ("total area", f"{areas.sum():.0f} m2 ({areas.sum() / 4046.86:.2f} acres)"),
+    ]
+    if geometry is not None:
+        rows[2:2] = [
+            ("row spacing", f"{geometry.spacing_m:.3f} m"),
+            ("row direction", f"{geometry.direction_deg:.1f} deg (grid)"),
+            ("signal strength", f"{geometry.strength:.1f}"
+                                f"{'' if geometry.confident else '  <- weak'}"),
+            ("rows found", str(frame['row'].nunique()) if 'row' in frame else "-"),
+        ]
     width = max(len(label) for label, _ in rows)
     return "\n".join(f"  {label:<{width}}  {value}" for label, value in rows)

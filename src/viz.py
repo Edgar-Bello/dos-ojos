@@ -171,3 +171,77 @@ def save_chm_png(
     plt.close(figure)
     log.info("wrote %s", out_path)
     return out_path
+
+
+def save_units_overlay(
+    chm,
+    units,
+    out_path: Path,
+    *,
+    transform,
+    resolution_m: float,
+    title: str,
+    subtitle: str = "",
+    column: str | None = None,
+    colors: dict[str, str] | None = None,
+) -> Path:
+    """Draw detected units over the canopy model.
+
+    ``column`` colours the units by one of their attributes, which is how step 8
+    shows flags; without it every unit is drawn in a single accent colour.
+    """
+    import numpy as np
+    from matplotlib.patches import Patch
+
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    figure, axes = plt.subplots(figsize=(10.0, 8.6), dpi=DPI)
+    finite = chm[np.isfinite(chm)]
+    vmax = float(np.percentile(finite, 99)) if finite.size else 1.0
+
+    colormap = plt.get_cmap("Greys").copy()
+    colormap.set_bad("#ffffff")
+    height, width = chm.shape
+    left, top = transform * (0, 0)
+    right, bottom = transform * (width, height)
+    axes.imshow(
+        np.ma.masked_invalid(chm), cmap=colormap, vmin=0, vmax=max(vmax, 0.1),
+        extent=(left, right, bottom, top), origin="upper", interpolation="nearest",
+        alpha=0.85,
+    )
+
+    if column and column in units:
+        palette = colors or {}
+        for value, group in units.groupby(column):
+            group.boundary.plot(
+                ax=axes, linewidth=0.7,
+                color=palette.get(str(value), PATH_COLOR),
+            )
+        axes.legend(
+            handles=[
+                Patch(edgecolor=palette.get(str(v), PATH_COLOR), facecolor="none",
+                      label=f"{v} ({(units[column] == v).sum()})")
+                for v in sorted(units[column].unique().tolist())
+            ],
+            loc="upper right", fontsize=9, frameon=False,
+        )
+    else:
+        units.boundary.plot(ax=axes, linewidth=0.5, color=PATH_COLOR, alpha=0.8)
+
+    axes.set_title(title, fontsize=15, loc="left", pad=24)
+    if subtitle:
+        axes.annotate(
+            subtitle, xy=(0, 1), xycoords="axes fraction", xytext=(0, 8),
+            textcoords="offset points", fontsize=10, color="#6f6e69",
+        )
+    axes.set_xlabel("easting (m)", fontsize=11)
+    axes.set_ylabel("northing (m)", fontsize=11)
+    axes.tick_params(labelsize=8)
+    axes.ticklabel_format(useOffset=False, style="plain")
+    axes.set_aspect("equal")
+
+    figure.savefig(out_path, bbox_inches="tight", facecolor="white")
+    plt.close(figure)
+    log.info("wrote %s", out_path)
+    return out_path

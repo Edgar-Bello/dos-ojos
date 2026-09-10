@@ -15,7 +15,7 @@ be confirmed or dismissed from 60 metres.
 | 2 | Video fallback (MP4 + DJI SRT → geotagged JPEGs) | done |
 | 3 | ODM run via Docker | done |
 | 4 | Canopy height model (DSM − DTM) | done |
-| 5 | Plant/row detection | not started |
+| 5 | Plant/row detection | done |
 | 6 | Per-plant metrics and RGB indices | not started |
 | 7 | Dead / missing / stressed flags | not started |
 | 8 | Overlay, histogram, block summary JSON | not started |
@@ -191,6 +191,62 @@ RMSE.
 outline. ODM reconstructs whatever the flight saw, including headlands, roads and
 the neighbour's crop, and statistics over that are not statistics about this field.
 
+## Detection
+
+```bash
+dosojos-drone detect chm-rows  --method rows
+dosojos-drone detect chm-trees --method watershed --min-height 0.6 --min-distance 2.5
+```
+
+Writes `out/<flight_id>/units_<method>.geojson` and an overlay PNG. Every method
+returns polygons with stable ids and a CRS, so everything downstream is
+indifferent to which one produced them.
+
+**`rows` is primary, and the reason is arithmetic.** Sorghum plants sit about
+15 cm apart in a 0.76 m row. At 5 cm that is three pixels, so individual plants
+are not separable and "per-plant" would be a fiction. The row segment is the
+smallest unit that can honestly be measured.
+
+Row geometry comes from the canopy model's own periodicity: planted rows make
+the canopy periodic across them, which is a single bright peak in the
+two-dimensional power spectrum. The peak's angle gives the direction and its
+frequency the spacing, without tracing any individual row. On a field with known
+planting, spacing recovers to **0.29 cm** and direction to **0.26°**.
+
+The phase matters as much as the spacing. Right spacing and angle with the wrong
+phase puts every segment in the furrow between two rows, and every canopy volume
+downstream then describes bare ground. Phase is found by folding the canopy
+modulo the spacing and taking the peak; on the test field this puts 1.64 m of
+canopy on the detected ridge against 0.11 m in the furrow.
+
+**A peak always exists, so the reported strength is what says whether to believe
+it.** Strength is the peak over the 99th percentile of the searched band, not
+over its median, because the median comparison cannot tell rows from a merely
+lumpy canopy:
+
+| canopy | vs median | vs p99 |
+|---|---|---|
+| clean rows | 814000 | 404 |
+| rows under heavy noise | 116 | 42 |
+| lumpy, no rows | 340 | 4.4 |
+| white noise | 3.6 | 1.4 |
+
+A closed-canopy field with no visible rows scores 340 against the median and
+would be reported as confident. The threshold is 10, in the gap.
+
+`watershed` is for orchards: local maxima seed a marker-controlled watershed,
+one polygon per crown. On the synthetic orchard it finds **90 crowns against 90
+planted**, correctly ignoring all 10 empty positions.
+
+`deepforest` is wired but **not installed**. It pulls PyTorch, roughly 2.5 GB,
+and risks the working environment; its pretrained weights come from forest
+canopy, so it is the wrong detector for row crops. Install it only when pointing
+this at citrus:
+
+```bash
+pip install deepforest
+```
+
 ## Video fallback
 
 Use this only when video is all that exists.
@@ -264,7 +320,7 @@ unaffected by that, but reported GSD is coarser than the real camera's.
 ./.venv/Scripts/python.exe -m pytest -q
 ```
 
-102 tests, none needing Docker, a network, or real imagery.
+130 tests, none needing Docker, a network, or real imagery.
 
 ## Layout
 
@@ -277,6 +333,7 @@ src/
   config.py           paths, settings, flight manifest
   ingest.py           EXIF reading, survey geometry, coverage, pre-flight checks
   chm.py              DSM - DTM, cleaning, field clipping
+  crowns.py           row geometry, segmentation, watershed crowns
   odm_runner.py       docker invocation, staging, verification, diagnosis
   video.py            MP4 + SRT -> geotagged JPEGs
   viz.py              quicklook now, overlays and histograms later
