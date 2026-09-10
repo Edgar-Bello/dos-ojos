@@ -75,6 +75,17 @@ DEFAULT_DEAD_VOLUME_FRACTION = 0.10
 #: segments missing.
 DEFAULT_MISSING_COVER_FRACTION = 0.70
 
+#: A row segment holding less than this share of the typical segment area was
+#: clipped by the edge of the field or the reconstruction, and is reported as
+#: EDGE rather than judged. Clipped across the row it keeps the bare furrow and
+#: loses the crop ridge, so it reads as missing plants: on the synthetic field
+#: partial segments were flagged at 24% against 10% for whole ones, and nine
+#: false MISSING flags lined the east edge, one per row.
+DEFAULT_EDGE_AREA_FRACTION = 0.75
+
+#: Verdicts that are not judgements of the crop, and so never count as problems.
+NOT_ASSESSED = ("EDGE", "NO_DATA")
+
 #: Converts an interquartile range into a standard-deviation equivalent.
 IQR_TO_SIGMA = 1.349
 
@@ -110,6 +121,7 @@ class FlagRules:
     dead_colour_fraction: float = DEFAULT_DEAD_COLOUR_FRACTION
     dead_volume_fraction: float = DEFAULT_DEAD_VOLUME_FRACTION
     missing_cover_fraction: float = DEFAULT_MISSING_COVER_FRACTION
+    edge_area_fraction: float = DEFAULT_EDGE_AREA_FRACTION
 
 
 # --------------------------------------------------------------------------- #
@@ -160,6 +172,7 @@ def classify_units(
     median_size = size.median()
     median_exg = frame["exg_mean"].median() if has_colour else np.nan
     median_cover = frame["canopy_cover"].median() if "canopy_cover" in frame else np.nan
+    median_area = frame["area_m2"].median() if "area_m2" in frame else np.nan
 
     flags, reasons = [], []
     for row in frame.itertuples():
@@ -168,6 +181,7 @@ def classify_units(
             size=getattr(row, structure_column(method)),
             size_cut=size_cut, exg_cut=exg_cut, median_size=median_size,
             median_exg=median_exg, median_cover=median_cover,
+            median_area=median_area,
         )
         flags.append(flag)
         reasons.append(reason)
@@ -181,12 +195,23 @@ def classify_units(
 
 def _verdict(
     row, *, method, rules, has_colour, size, size_cut, exg_cut, median_size,
-    median_exg, median_cover,
+    median_exg, median_cover, median_area,
 ):
     """Decide one unit's flag, most severe first."""
     noun = "canopy height" if method == "rows" else "volume"
     if getattr(row, "n_pixels", 1) == 0 or not np.isfinite(size):
         return "NO_DATA", "unit covers no measured pixels"
+
+    area = getattr(row, "area_m2", np.nan)
+    if (
+        method == "rows"
+        and np.isfinite(area) and np.isfinite(median_area) and median_area > 0
+        and area < rules.edge_area_fraction * median_area
+    ):
+        return "EDGE", (
+            f"clipped to {area / median_area:.0%} of a full segment at the field "
+            "edge, not a fair sample of its row"
+        )
 
     if (
         method == "rows"
@@ -480,4 +505,5 @@ def summarise_flags(
             summary[f"n_{flag.lower()}"] / denominator if denominator else 0.0
         )
     summary["n_no_data"] = int(counts.get("NO_DATA", 0))
+    summary["n_edge"] = int(counts.get("EDGE", 0))
     return summary

@@ -15,6 +15,7 @@ import numpy as np
 from . import chm as chm_mod
 from . import crowns
 from . import flags as flags_mod
+from . import report as report_mod
 from . import metrics as metrics_mod
 from . import odm_runner, video, viz
 from .config import (
@@ -999,3 +1000,161 @@ def _format_flags(summary: dict, method: str, missing_frame) -> str:
         lines.append("")
         lines.append(f"  {n} empty position(s) in the inferred planting grid")
     return "\n".join(lines)
+
+
+# --------------------------------------------------------------------------- #
+# Demo outputs and the satellite join
+# --------------------------------------------------------------------------- #
+
+
+@cli.command("report")
+@click.argument("flight_id")
+@click.option("--method", type=click.Choice(list(crowns.METHODS)), default="rows",
+              show_default=True, help="Which detection to report on.")
+@click.pass_obj
+def report_cmd(settings: Settings, flight_id: str, method: str) -> None:
+    """Draw the flag overlay and histogram, and write the block summary JSON."""
+    import geopandas as gpd
+
+    out_dir = settings.flight_out(flight_id)
+    flags_path = out_dir / f"flags_{method}.geojson"
+    if not flags_path.exists():
+        raise click.ClickException(
+            f"{flags_path.name} not found. Run "
+            f"'dosojos-drone flag {flight_id} --method {method}' first."
+        )
+
+    flagged = gpd.read_file(flags_path)
+    missing_path = out_dir / f"missing_{method}.geojson"
+    missing_points = None
+    n_missing_positions = 0
+    if method != "rows" and missing_path.exists():
+        missing_points = gpd.read_file(missing_path)
+        n_missing_positions = len(missing_points)
+
+    flight = None
+    try:
+        flight = get_flight(settings.manifest_path, flight_id)
+    except ManifestError:
+        pass
+    field_id = flight.field_id if flight else None
+    crop = (flight.crop if flight and flight.crop else "").strip()
+
+    ortho = settings.flight_odm(flight_id) / "odm_orthophoto" / "odm_orthophoto.tif"
+    summary = report_mod.block_summary(
+        flagged, flight_id=flight_id, field_id=field_id, method=method,
+        flown_on=flight.flown_on.isoformat() if flight and flight.flown_on else None,
+        n_missing_positions=n_missing_positions,
+    )
+    problems = summary["n_stressed"] + summary["n_dead"] + summary["n_missing"]
+    total = summary["n_trees"] + n_missing_positions
+    noun = "row segments" if method == "rows" else "trees"
+    heading = f"{field_id or flight_id}" + (f" - {crop}" if crop else "")
+
+    try:
+        overlay = report_mod.save_flag_overlay(
+            flagged, ortho if ortho.exists() else None, out_dir / "flag_overlay.png",
+            title=heading,
+            subtitle=f"{problems} of {total} {noun} need a look  -  drone flight {flight_id}",
+            missing_points=missing_points,
+        )
+        histogram = report_mod.save_flag_histogram(
+            flagged, method, out_dir / "flag_histogram.png",
+            title=f"{heading} - where the flagged {noun} sit",
+        )
+    except report_mod.ReportError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    summary_path = out_dir / "block_summary.json"
+    summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+
+    click.echo(_format_block_summary(summary))
+    click.echo("")
+    for path in (overlay, histogram, summary_path):
+        click.echo(f"  {path}")
+
+
+def _format_block_summary(summary: dict) -> str:
+    """Render the block summary as an aligned key/value block."""
+    rows = [
+        ("field", summary["field_id"] or "not registered"),
+        ("unit", summary["unit_type"]),
+        ("units", str(summary["n_trees"])),
+        ("healthy", str(summary["n_healthy"])),
+        ("stressed", f"{summary['n_stressed']}  ({summary['share_stressed']:.1%})"),
+        ("dead", f"{summary['n_dead']}  ({summary['share_dead']:.1%})"),
+        ("missing", f"{summary['n_missing']}  ({summary['share_missing']:.1%})"),
+        ("median volume", f"{summary['median_canopy_volume']} m3"),
+        ("mean ExG", str(summary["mean_ExG"])),
+    ]
+    width = max(len(label) for label, _ in rows)
+    return "\n".join(f"  {label:<{width}}  {value}" for label, value in rows)
+
+
+AGREEMENT_TEXT = {
+    "confirmed": "CONFIRMED - both eyes see it",
+    "not_confirmed": "not confirmed - check for harvest",
+    "drone_only": "drone found what satellite missed",
+    "both_clear": "clear",
+    "satellite_only": "satellite only - no flight yet",
+    "drone_only_no_satellite": "drone only - no satellite record",
+}
+
+
+@cli.command("join")
+@click.option("--satellite", "satellite_path",
+              type=click.Path(dir_okay=False, path_type=Path), default=None,
+              help="Satellite flags.json  [default: ../dosojos_sat/out/flags.json]")
+@click.option("--out", "out_path", type=click.Path(dir_okay=False, path_type=Path),
+              default=None, help="Joined output  [default: out/triage.json]")
+@click.option("--concern", type=float, default=report_mod.DRONE_CONCERN_SHARE,
+              show_default=True,
+              help="Share of flagged units at which the drone confirms a problem.")
+@click.pass_obj
+def join_cmd(
+    settings: Settings, satellite_path: Path | None, out_path: Path | None, concern: float
+) -> None:
+    """Merge every flight's block summary into the satellite flags on field_id."""
+    satellite_path = satellite_path or settings.satellite_flags
+    out_path = out_path or (settings.out_dir / "triage.json")
+
+    try:
+        satellite = report_mod.load_satellite_flags(satellite_path)
+    except report_mod.ReportError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    summaries = [
+        json.loads(path.read_text(encoding="utf-8"))
+        for path in sorted(settings.out_dir.glob("*/block_summary.json"))
+    ]
+    if not summaries:
+        click.secho(
+            "WARNING: no drone block summaries yet; run 'dosojos-drone report' on a "
+            "flight first. Writing the satellite ranking on its own.", fg="yellow",
+        )
+
+    joined = report_mod.join_with_satellite(satellite, summaries, concern=concern)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(joined, indent=2), encoding="utf-8")
+
+    click.echo(_format_join(joined))
+    click.echo("")
+    click.echo(f"  {out_path}")
+
+
+def _format_join(joined: dict) -> str:
+    """One row per field: satellite verdict, drone verdict, and how they compare."""
+    rows = []
+    for entry in joined["fields"]:
+        drone = entry.get("drone")
+        satellite = "-"
+        if "score" in entry:
+            satellite = f"{entry['score']:.0f}" + (" FLAG" if entry.get("flagged") else "")
+        rows.append((
+            entry["field_id"],
+            str(entry.get("name", "-"))[:22],
+            satellite,
+            "-" if drone is None else f"{drone['share_problem']:.0%} of {drone['n_trees']}",
+            AGREEMENT_TEXT.get(entry["agreement"], entry["agreement"]),
+        ))
+    return _table(("FIELD", "NAME", "SATELLITE", "DRONE", "VERDICT"), rows, "<<><<")

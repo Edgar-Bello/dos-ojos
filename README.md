@@ -18,7 +18,7 @@ be confirmed or dismissed from 60 metres.
 | 5 | Plant/row detection | done |
 | 6 | Per-plant metrics and RGB indices | done |
 | 7 | Dead / missing / stressed flags | done |
-| 8 | Overlay, histogram, block summary JSON | not started |
+| 8 | Overlay, histogram, block summary JSON, satellite join | done |
 
 ## Setup
 
@@ -307,6 +307,7 @@ decided it), `missing_<method>.geojson`, and `flags_<method>_summary.csv`.
 | MISSING | segment with under 70% of the field's median canopy cover | empty position in the inferred planting grid |
 | DEAD | canopy under 10% of the median, or greenness down 3+ sd *and* under 25% of the median | same |
 | STRESSED | bottom 15% of height or greenness, *and* 20% below the median, *and* 1.5 sd below it | same, on volume |
+| EDGE | segment clipped under 75% of a full one at the boundary: not judged | never |
 | HEALTHY | everything else | |
 
 Missing plants and dead plants call for different things, so they are reported
@@ -373,6 +374,88 @@ the synthetic rows.
 
 Neither synthetic field contains a standing-dead plant, so the DEAD-by-colour
 path is covered by unit tests only. It hasn't been validated end to end.
+
+## Demo outputs and the satellite join
+
+```bash
+dosojos-drone report chm-rows  --method rows
+dosojos-drone report chm-trees --method watershed
+dosojos-drone join
+```
+
+`report` writes three things per flight into `out/<flight_id>/`:
+
+- `flag_overlay.png` shows every unit's flag over the orthomosaic. Healthy units
+  aren't drawn, so the photo shows through and the eye goes to the problems.
+- `flag_histogram.png` shows the size distribution stacked by flag, with the
+  flagged tail picked out. For crowns it plots canopy volume and for row
+  segments mean canopy height, since row volume would add a false tail made of
+  segments the boundary clipped short.
+- `block_summary.json` is one field-level record with the keys the join needs:
+  `field_id`, `n_trees`, `n_dead`, `n_missing`, `n_stressed`,
+  `median_canopy_volume`, `mean_ExG`, plus shares and `unit_type`. For a row
+  crop, `n_trees` counts row segments and `unit_type` says `row_segment`.
+
+`join` reads the satellite pipeline's `../dosojos_sat/out/flags.json` and every
+flight's block summary, and writes `out/triage.json`. The satellite ranking is
+kept exactly, in the same order with every original key, and each field gets a
+`drone` object and an `agreement` verdict:
+
+| agreement | meaning |
+|---|---|
+| `confirmed` | satellite flagged it and the drone sees the problem plants |
+| `not_confirmed` | satellite flagged it but the plants look mostly fine; **often a harvest**, which looks identical from orbit |
+| `drone_only` | the drone found problems the satellite's 10 m pixels couldn't resolve |
+| `both_clear` | neither sees a problem |
+| `satellite_only` | no flight over this field yet |
+
+The drone confirms a problem when at least 10% of judged units are flagged
+(`--concern`). `not_confirmed` is the verdict that matters most. A harvested
+field crashes NDVI exactly the way a stressed one does, and only the drone can
+tell them apart.
+
+**The demo verdicts pair real satellite data with synthetic drone data.** The
+satellite flags come from real Sentinel-2 imagery. The drone "flights" are
+fields I generated with deliberately planted anomalies, so when the drone
+"confirms" rgv-003, that is a coincidence of the test data, not a finding. The
+join works; its verdicts start meaning something once a real flight is run.
+
+### Colour, and why each flag also has its own shape
+
+Flags use the reserved status palette: good, warning, serious, critical.
+Validated as a set, STRESSED amber and MISSING orange measure only 13.6 apart
+for full colour vision, below the floor of 15, so hue alone can't separate
+them. Each flag is therefore also drawn differently: stressed as a solid fill,
+missing as a hatched outline with no fill (empty reads as absent), dead as a
+crosshatched fill, and missing orchard trees as a ring with a cross.
+
+### Row segments at the edge
+
+Row segments cut by the field or reconstruction boundary are reported as EDGE
+and not judged. A segment clipped across its row keeps the bare furrow and loses
+the crop ridge, so its cover collapses and it reads as missing plants. On the
+synthetic field, partial segments were flagged at 24% against 10% for whole
+ones, and a column of false MISSING flags ran down the east edge, one per row.
+Setting them aside raised precision from 71% to 78% with recall unchanged.
+Shares in the block summary are over judged units, so boundary slivers don't
+dilute them.
+
+## The whole thing, start to finish
+
+```bash
+dosojos-drone register f1 --field rgv-002 --crop "grain sorghum" --ground-elevation 12
+dosojos-drone survey  f1                      # worth running ODM?
+dosojos-drone odm     f1                      # hours
+dosojos-drone chm     f1
+dosojos-drone detect  f1 --method rows        # or watershed for an orchard
+dosojos-drone metrics f1 --method rows
+dosojos-drone flag    f1 --method rows
+dosojos-drone report  f1 --method rows
+dosojos-drone join                            # merge with the satellite ranking
+```
+
+Every step reads the previous step's output from disk, so any step can be re-run
+without redoing ODM.
 
 ## Video fallback
 
@@ -447,7 +530,7 @@ unaffected by that, but reported GSD is coarser than the real camera's.
 ./.venv/Scripts/python.exe -m pytest -q
 ```
 
-191 tests, none needing Docker, a network, or real imagery.
+215 tests, none needing Docker, a network, or real imagery.
 
 ## Layout
 
@@ -463,6 +546,7 @@ src/
   crowns.py           row geometry, segmentation, watershed crowns
   metrics.py          zonal volume, height, cover, RGB indices
   flags.py            classification, planting grid, missing plants, gaps
+  report.py           flag overlay, histogram, block summary, satellite join
   odm_runner.py       docker invocation, staging, verification, diagnosis
   video.py            MP4 + SRT -> geotagged JPEGs
   viz.py              quicklook now, overlays and histograms later

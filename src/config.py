@@ -21,6 +21,7 @@ MANIFEST_NAME = "flights.json"
 #: Where the satellite half keeps its field polygons. Read-only, and the join
 #: between the two halves is this file plus a shared field_id, nothing more.
 SATELLITE_FIELDS = Path("../dosojos_sat/fields.geojson")
+SATELLITE_FLAGS = Path("../dosojos_sat/out/flags.json")
 
 
 class ManifestError(RuntimeError):
@@ -81,6 +82,7 @@ class Settings:
     out_dir: Path
     manifest_path: Path
     fields_geojson: Path
+    satellite_flags: Path
 
     @classmethod
     def from_root(cls, root: Path, **overrides: object) -> "Settings":
@@ -92,6 +94,7 @@ class Settings:
             out_dir=root / "out",
             manifest_path=root / MANIFEST_NAME,
             fields_geojson=(root / SATELLITE_FIELDS).resolve(),
+            satellite_flags=(root / SATELLITE_FLAGS).resolve(),
         )
         supplied = {k: v for k, v in overrides.items() if v is not None}
         return replace(base, **supplied) if supplied else base
