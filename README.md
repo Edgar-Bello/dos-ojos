@@ -14,7 +14,7 @@ be confirmed or dismissed from 60 metres.
 | 1 | Ingest, EXIF validation, coverage quicklook | done |
 | 2 | Video fallback (MP4 + DJI SRT → geotagged JPEGs) | done |
 | 3 | ODM run via Docker | done |
-| 4 | Canopy height model (DSM − DTM) | not started |
+| 4 | Canopy height model (DSM − DTM) | done |
 | 5 | Plant/row detection | not started |
 | 6 | Per-plant metrics and RGB indices | not started |
 | 7 | Dead / missing / stressed flags | not started |
@@ -138,6 +138,59 @@ georeference, and out-of-memory (including a bare exit code 137).
 Rough guidance at medium quality: 100 images want 4 GB, 250 want 8 GB, 500 want
 16 GB, 1500 want 32 GB.
 
+## Canopy height model
+
+```bash
+dosojos-drone chm chm-rows
+```
+
+Writes `out/<flight_id>/chm.tif` and a colourised `chm.png`. The model is
+`DSM − DTM`: how tall the crop is, as distinct from how high the ground is.
+
+The arithmetic is trivial. Everything else in this step is about the ways a real
+reconstruction is not:
+
+- **Nodata** arrives as `-9999`, as NaN, or occasionally as a very large
+  sentinel. All three become NaN.
+- **Grids can differ.** ODM normally emits DSM and DTM on the same grid, but a
+  changed `--dem-resolution` or a resumed run can leave them mismatched.
+  Subtracting mismatched arrays either raises or silently broadcasts, so the DTM
+  is resampled onto the DSM's grid with a warning when they disagree.
+- **Sub-ground noise** is clamped to zero. Interpolation routinely puts the
+  surface a few centimetres below the ground; that is not negative canopy.
+- **Holes** smaller than `--fill-holes` (m², default 0.25) fill from their
+  neighbours. Larger voids stay as nodata, because interpolating across a gap the
+  size of a plant invents canopy nobody observed and every downstream volume
+  would inherit it.
+- **Spikes** above `--max-height` (default 8 m) are clipped. No field crop is
+  that tall; sorghum tops out near 3 m and cane near 5 m.
+- **Smoothing ignores NaN.** A plain Gaussian filter smears one hole across its
+  whole kernel.
+
+**Cleaning parameters are in ground units, not pixels.** This matters: with a
+sigma in pixels, `--smooth 1` would mean 5 cm of smoothing on a 5 cm DEM and 2 cm
+on a 2 cm one, so changing `--dem-resolution` between runs would silently change
+how much canopy structure the cleaning destroys.
+
+**Smoothing is the only meaningful source of error**, measured against a canopy
+whose true heights are known:
+
+| `--smooth` | RMSE | correlation |
+|---|---|---|
+| 0 m | 0.011 m | 0.99993 |
+| 0.03 m (default) | 0.090 m | 0.99665 |
+| 0.05 m | 0.178 m | 0.98803 |
+| 0.10 m | 0.386 m | 0.96002 |
+
+Bias is zero at every setting. The default is deliberately light because step 5
+measures the row structure that smoothing flattens. On an orchard pattern, where
+crowns are smooth domes rather than sharp ridges, the same default gives 0.017 m
+RMSE.
+
+`--clip-field` (on by default) masks everything outside the registered field
+outline. ODM reconstructs whatever the flight saw, including headlands, roads and
+the neighbour's crop, and statistics over that are not statistics about this field.
+
 ## Video fallback
 
 Use this only when video is all that exists.
@@ -188,7 +241,19 @@ satellite project:
 ```bash
 python tools/make_synthetic_flight.py demo-001 --field rgv-002 --count 200
 python tools/make_synthetic_video.py --out data/video/demo.mp4 --seconds 30
+python tools/make_synthetic_field.py chm-rows --pattern rows
+python tools/make_synthetic_field.py chm-trees --pattern trees
 ```
+
+`make_synthetic_field.py` writes a complete ODM product set — DSM, DTM,
+orthophoto and point cloud placeholder — in the exact layout ODM produces, so
+the rest of the pipeline cannot tell the difference. It also writes
+`truth_canopy.tif` and `ground_truth.json`, so canopy heights and later
+detections can be scored against an exact answer rather than eyeballed.
+
+Two patterns: `rows` for sorghum and cane (continuous rows with gaps and stunted
+stretches) and `trees` for orchard and citrus (discrete crowns with missing and
+undersized individuals).
 
 The stills generator accepts `--drop-gps`, `--forward-overlap` and
 `--altitude-jitter` for exercising the warning paths. Frames are written at a
@@ -199,7 +264,7 @@ unaffected by that, but reported GSD is coarser than the real camera's.
 ./.venv/Scripts/python.exe -m pytest -q
 ```
 
-82 tests, none needing Docker, a network, or real imagery.
+102 tests, none needing Docker, a network, or real imagery.
 
 ## Layout
 
@@ -211,6 +276,7 @@ out/<flight>/         quicklook, survey.json, later the crowns and overlays
 src/
   config.py           paths, settings, flight manifest
   ingest.py           EXIF reading, survey geometry, coverage, pre-flight checks
+  chm.py              DSM - DTM, cleaning, field clipping
   odm_runner.py       docker invocation, staging, verification, diagnosis
   video.py            MP4 + SRT -> geotagged JPEGs
   viz.py              quicklook now, overlays and histograms later

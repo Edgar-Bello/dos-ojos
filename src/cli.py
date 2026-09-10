@@ -11,6 +11,7 @@ from typing import Sequence
 
 import click
 
+from . import chm as chm_mod
 from . import odm_runner, video, viz
 from .config import (
     Flight,
@@ -557,3 +558,108 @@ def _format_odm_result(result) -> str:
         lines.append(f"  {result.advice}")
     lines.append(f"  Full log: {result.log_path}")
     return "\n".join(lines)
+
+
+# --------------------------------------------------------------------------- #
+# Canopy height model
+# --------------------------------------------------------------------------- #
+
+
+@cli.command("chm")
+@click.argument("flight_id")
+@click.option("--fill-holes", type=float, default=chm_mod.DEFAULT_FILL_HOLES_M2,
+              show_default=True,
+              help="Fill nodata patches up to this area in m2; larger voids stay empty.")
+@click.option("--smooth", type=float, default=chm_mod.DEFAULT_SMOOTH_M, show_default=True,
+              help="Gaussian smoothing radius in metres. 0 disables it.")
+@click.option("--max-height", type=float, default=chm_mod.DEFAULT_MAX_HEIGHT_M,
+              show_default=True, help="Clip canopy taller than this, in metres.")
+@click.option("--keep-negative", is_flag=True,
+              help="Keep sub-ground values instead of clamping them to zero.")
+@click.option("--clip-field/--no-clip-field", default=True, show_default=True,
+              help="Mask everything outside the registered field outline.")
+@click.pass_obj
+def chm_cmd(
+    settings: Settings,
+    flight_id: str,
+    fill_holes: float,
+    smooth: float,
+    max_height: float,
+    keep_negative: bool,
+    clip_field: bool,
+) -> None:
+    """Build the canopy height model from a flight's DSM and DTM."""
+    project = settings.flight_odm(flight_id)
+    out_dir = settings.flight_out(flight_id)
+    settings.ensure_dirs(flight_id)
+
+    dsm_path = project / "odm_dem" / "dsm.tif"
+    dtm_path = project / "odm_dem" / "dtm.tif"
+    for path, name in ((dsm_path, "DSM"), (dtm_path, "DTM")):
+        if not path.exists():
+            raise click.ClickException(
+                f"{name} not found at {path}. Run 'dosojos-drone odm {flight_id}' "
+                "first, or check that the run produced DEMs."
+            )
+
+    try:
+        dsm = chm_mod.load_surface(dsm_path)
+        dtm = chm_mod.load_surface(dtm_path)
+        canopy, stats = chm_mod.compute_chm(
+            dsm, dtm,
+            clamp_negative=not keep_negative,
+            fill_holes_m2=fill_holes,
+            smooth_m=smooth,
+            max_height_m=max_height,
+        )
+    except chm_mod.ChmError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    flight = None
+    try:
+        flight = get_flight(settings.manifest_path, flight_id)
+    except ManifestError:
+        pass
+
+    n_in_field = None
+    if clip_field and flight:
+        field = _load_field(settings, flight.field_id)
+        if field is not None:
+            canopy, n_in_field = chm_mod.clip_to_field(
+                canopy, dsm.transform, dsm.crs, field
+            )
+
+    tif = chm_mod.save_chm(canopy, dsm, out_dir / "chm.tif")
+    png = viz.save_chm_png(
+        canopy, out_dir / "chm.png",
+        resolution_m=stats.resolution_m,
+        title=f"{flight_id} - canopy height",
+        subtitle=(
+            f"{stats.resolution_m * 100:.0f} cm/px  -  mean {stats.mean_m:.2f} m  -  "
+            f"95th percentile {stats.p95_m:.2f} m"
+            + (f"  -  field {flight.field_id}" if flight else "")
+        ),
+    )
+
+    click.echo(_format_chm(stats, n_in_field))
+    click.echo(f"\n  {tif}\n  {png}")
+
+
+def _format_chm(stats, n_in_field: int | None) -> str:
+    """Report the canopy model's shape, coverage and cleaning actions."""
+    rows = [
+        ("grid", f"{stats.shape[0]} x {stats.shape[1]} px at "
+                 f"{stats.resolution_m * 100:.0f} cm"),
+        ("coverage", f"{stats.coverage:.1%} of the grid has data"),
+        ("mean height", f"{stats.mean_m:.2f} m"),
+        ("median height", f"{stats.median_m:.2f} m"),
+        ("95th percentile", f"{stats.p95_m:.2f} m"),
+        ("max height", f"{stats.max_m:.2f} m"),
+        ("holes filled", f"{stats.n_filled} px"),
+        ("negatives clamped", f"{stats.n_clipped_negative} px"),
+        ("tall pixels clipped", f"{stats.n_clipped_tall} px"),
+    ]
+    if n_in_field is not None:
+        rows.append(("inside field", f"{n_in_field} px"))
+    width = max(len(label) for label, _ in rows)
+    return "\n".join(f"  {label:<{width}}  {value}" for label, value in rows)

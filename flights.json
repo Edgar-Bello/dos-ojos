@@ -4,6 +4,14 @@
       "field_id": "rgv-002",
       "ground_elevation_m": 12.0
     },
+    "chm-rows": {
+      "field_id": "rgv-002",
+      "crop": "grain sorghum"
+    },
+    "chm-trees": {
+      "field_id": "rgv-002",
+      "crop": "citrus"
+    },
     "demo-001": {
       "field_id": "rgv-002",
       "flown_on": "2026-09-05",

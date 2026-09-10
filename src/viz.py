@@ -124,3 +124,50 @@ def _caption(survey: FlightSurvey) -> str:
     if survey.alt_mean_m:
         parts.append(f"{survey.alt_mean_m:.0f} m altitude")
     return "  -  ".join(parts)
+
+
+CHM_CMAP = "YlGn"
+
+
+def save_chm_png(
+    chm, out_path: Path, *, resolution_m: float, title: str, subtitle: str = ""
+) -> Path:
+    """Render a canopy height model as a colourised PNG with a scale bar.
+
+    Nodata is drawn in a flat grey rather than the colormap's low end, so a hole
+    cannot be mistaken for bare ground.
+    """
+    import numpy as np
+
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    finite = chm[np.isfinite(chm)]
+    vmax = float(np.percentile(finite, 99)) if finite.size else 1.0
+
+    figure, axes = plt.subplots(figsize=(9.5, 8.0), dpi=DPI)
+    colormap = plt.get_cmap(CHM_CMAP).copy()
+    colormap.set_bad("#d9d8d2")
+
+    extent_m = (0, chm.shape[1] * resolution_m, 0, chm.shape[0] * resolution_m)
+    image = axes.imshow(
+        np.ma.masked_invalid(chm), cmap=colormap, vmin=0, vmax=max(vmax, 0.1),
+        extent=extent_m, origin="upper", interpolation="nearest",
+    )
+    bar = figure.colorbar(image, ax=axes, shrink=0.82, pad=0.02)
+    bar.set_label("canopy height (m)", fontsize=11)
+
+    axes.set_title(title, fontsize=15, loc="left", pad=24)
+    if subtitle:
+        axes.annotate(
+            subtitle, xy=(0, 1), xycoords="axes fraction", xytext=(0, 8),
+            textcoords="offset points", fontsize=10, color="#6f6e69",
+        )
+    axes.set_xlabel("metres east", fontsize=11)
+    axes.set_ylabel("metres north", fontsize=11)
+    axes.tick_params(labelsize=9)
+
+    figure.savefig(out_path, bbox_inches="tight", facecolor="white")
+    plt.close(figure)
+    log.info("wrote %s", out_path)
+    return out_path
