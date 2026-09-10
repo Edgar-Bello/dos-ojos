@@ -10,6 +10,11 @@
       "crop": "grain sorghum",
       "notes": "synthetic test flight",
       "ground_elevation_m": 12.0
+    },
+    "vid-001": {
+      "field_id": "rgv-002",
+      "crop": "grain sorghum",
+      "ground_elevation_m": 12.0
     }
   }
 }

@@ -11,7 +11,7 @@ from typing import Sequence
 
 import click
 
-from . import viz
+from . import video, viz
 from .config import (
     Flight,
     ManifestError,
@@ -336,3 +336,83 @@ def _table(
 
 if __name__ == "__main__":  # pragma: no cover
     cli()
+
+
+@cli.command("ingest-video")
+@click.argument("flight_id")
+@click.option("--video", "video_path", required=True,
+              type=click.Path(exists=True, dir_okay=False, path_type=Path),
+              help="MP4 recorded by the drone.")
+@click.option("--srt", default=None,
+              type=click.Path(exists=True, dir_okay=False, path_type=Path),
+              help="DJI SRT sidecar carrying per-frame GPS.")
+@click.option("--fps", type=float, default=video.DEFAULT_FPS, show_default=True,
+              help="Frames per second to extract.")
+@click.option("--blur-quantile", type=float, default=video.DEFAULT_BLUR_QUANTILE,
+              show_default=True, help="Drop this fraction as the blurriest.")
+@click.option("--blur-threshold", type=float, default=None,
+              help="Absolute variance-of-Laplacian cut-off, overriding the quantile.")
+@click.option("--out", "out_dir", type=click.Path(file_okay=False, path_type=Path),
+              default=None, help="Frame folder  [default: data/raw/<flight_id>]")
+@click.pass_obj
+def ingest_video_cmd(
+    settings: Settings,
+    flight_id: str,
+    video_path: Path,
+    srt: Path | None,
+    fps: float,
+    blur_quantile: float,
+    blur_threshold: float | None,
+    out_dir: Path | None,
+) -> None:
+    """Turn an MP4 plus DJI SRT into geotagged JPEGs. Secondary to shooting stills."""
+    out_dir = out_dir or settings.flight_raw(flight_id)
+    click.secho(
+        "Video is the fallback path: frames are compressed, rolling-shutter "
+        "distorted and motion blurred, so expect a worse reconstruction than "
+        "stills would give.", fg="yellow",
+    )
+    if srt is None:
+        click.secho(
+            "No SRT given, so frames will carry no GPS and nothing will be "
+            "georeferenced.", fg="yellow",
+        )
+
+    try:
+        result = video.video_to_frames(
+            flight_id, video_path, srt, out_dir,
+            fps=fps, blur_quantile=blur_quantile,
+            absolute_blur_threshold=blur_threshold,
+        )
+    except video.VideoError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    click.echo()
+    click.echo(_format_video_ingest(result))
+    click.echo(
+        f"\n{len(result.kept)} frame(s) written to {result.out_dir}\n"
+        f"Next: dosojos-drone survey {flight_id}"
+    )
+
+
+def _format_video_ingest(result) -> str:
+    """Summarise extraction, with a breakdown of why frames were dropped."""
+    dropped = [f for f in result.frames if not f.kept]
+    reasons: dict[str, int] = {}
+    for frame in dropped:
+        key = frame.reason.split(" (")[0]
+        reasons[key] = reasons.get(key, 0) + 1
+
+    sharp = [f.sharpness for f in result.frames]
+    lines = [
+        f"  video            {result.video.name}",
+        f"  telemetry        {result.srt.name if result.srt else 'none'}",
+        f"  extracted        {len(result.frames)} frame(s) at {result.fps:g} fps",
+        f"  sharpness        min {min(sharp):.0f}, median "
+        f"{sorted(sharp)[len(sharp)//2]:.0f}, max {max(sharp):.0f}",
+        f"  cut-off          {result.blur_threshold:.0f}",
+        f"  kept             {len(result.kept)}",
+    ]
+    for reason, count in sorted(reasons.items(), key=lambda kv: -kv[1]):
+        lines.append(f"  dropped          {count} - {reason}")
+    return "\n".join(lines)

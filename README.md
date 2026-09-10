@@ -1,0 +1,171 @@
+# Dos Ojos — drone half
+
+Post-processing for UAV flights over Rio Grande Valley crop fields. The drone
+records; you bring the SD card back; this turns it into per-plant metrics. There
+is no onboard compute and nothing happens in real time.
+
+Outputs join the satellite half on `field_id`, so a field flagged from orbit can
+be confirmed or dismissed from 60 metres.
+
+## Status
+
+| Step | What | State |
+|---|---|---|
+| 1 | Ingest, EXIF validation, coverage quicklook | done |
+| 2 | Video fallback (MP4 + DJI SRT → geotagged JPEGs) | done |
+| 3 | ODM run via Docker | **needs Docker installed** |
+| 4 | Canopy height model (DSM − DTM) | not started |
+| 5 | Plant/row detection | not started |
+| 6 | Per-plant metrics and RGB indices | not started |
+| 7 | Dead / missing / stressed flags | not started |
+| 8 | Overlay, histogram, block summary JSON | not started |
+
+## Setup
+
+```bash
+python -m venv .venv
+./.venv/Scripts/python.exe -m pip install -r requirements-dev.txt
+./.venv/Scripts/python.exe -m pip install -e . --no-deps
+```
+
+Python 3.11 or 3.12. ffmpeg ships with the project via `imageio-ffmpeg`, so the
+video path needs no system install; a system ffmpeg on PATH is preferred if
+present.
+
+**Docker is required for step 3** and is not yet installed on this machine. WSL2
+is present and on version 2, so Docker Desktop should install straight onto it.
+Give it at least 12 GB of memory in `.wslconfig` before running ODM on a few
+hundred images.
+
+## Normal workflow
+
+```bash
+dosojos-drone register demo-001 --field rgv-002 --crop "grain sorghum" \
+    --date 2026-09-05 --ground-elevation 12
+dosojos-drone survey demo-001
+```
+
+`register` writes `flights.json`, which maps a flight to a satellite field.
+`survey` reads every EXIF header and tells you whether the set is worth an hour
+of photogrammetry, then writes `out/<flight_id>/quicklook.png` and `survey.json`.
+
+## What `survey` checks
+
+It exists to fail before ODM does. A flight with thin overlap or missing GPS will
+burn hours and then produce a hole-ridden orthomosaic.
+
+```
+  images           200  (200 with GPS)
+  camera           FC6310
+  altitude         72 m        spread  2.2%
+  GSD              6.57 cm/px
+  footprint        90 x 60 m
+  shot spacing     12.4 m
+  forward overlap  80%
+
+  coverage         45% of the registered field (17.8 of 39.9 acres)
+  full coverage    about 499 images at this altitude
+                   or roughly 95 m AGL to cover it with the images you have
+```
+
+Messages prefixed `BLOCKER` mean the run is not worth starting; the command exits
+non-zero on those. Everything else is advisory.
+
+**Flying height needs a reference.** Absolute GPS altitude says nothing about the
+ground beneath it, so height above ground comes from DJI's XMP `RelativeAltitude`
+tag, or from `--ground-elevation <metres AMSL>` at registration. Without either,
+GSD and overlap are reported as unknown rather than guessed — an earlier version
+inferred ground level from the lowest altitude in the survey and reported a false
+"0% overlap" failure on a perfectly good flight.
+
+**Coverage is worth planning around.** At 60 m with standard 80/70 overlap, 200
+frames cover roughly 45% of a 40-acre field. Full coverage needs about 500 frames,
+or a higher flight at coarser resolution.
+
+## Video fallback
+
+Use this only when video is all that exists.
+
+```bash
+dosojos-drone ingest-video vid-001 \
+    --video data/video/demo.mp4 --srt data/video/demo.SRT --fps 2
+dosojos-drone survey vid-001
+```
+
+**This path produces measurably worse reconstructions than stills.** Video frames
+are heavily compressed, rolling-shutter distorted, and motion blurred in ways
+stills are not. Feature matching has less to work with, so the point cloud is
+sparser and the surface model noisier.
+
+The resolution penalty is the part people underestimate. A Phantom 4 Pro shoots
+5472 px stills but records 4K video at 3840 px, and many flights record at 1080p.
+At the same altitude that is a 1.4× to 2.8× coarser ground sample distance before
+any compression loss. On the synthetic test flight, 640×480 frames at 60 m give
+14 cm/px against 1.6 cm/px for stills, and `survey` warns that this is too coarse
+for individual plant work.
+
+What the command does:
+
+1. Extracts frames with ffmpeg at `--fps` (default 2/s — at survey speed that
+   already yields more forward overlap than a stills flight).
+2. Scores each frame by variance of the Laplacian, a standard sharpness measure.
+3. Drops the blurriest `--blur-quantile` (default 15%), floored so a uniformly
+   soft video still loses its worst frames. `--blur-threshold` sets an absolute
+   cut-off instead. The cut is relative by default because absolute sharpness
+   depends on scene content.
+4. Writes EXIF GPS, altitude, timestamp and lens fields onto the survivors from
+   the SRT, matching each frame to the telemetry record covering its moment.
+
+Both DJI SRT layouts are handled: the current bracketed
+`[latitude : x] [rel_alt: y abs_alt: z]` form and the older
+`GPS(lon,lat,sats)` form. Note that a single bracket can carry two pairs, which
+is easy to get wrong and leaves every frame without an altitude.
+
+Without an `--srt`, frames are still extracted but carry no GPS, so nothing is
+georeferenced and nothing joins to a field.
+
+## Testing without an SD card
+
+Two generators produce realistic input over a real field polygon from the
+satellite project:
+
+```bash
+python tools/make_synthetic_flight.py demo-001 --field rgv-002 --count 200
+python tools/make_synthetic_video.py --out data/video/demo.mp4 --seconds 30
+```
+
+The stills generator accepts `--drop-gps`, `--forward-overlap` and
+`--altitude-jitter` for exercising the warning paths. Frames are written at a
+reduced pixel count so a few hundred stay small; footprint and overlap are
+unaffected by that, but reported GSD is coarser than the real camera's.
+
+```bash
+./.venv/Scripts/python.exe -m pytest -q
+```
+
+54 tests, none needing Docker, a network, or real imagery.
+
+## Layout
+
+```
+flights.json          flight_id -> field_id, the join to the satellite half
+data/raw/<flight>/    input JPEGs
+data/odm/<flight>/    ODM products
+out/<flight>/         quicklook, survey.json, later the crowns and overlays
+src/
+  config.py           paths, settings, flight manifest
+  ingest.py           EXIF reading, survey geometry, coverage, pre-flight checks
+  video.py            MP4 + SRT -> geotagged JPEGs
+  viz.py              quicklook now, overlays and histograms later
+  cli.py              click commands
+tools/                synthetic flight and video generators
+```
+
+`config.py`, `video.py` and `viz.py` are additions to the original module plan.
+
+## How the two halves join
+
+The drone side reads `../dosojos_sat/fields.geojson` by path to get field
+outlines, and shares nothing else. There is no import between the codebases. The
+join key is the `field_id` string recorded in `flights.json`, which is the same
+identifier the satellite pipeline writes into `out/flags.json`.
