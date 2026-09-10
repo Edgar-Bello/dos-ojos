@@ -16,7 +16,7 @@ be confirmed or dismissed from 60 metres.
 | 3 | ODM run via Docker | done |
 | 4 | Canopy height model (DSM − DTM) | done |
 | 5 | Plant/row detection | done |
-| 6 | Per-plant metrics and RGB indices | not started |
+| 6 | Per-plant metrics and RGB indices | done |
 | 7 | Dead / missing / stressed flags | not started |
 | 8 | Overlay, histogram, block summary JSON | not started |
 
@@ -247,6 +247,51 @@ this at citrus:
 pip install deepforest
 ```
 
+## Metrics
+
+```bash
+dosojos-drone metrics chm-rows  --method rows
+dosojos-drone metrics chm-trees --method watershed
+```
+
+Writes `out/<flight_id>/metrics_<method>.geojson` and a matching CSV, one row per
+unit: area, maximum and mean canopy height, canopy cover, volume, data coverage,
+and the mean VARI, ExG and GLI, each with a within-flight percentile rank.
+
+**Volume integrates canopy height over the footprint** — the sum over a unit's
+pixels of height times pixel area. Against ellipsoidal crowns whose volume is
+exactly two thirds pi r squared h, it lands within **0.6%** (correlation 0.9999).
+That is scored against an analytic answer on purpose: a voxel count and a CHM
+integral are the same calculation at different discretisations, so comparing
+them only shows they agree with each other.
+
+`canopy_volume_voxel` is still provided, reading ODM's LAZ point cloud directly
+via `laspy`. It fills each ground column from the ground to its highest point,
+because photogrammetry sees surfaces rather than interiors and counting occupied
+voxels would measure the canopy's skin. On a real flight it is an independent
+check, since it never touches the interpolated raster.
+
+**Structure and colour sit on different grids** — typically 5 cm and 2 cm — so
+each unit is rasterised onto each grid separately rather than resampling one
+raster onto the other. Everything is computed zonally in one pass per raster.
+
+**ExG is computed on chromatic coordinates**, r = R/(R+G+B) and so on, which
+removes overall brightness: a cloud shadow drifting across the field halves
+every band and leaves ExG unchanged. Then every index is **ranked within the
+flight**, because absolute RGB depends on camera, exposure, sun angle and haze,
+and an ExG of 0.12 means nothing on its own.
+
+On the synthetic sorghum field, structure and colour agree:
+
+| truth | volume vs normal | median ExG | ExG percentile |
+|---|---|---|---|
+| normal | 100% | 0.277 | 55 |
+| stunted | 64% | 0.164 | 6 |
+| gap | 48% | 0.121 | 3 |
+
+On the orchard, stressed trees hold 15% of a healthy tree's volume and sit at
+the 7th greenness percentile against 57 for healthy ones.
+
 ## Video fallback
 
 Use this only when video is all that exists.
@@ -320,7 +365,7 @@ unaffected by that, but reported GSD is coarser than the real camera's.
 ./.venv/Scripts/python.exe -m pytest -q
 ```
 
-130 tests, none needing Docker, a network, or real imagery.
+159 tests, none needing Docker, a network, or real imagery.
 
 ## Layout
 
@@ -334,6 +379,7 @@ src/
   ingest.py           EXIF reading, survey geometry, coverage, pre-flight checks
   chm.py              DSM - DTM, cleaning, field clipping
   crowns.py           row geometry, segmentation, watershed crowns
+  metrics.py          zonal volume, height, cover, RGB indices
   odm_runner.py       docker invocation, staging, verification, diagnosis
   video.py            MP4 + SRT -> geotagged JPEGs
   viz.py              quicklook now, overlays and histograms later

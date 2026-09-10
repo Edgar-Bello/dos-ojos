@@ -13,6 +13,7 @@ import click
 
 from . import chm as chm_mod
 from . import crowns
+from . import metrics as metrics_mod
 from . import odm_runner, video, viz
 from .config import (
     Flight,
@@ -798,5 +799,78 @@ def _format_detection(frame, geometry, method: str, resolution: float) -> str:
                                 f"{'' if geometry.confident else '  <- weak'}"),
             ("rows found", str(frame['row'].nunique()) if 'row' in frame else "-"),
         ]
+    width = max(len(label) for label, _ in rows)
+    return "\n".join(f"  {label:<{width}}  {value}" for label, value in rows)
+
+
+# --------------------------------------------------------------------------- #
+# Metrics
+# --------------------------------------------------------------------------- #
+
+
+@cli.command("metrics")
+@click.argument("flight_id")
+@click.option("--method", type=click.Choice(list(crowns.METHODS)), default="rows",
+              show_default=True, help="Which detection to measure.")
+@click.option("--cover-height", type=float, default=metrics_mod.DEFAULT_COVER_HEIGHT_M,
+              show_default=True, help="Canopy below this counts as ground for cover.")
+@click.pass_obj
+def metrics_cmd(
+    settings: Settings, flight_id: str, method: str, cover_height: float
+) -> None:
+    """Measure every detected unit: area, height, volume and RGB stress indices."""
+    out_dir = settings.flight_out(flight_id)
+    units_path = out_dir / f"units_{method}.geojson"
+    chm_path = out_dir / "chm.tif"
+    for path, hint in ((chm_path, "chm"), (units_path, f"detect --method {method}")):
+        if not path.exists():
+            raise click.ClickException(
+                f"{path.name} not found. Run 'dosojos-drone {hint} {flight_id}' first."
+            )
+
+    import geopandas as gpd
+
+    units = gpd.read_file(units_path)
+    surface = chm_mod.load_surface(chm_path)
+    ortho = settings.flight_odm(flight_id) / "odm_orthophoto" / "odm_orthophoto.tif"
+
+    try:
+        measured = metrics_mod.compute_metrics(
+            units, surface.data, surface.transform,
+            ortho_path=ortho if ortho.exists() else None,
+            cover_height_m=cover_height,
+        )
+    except metrics_mod.MetricsError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    geojson = out_dir / f"metrics_{method}.geojson"
+    csv = out_dir / f"metrics_{method}.csv"
+    measured.to_file(geojson, driver="GeoJSON")
+    measured.drop(columns="geometry").to_csv(csv, index=False)
+
+    summary = metrics_mod.summarise(measured)
+    click.echo(_format_metrics(summary, measured, bool(ortho.exists())))
+    click.echo("")
+    click.echo(f"  {geojson}")
+    click.echo(f"  {csv}")
+
+
+def _format_metrics(summary: dict, measured, has_colour: bool) -> str:
+    """Report flight-level figures and the spread of each measure."""
+    rows = [
+        ("units", f"{int(summary['n_units'])}"),
+        ("total volume", f"{summary['total_volume_m3']:.1f} m3"),
+        ("median volume", f"{summary['median_volume_m3']:.3f} m3 per unit"),
+        ("median height", f"{summary['median_height_m']:.2f} m"),
+        ("median cover", f"{summary['median_cover']:.0%}"),
+    ]
+    if has_colour:
+        rows.append(("mean ExG", f"{summary['mean_exg']:.3f}"))
+    else:
+        rows.append(("RGB indices", "none - no orthophoto"))
+
+    empty = int((measured["n_pixels"] == 0).sum())
+    if empty:
+        rows.append(("empty units", f"{empty} (slivers under one pixel)"))
     width = max(len(label) for label, _ in rows)
     return "\n".join(f"  {label:<{width}}  {value}" for label, value in rows)

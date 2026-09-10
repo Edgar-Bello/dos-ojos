@@ -14,3 +14,4 @@ scikit-image>=0.22
 scipy>=1.12
 opencv-python>=4.9
 imageio-ffmpeg>=0.4.9
+laspy[lazrs]>=2.5

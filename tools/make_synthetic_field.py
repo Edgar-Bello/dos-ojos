@@ -287,9 +287,13 @@ def main() -> None:
 
     ortho_res = args.ortho_resolution / 100.0
     ortho_size = int(round(args.extent / ortho_res))
-    scale = ortho_size / size
-    ortho_canopy = np.repeat(np.repeat(canopy, math.ceil(scale), 0),
-                             math.ceil(scale), 1)[:ortho_size, :ortho_size]
+    # Map each orthophoto pixel centre to the DEM pixel beneath it, so the two
+    # rasters describe the same ground exactly. Repeating DEM pixels by a rounded
+    # scale factor instead stretched the orthophoto 1.2x and displaced it by up to
+    # 12 m, so colour was sampled from the wrong ground entirely.
+    source = ((np.arange(ortho_size) + 0.5) * ortho_res / dem_res).astype(int)
+    source = np.clip(source, 0, size - 1)
+    ortho_canopy = canopy[np.ix_(source, source)]
     rgb = make_orthophoto(ortho_canopy, (ortho_size, ortho_size), rng, args.canopy_height)
     write_raster(
         project / "odm_orthophoto" / "odm_orthophoto.tif", rgb,
