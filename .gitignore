@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Imagery and derived products are large and reproducible.
+data/raw/
+data/odm/
+out/
