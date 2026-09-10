@@ -10,9 +10,11 @@ from pathlib import Path
 from typing import Sequence
 
 import click
+import numpy as np
 
 from . import chm as chm_mod
 from . import crowns
+from . import flags as flags_mod
 from . import metrics as metrics_mod
 from . import odm_runner, video, viz
 from .config import (
@@ -874,3 +876,126 @@ def _format_metrics(summary: dict, measured, has_colour: bool) -> str:
         rows.append(("empty units", f"{empty} (slivers under one pixel)"))
     width = max(len(label) for label, _ in rows)
     return "\n".join(f"  {label:<{width}}  {value}" for label, value in rows)
+
+
+# --------------------------------------------------------------------------- #
+# Flags
+# --------------------------------------------------------------------------- #
+
+
+FLAG_COLOURS = {
+    "HEALTHY": "#199e70",
+    "STRESSED": "#eda100",
+    "DEAD": "#d03b3b",
+    "MISSING": "#6250d6",
+    "NO_DATA": "#888780",
+}
+
+
+@cli.command("flag")
+@click.argument("flight_id")
+@click.option("--method", type=click.Choice(list(crowns.METHODS)), default="rows",
+              show_default=True, help="Which detection to flag.")
+@click.option("--segment", type=float, default=crowns.DEFAULT_SEGMENT_M,
+              show_default=True, help="Row segment length used at detection.")
+@click.option("--stressed-quantile", type=float,
+              default=flags_mod.DEFAULT_STRESSED_QUANTILE, show_default=True,
+              help="Bottom share of the field considered for STRESSED.")
+@click.option("--stressed-min-shortfall", type=float,
+              default=flags_mod.DEFAULT_STRESSED_MIN_SHORTFALL, show_default=True,
+              help="Also require this share below the field median. 0 disables it.")
+@click.option("--stressed-min-z", type=float, default=flags_mod.DEFAULT_STRESSED_MIN_Z,
+              show_default=True,
+              help="Also require this many robust sd below the median. 0 disables it.")
+@click.pass_obj
+def flag_cmd(
+    settings: Settings,
+    flight_id: str,
+    method: str,
+    segment: float,
+    stressed_quantile: float,
+    stressed_min_shortfall: float,
+    stressed_min_z: float,
+) -> None:
+    """Classify units as HEALTHY, STRESSED, DEAD or MISSING, and find absent plants."""
+    import geopandas as gpd
+    import pandas as pd
+
+    out_dir = settings.flight_out(flight_id)
+    metrics_path = out_dir / f"metrics_{method}.geojson"
+    if not metrics_path.exists():
+        raise click.ClickException(
+            f"{metrics_path.name} not found. Run "
+            f"'dosojos-drone metrics {flight_id} --method {method}' first."
+        )
+
+    rules = flags_mod.FlagRules(
+        stressed_quantile=stressed_quantile,
+        stressed_min_shortfall=stressed_min_shortfall or None,
+        stressed_min_z=stressed_min_z or None,
+    )
+    measured = gpd.read_file(metrics_path)
+    try:
+        flagged = flags_mod.classify_units(measured, method=method, rules=rules)
+    except flags_mod.FlagError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    missing_frame = None
+    n_missing_positions = 0
+    if method == "rows":
+        missing_frame = flags_mod.gap_runs(flagged, segment_m=segment)
+    else:
+        centroids = np.array([[g.centroid.x, g.centroid.y] for g in flagged.geometry])
+        try:
+            grid = flags_mod.infer_planting_grid(centroids)
+            positions = flags_mod.find_missing_positions(grid, centroids)
+        except flags_mod.FlagError as exc:
+            click.secho(f"WARNING: no missing-tree search: {exc}", fg="yellow")
+            positions = np.empty((0, 2))
+        n_missing_positions = len(positions)
+        missing_frame = gpd.GeoDataFrame(
+            {"kind": ["missing"] * len(positions)},
+            geometry=gpd.points_from_xy(positions[:, 0], positions[:, 1]),
+            crs=flagged.crs,
+        )
+
+    flagged.to_file(out_dir / f"flags_{method}.geojson", driver="GeoJSON")
+    missing_path = out_dir / f"missing_{method}.geojson"
+    if missing_frame is not None and not missing_frame.empty:
+        missing_frame.to_file(missing_path, driver="GeoJSON")
+
+    summary = flags_mod.summarise_flags(flagged, n_missing_positions=n_missing_positions)
+    pd.DataFrame([{"flight_id": flight_id, "method": method, **summary}]).to_csv(
+        out_dir / f"flags_{method}_summary.csv", index=False
+    )
+
+    click.echo(_format_flags(summary, method, missing_frame))
+    click.echo("")
+    for name in (f"flags_{method}.geojson", f"flags_{method}_summary.csv"):
+        click.echo(f"  {out_dir / name}")
+    if missing_frame is not None and not missing_frame.empty:
+        click.echo(f"  {missing_path}")
+
+
+def _format_flags(summary: dict, method: str, missing_frame) -> str:
+    """Report the count and share of every flag."""
+    lines = []
+    for flag in flags_mod.FLAGS:
+        key = flag.lower()
+        lines.append(
+            f"  {flag:<9} {summary[f'n_{key}']:>6}   {summary[f'share_{key}']:6.1%}"
+        )
+    if summary.get("n_no_data"):
+        lines.append(f"  {'NO_DATA':<9} {summary['n_no_data']:>6}")
+    if method == "rows" and missing_frame is not None and not missing_frame.empty:
+        lines.append("")
+        lines.append(
+            f"  {len(missing_frame)} gap(s) along rows, "
+            f"{missing_frame['length_m'].sum():.0f} m in total, "
+            f"longest {missing_frame['length_m'].max():.0f} m"
+        )
+    elif method != "rows":
+        n = 0 if missing_frame is None else len(missing_frame)
+        lines.append("")
+        lines.append(f"  {n} empty position(s) in the inferred planting grid")
+    return "\n".join(lines)

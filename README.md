@@ -17,7 +17,7 @@ be confirmed or dismissed from 60 metres.
 | 4 | Canopy height model (DSM − DTM) | done |
 | 5 | Plant/row detection | done |
 | 6 | Per-plant metrics and RGB indices | done |
-| 7 | Dead / missing / stressed flags | not started |
+| 7 | Dead / missing / stressed flags | done |
 | 8 | Overlay, histogram, block summary JSON | not started |
 
 ## Setup
@@ -292,6 +292,88 @@ On the synthetic sorghum field, structure and colour agree:
 On the orchard, stressed trees hold 15% of a healthy tree's volume and sit at
 the 7th greenness percentile against 57 for healthy ones.
 
+## Flags
+
+```bash
+dosojos-drone flag chm-rows  --method rows
+dosojos-drone flag chm-trees --method watershed
+```
+
+Writes `flags_<method>.geojson` (every unit with its flag and the reason that
+decided it), `missing_<method>.geojson`, and `flags_<method>_summary.csv`.
+
+| flag | rows | orchard |
+|---|---|---|
+| MISSING | segment with under 70% of the field's median canopy cover | empty position in the inferred planting grid |
+| DEAD | canopy under 10% of the median, or greenness down 3+ sd *and* under 25% of the median | same |
+| STRESSED | bottom 15% of height or greenness, *and* 20% below the median, *and* 1.5 sd below it | same, on volume |
+| HEALTHY | everything else | |
+
+Missing plants and dead plants call for different things, so they are reported
+separately: missing means replanting, while dead standing plants point to
+disease or drought. Along rows, consecutive missing segments merge into one gap
+with its length, since a grower replants a stretch of row rather than a list of
+two-metre tiles.
+
+### Why the rules look the way they do
+
+Each rule was measured against ground truth rather than chosen by hand, and
+several obvious versions turned out to be wrong.
+
+**Rows compare canopy height, not volume.** Volume grows with area, so a segment
+clipped to half its length by the field boundary holds half the volume and reads
+as stunted even when its canopy is healthy. That one effect caused 109 of the
+first 214 false alarms. Mean canopy height doesn't depend on area, so clipping
+can't move it. Crowns are the opposite case: a stressed tree grows a smaller
+crown, so for an orchard volume is the signal.
+
+**STRESSED needs two guards, not the bare percentile.** "Bottom 15%" alone always
+flags 15% of a field, including a perfectly healthy one. The obvious fix is a
+z-score guard, but it fails too: any z threshold also flags a fixed share of a
+normal distribution, so a healthy field still lost 8.5% of its plants. A guard
+on the shortfall below the median fixes that, but fails the opposite way on a
+naturally variable orchard, where the smallest healthy tree already has a 31%
+shortfall. Each guard covers the other's blind spot, and a genuinely stressed
+plant fails both:
+
+| guard | rows precision | rows recall | orchard errors | healthy field flagged |
+|---|---|---|---|---|
+| none (percentile only) | 56.8% | 97.1% | 6 of 90 | 28.0% |
+| z < −1.5 only | 73.0% | 91.3% | 0 of 90 | 8.5% |
+| 20% shortfall only | 71.1% | 91.3% | 3 of 90 | 0.5% |
+| **both (default)** | **73.6%** | **90.3%** | **0 of 90** | **0.5%** |
+
+**MISSING is relative, not absolute.** A full-width segment always includes the
+furrow on each side, so even a perfect row reaches only about 57% canopy cover.
+An absolute 10% threshold caught 1 of 74 true gaps. Gap segments carry 52% of
+the median cover and stunted ones 88%, so the default cut of 70% falls between
+them.
+
+**DEAD by colour also needs an effect size.** On an even orchard, a tree at 43%
+of normal greenness sits far past −3 sd and was being called dead while clearly
+alive. It must now also have lost three quarters of the field's typical
+greenness.
+
+**The missing-tree search is a grid-aligned rectangle, not a convex hull.** When
+a corner tree is missing, the hull cuts that corner off and the tree is never
+reported. The corner's row and column still contain other trees, so a rectangle
+in the grid's own frame keeps it in the search. The drawback is an L-shaped
+orchard, where the rectangle would include the empty notch.
+
+### Results against ground truth
+
+Orchard: all 79 healthy trees HEALTHY, all 11 stressed trees STRESSED, all 10
+missing positions found, no false positives. The planting grid recovers as
+5.000 × 5.000 m at 0.0°.
+
+Rows: 60 of 74 gap segments MISSING, 112 of 133 stunted segments STRESSED, and
+97% of healthy segments HEALTHY. The remaining disagreements are mostly segments
+that only partly overlap an anomaly, plus the ±12% natural variation built into
+the synthetic rows.
+
+Neither synthetic field contains a standing-dead plant, so the DEAD-by-colour
+path is covered by unit tests only. It hasn't been validated end to end.
+
 ## Video fallback
 
 Use this only when video is all that exists.
@@ -365,7 +447,7 @@ unaffected by that, but reported GSD is coarser than the real camera's.
 ./.venv/Scripts/python.exe -m pytest -q
 ```
 
-159 tests, none needing Docker, a network, or real imagery.
+191 tests, none needing Docker, a network, or real imagery.
 
 ## Layout
 
@@ -380,6 +462,7 @@ src/
   chm.py              DSM - DTM, cleaning, field clipping
   crowns.py           row geometry, segmentation, watershed crowns
   metrics.py          zonal volume, height, cover, RGB indices
+  flags.py            classification, planting grid, missing plants, gaps
   odm_runner.py       docker invocation, staging, verification, diagnosis
   video.py            MP4 + SRT -> geotagged JPEGs
   viz.py              quicklook now, overlays and histograms later
