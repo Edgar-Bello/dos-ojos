@@ -100,3 +100,23 @@ def test_settings_locate_the_satellite_fields(tmp_path: Path) -> None:
     assert "dosojos_sat" in str(settings.fields_geojson)
     assert settings.flight_raw("f1") == tmp_path / "data" / "raw" / "f1"
     assert settings.flight_out("f1") == tmp_path / "out" / "f1"
+
+
+def test_source_and_row_spacing_survive_the_manifest(tmp_path: Path) -> None:
+    """Both are set once at registration and read by later steps."""
+    path = tmp_path / "flights.json"
+    save_manifest(path, {"p": Flight(
+        flight_id="p", field_id="PUBLIC-x", source="Purdue University, CC0",
+        row_spacing_m=0.762,
+    )})
+    flight = load_manifest(path)["p"]
+    assert flight.source == "Purdue University, CC0"
+    assert flight.row_spacing_m == 0.762
+
+
+def test_a_workspace_keeps_its_satellite_link_relative(tmp_path: Path) -> None:
+    """A demo workspace laid out like the project pairs with its own satellite half."""
+    workspace = tmp_path / "demo" / "dosojos_drone"
+    settings = Settings.from_root(workspace)
+    assert settings.fields_geojson == (tmp_path / "demo" / "dosojos_sat" / "fields.geojson").resolve()
+    assert settings.satellite_flags == (tmp_path / "demo" / "dosojos_sat" / "out" / "flags.json").resolve()

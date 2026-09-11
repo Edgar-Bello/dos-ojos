@@ -43,7 +43,10 @@ FLAG_STYLE: dict[str, dict] = {
     "MISSING": {"color": "#ec835a", "fill": False, "hatch": "////", "label": "missing"},
     "DEAD": {"color": "#d03b3b", "fill": True, "hatch": "xxxx", "label": "dead"},
     "NO_DATA": {"color": "#888780", "fill": False, "hatch": "....", "label": "no data"},
-    "EDGE": {"color": "#888780", "fill": False, "hatch": None, "label": "edge, not assessed"},
+    # Thin and faint: on a plot trial a third of all pieces are plot ends, and at
+    # full weight their outlines buried the flags that matter.
+    "EDGE": {"color": "#888780", "fill": False, "hatch": None, "label": "edge, not assessed",
+             "linewidth": 0.5, "alpha": 0.55},
 }
 
 #: Order problems are drawn and listed in: worst last, so it lands on top.
@@ -61,6 +64,9 @@ INK = "#0b0b0b"
 INK_SECONDARY = "#52514e"
 INK_MUTED = "#898781"
 GRID = "#e1e0d9"
+#: Banner for data that is not ours. Blue, so it reads as information and can
+#: never be confused with any of the four flag colours.
+BANNER = "#1f5fa6"
 
 
 class ReportError(RuntimeError):
@@ -140,11 +146,12 @@ def save_flag_overlay(
     title: str,
     subtitle: str = "",
     missing_points: gpd.GeoDataFrame | None = None,
+    banner: str | None = None,
 ) -> Path:
     """Draw every unit's flag over the orthomosaic.
 
     Healthy units are left undrawn so the photo shows through and the eye goes
-    straight to the problems.
+    straight to the problems. ``banner`` marks borrowed data above the title.
     """
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -177,8 +184,8 @@ def save_flag_overlay(
             facecolor=style["color"] if style["fill"] else "none",
             edgecolor=style["color"],
             hatch=style["hatch"],
-            linewidth=1.1,
-            alpha=0.78 if style["fill"] else 1.0,
+            linewidth=style.get("linewidth", 1.1),
+            alpha=style.get("alpha", 0.78 if style["fill"] else 1.0),
         )
         handles.append(_legend_patch(flag, counts.get(flag, 0)))
 
@@ -223,11 +230,22 @@ def save_flag_overlay(
             subtitle, xy=(0, 1), xycoords="axes fraction", xytext=(0, 10),
             textcoords="offset points", fontsize=12, color=INK_SECONDARY,
         )
+    if banner:
+        _banner(axes, banner, offset=62)
 
     figure.savefig(out_path, bbox_inches="tight", facecolor=SURFACE)
     plt.close(figure)
     log.info("wrote %s", out_path)
     return out_path
+
+
+def _banner(axes: plt.Axes, text: str, *, offset: float) -> None:
+    """A solid band above the title, for data that did not come from our flights."""
+    axes.annotate(
+        text, xy=(0, 1), xycoords="axes fraction", xytext=(0, offset),
+        textcoords="offset points", fontsize=12, color="white", fontweight="bold",
+        bbox={"boxstyle": "square,pad=0.45", "facecolor": BANNER, "edgecolor": "none"},
+    )
 
 
 def _legend_patch(flag: str, count: int) -> Patch:
@@ -264,22 +282,34 @@ def _scale_bar(axes: plt.Axes, bounds: tuple[float, float, float, float]) -> Non
 
 
 def save_flag_histogram(
-    flagged: gpd.GeoDataFrame, method: str, out_path: Path, *, title: str
+    flagged: gpd.GeoDataFrame, method: str, out_path: Path, *, title: str,
+    banner: str | None = None, within: str | None = None,
 ) -> Path:
     """Histogram of unit size, stacked by flag, so the flagged tail stands out.
 
     Plots the measure the flags were decided on: canopy volume for crowns, mean
     canopy height for row segments. Row volume would put an artifact tail on the
-    left, made of segments the field boundary clipped short.
+    left, made of segments the field boundary clipped short. When units were
+    judged ``within`` blocks, each is plotted as a share of its own block's
+    median, since that is the comparison that flagged it.
     """
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     column = structure_column(method)
     values = flagged[column]
+    if within:
+        values = 100.0 * values / flagged.groupby(within)[column].transform("median")
+        flagged = flagged.assign(**{column: values})
     finite = values[np.isfinite(values)]
     if finite.empty:
         raise ReportError(f"no finite {column} values to plot")
 
+    # A handful of outliers would otherwise stretch the axis and squeeze the rest;
+    # they are drawn in the last bin instead.
+    top = float(np.percentile(finite, 99.5))
+    values = values.clip(upper=top)
+    flagged = flagged.assign(**{column: values})
+    finite = values[np.isfinite(values)]
     bins = np.histogram_bin_edges(finite, bins=min(40, max(10, int(math.sqrt(len(finite))))))
     figure, axes = plt.subplots(figsize=(11, 5.6), dpi=150)
     figure.patch.set_facecolor(SURFACE)
@@ -304,11 +334,14 @@ def save_flag_histogram(
     median = float(np.median(finite))
     axes.axvline(median, color=INK_SECONDARY, linewidth=1.6, linestyle="--")
     axes.annotate(
-        f"field median {median:.2f}", xy=(median, bottom.max()), xytext=(6, -4),
+        f"block median {median:.0f}%" if within else f"field median {median:.2f}",
+        xy=(median, bottom.max()), xytext=(6, -4),
         textcoords="offset points", fontsize=11, color=INK_SECONDARY, va="top",
     )
 
     unit = "canopy height (m)" if column == "height_mean_m" else "canopy volume (m3)"
+    if within:
+        unit = unit.split(" (")[0] + ", % of its own block's median"
     noun = "row segments" if method == "rows" else "crowns"
     axes.set_xlabel(unit, fontsize=14, color=INK)
     axes.set_ylabel(noun, fontsize=14, color=INK)
@@ -321,6 +354,8 @@ def save_flag_histogram(
         axes.spines[side].set_color("#c3c2b7")
     axes.legend(frameon=False, fontsize=12, labelcolor=INK_SECONDARY, loc="upper left")
     axes.set_title(title, fontsize=19, color=INK, loc="left", pad=14)
+    if banner:
+        _banner(axes, banner, offset=44)
 
     figure.savefig(out_path, bbox_inches="tight", facecolor=SURFACE)
     plt.close(figure)
@@ -341,12 +376,13 @@ def block_summary(
     method: str,
     flown_on: str | None = None,
     n_missing_positions: int = 0,
+    source: str | None = None,
 ) -> dict:
     """One field-level record, shaped to join the satellite's flags.json.
 
     The requested keys are kept as named, ``n_trees`` included, since other code
     may already read them. For a row crop ``n_trees`` counts row segments, and
-    ``unit_type`` says so.
+    ``unit_type`` says so. ``source`` is set only for data that is not ours.
     """
     counts = flagged["flag"].value_counts().to_dict()
     n_missing = int(counts.get("MISSING", 0)) + int(n_missing_positions)
@@ -376,12 +412,15 @@ def block_summary(
         "n_dead": n_dead,
         "n_missing": n_missing,
         "n_not_assessed": n_not_assessed,
+        "n_judged": int(denominator),
         "share_stressed": share(n_stressed),
         "share_dead": share(n_dead),
         "share_missing": share(n_missing),
         "share_problem": share(n_stressed + n_dead + n_missing),
         "median_canopy_volume": round(float(volume.median()), 4) if len(volume) else None,
         "mean_ExG": round(float(exg.mean()), 4) if len(exg) else None,
+        "n_blocks": int(flagged["block"].nunique()) if "block" in flagged else None,
+        "source": source,
         "generated": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }
 
@@ -482,10 +521,13 @@ def _drone_view(summary: dict | None, n_other_flights: int) -> dict | None:
     if summary is None:
         return None
     keep = (
-        "flight_id", "flown_on", "unit_type", "n_trees", "n_healthy", "n_stressed",
-        "n_dead", "n_missing", "share_problem", "median_canopy_volume", "mean_ExG",
+        "flight_id", "flown_on", "unit_type", "n_trees", "n_judged", "n_healthy",
+        "n_stressed", "n_dead", "n_missing", "share_problem", "median_canopy_volume",
+        "mean_ExG",
     )
     view = {key: summary.get(key) for key in keep}
+    if summary.get("source"):
+        view["source"] = summary["source"]
     if n_other_flights:
         view["n_other_flights"] = n_other_flights
     return view

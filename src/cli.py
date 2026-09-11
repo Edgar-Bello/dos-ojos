@@ -32,6 +32,13 @@ from .ingest import FlightSurvey, IngestError, estimate_coverage, survey_flight
 log = logging.getLogger(__name__)
 
 
+def _public_banner(flight: Flight | None) -> str | None:
+    """The band printed on every figure of a flight that is not ours."""
+    if flight is None or not flight.source:
+        return None
+    return f"FREE PUBLIC DATA, NOT OUR FLIGHT  -  {flight.source}"
+
+
 def setup_logging(verbosity: int = 0) -> None:
     """Configure stderr logging; ``verbosity`` >= 1 turns on DEBUG."""
     level = logging.DEBUG if verbosity else logging.INFO
@@ -46,12 +53,19 @@ def setup_logging(verbosity: int = 0) -> None:
 
 
 @click.group(context_settings={"help_option_names": ["-h", "--help"]})
+@click.option("--workspace", type=click.Path(file_okay=False, path_type=Path), default=None,
+              help="Keep flights.json, data/ and out/ here instead of the project "
+                   "folder, e.g. to keep public demo data apart from your own.")
 @click.option("-v", "--verbose", count=True, help="Show debug logging.")
 @click.pass_context
-def cli(ctx: click.Context, verbose: int) -> None:
+def cli(ctx: click.Context, workspace: Path | None, verbose: int) -> None:
     """Dos Ojos - drone post-processing for Rio Grande Valley fields."""
     setup_logging(verbose)
-    ctx.obj = Settings.from_root(default_root())
+    root = workspace.resolve() if workspace else default_root()
+    if workspace:
+        root.mkdir(parents=True, exist_ok=True)
+        log.info("workspace %s", root)
+    ctx.obj = Settings.from_root(root)
 
 
 # --------------------------------------------------------------------------- #
@@ -69,6 +83,12 @@ def cli(ctx: click.Context, verbose: int) -> None:
 @click.option("--notes", default=None, help="Anything worth remembering.")
 @click.option("--ground-elevation", type=float, default=None,
               help="Terrain elevation in metres, for height above ground.")
+@click.option("--source", default=None,
+              help="Origin of data that is not your own flight, e.g. a public dataset. "
+                   "Printed on every figure.")
+@click.option("--row-spacing", type=float, default=None,
+              help="Planter row spacing in metres (30 in = 0.762, 40 in = 1.016, "
+                   "5 ft cane = 1.524). Used by 'detect' so it need not guess.")
 @click.option("--force", is_flag=True, help="Remap a flight already registered.")
 @click.pass_obj
 def register_cmd(
@@ -79,6 +99,8 @@ def register_cmd(
     crop: str | None,
     notes: str | None,
     ground_elevation: float | None,
+    source: str | None,
+    row_spacing: float | None,
     force: bool,
 ) -> None:
     """Map a flight to a satellite field in flights.json."""
@@ -89,6 +111,8 @@ def register_cmd(
         crop=crop,
         notes=notes,
         ground_elevation_m=ground_elevation,
+        source=source,
+        row_spacing_m=row_spacing,
     )
     try:
         stored = register_flight(settings.manifest_path, flight, overwrite=force)
@@ -565,6 +589,51 @@ def _format_odm_result(result) -> str:
     return "\n".join(lines)
 
 
+@cli.command("import")
+@click.argument("flight_id")
+@click.option("--ortho", type=click.Path(exists=True, dir_okay=False, path_type=Path),
+              default=None, help="Orthomosaic GeoTIFF.")
+@click.option("--dsm", type=click.Path(exists=True, dir_okay=False, path_type=Path),
+              required=True, help="Surface model: a GeoTIFF, or a LAS/LAZ point cloud.")
+@click.option("--dtm", type=click.Path(exists=True, dir_okay=False, path_type=Path),
+              required=True,
+              help="Ground: a GeoTIFF, or a LAS/LAZ cloud from a bare-soil or early flight.")
+@click.option("--crs", default=None,
+              help="Coordinate system for inputs that carry none, e.g. EPSG:26916.")
+@click.option("--resolution", type=float, default=None,
+              help="Grid for point clouds, in metres  [default: from the point spacing]")
+@click.option("--crop/--no-crop", default=True, show_default=True,
+              help="Crop the surfaces to the orthophoto's footprint.")
+@click.option("--force", is_flag=True, help="Replace products already in the project.")
+@click.pass_obj
+def import_cmd(
+    settings: Settings, flight_id: str, ortho: Path | None, dsm: Path, dtm: Path,
+    crs: str | None, resolution: float | None, crop: bool, force: bool,
+) -> None:
+    """Bring in finished maps made elsewhere, in place of an ODM run."""
+    from . import external
+
+    project = settings.flight_odm(flight_id)
+    try:
+        done = external.import_products(
+            project, ortho=ortho, dsm=dsm, dtm=dtm, crs=crs, resolution_m=resolution,
+            crop_to_ortho=crop, overwrite=force,
+        )
+    except external.ProductImportError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    found = odm_runner.verify_outputs(project)
+    rows = [
+        (item.name, f"{item.shape[1]} x {item.shape[0]}",
+         f"{item.resolution_m * 100:.1f} cm", item.crs, item.how)
+        for item in done
+    ]
+    click.echo(_table(("PRODUCT", "PIXELS", "GRID", "CRS", "HOW"), rows, "<>><<"))
+    click.echo(f"\n  {len(found)} product(s) in {project}, provenance in "
+               f"{external.PROVENANCE_NAME}")
+    click.echo(f"  Next: dosojos-drone chm {flight_id}")
+
+
 # --------------------------------------------------------------------------- #
 # Canopy height model
 # --------------------------------------------------------------------------- #
@@ -644,6 +713,7 @@ def chm_cmd(
             f"95th percentile {stats.p95_m:.2f} m"
             + (f"  -  field {flight.field_id}" if flight else "")
         ),
+        banner=_public_banner(flight),
     )
 
     click.echo(_format_chm(stats, n_in_field))
@@ -685,6 +755,9 @@ def _format_chm(stats, n_in_field: int | None) -> str:
               show_default=True, help="Row segment length in metres.")
 @click.option("--row-width", type=float, default=None,
               help="Segment width in metres  [default: the detected row spacing]")
+@click.option("--spacing", "known_spacing", type=float, default=None,
+              help="Row spacing you already know, in metres (30 in = 0.762, 40 in = "
+                   "1.016, 5 ft cane = 1.524). Needed once the canopy closes over the rows.")
 @click.option("--min-spacing", type=float, default=crowns.DEFAULT_MIN_SPACING_M,
               show_default=True, help="Smallest row spacing to search for.")
 @click.option("--max-spacing", type=float, default=crowns.DEFAULT_MAX_SPACING_M,
@@ -695,6 +768,12 @@ def _format_chm(stats, n_in_field: int | None) -> str:
               help="Watershed: minimum metres between crown peaks.")
 @click.option("--clip-field/--no-clip-field", default=True, show_default=True,
               help="Drop units falling mostly outside the field.")
+@click.option("--blocks", "blocks_path", type=click.Path(exists=True, dir_okay=False, path_type=Path),
+              default=None,
+              help="Polygons of parts judged separately (varieties, planting dates, trial "
+                   "plots). Units are cut at their edges; units outside them are dropped.")
+@click.option("--block-field", default=None,
+              help="Column naming each block  [default: the first attribute]")
 @click.pass_obj
 def detect_cmd(
     settings: Settings,
@@ -702,11 +781,14 @@ def detect_cmd(
     method: str,
     segment: float,
     row_width: float | None,
+    known_spacing: float | None,
     min_spacing: float,
     max_spacing: float,
     min_height: float,
     min_distance: float,
     clip_field: bool,
+    blocks_path: Path | None,
+    block_field: str | None,
 ) -> None:
     """Detect the units later steps measure: row segments or crowns."""
     out_dir = settings.flight_out(flight_id)
@@ -721,12 +803,26 @@ def detect_cmd(
     resolution = float(surface.resolution_m[0])
     geometry = None
 
+    flight = None
+    try:
+        flight = get_flight(settings.manifest_path, flight_id)
+    except ManifestError:
+        pass
+    if known_spacing is None and flight is not None:
+        known_spacing = flight.row_spacing_m
+
     try:
         if method == "rows":
             geometry = crowns.estimate_row_geometry(
                 surface.data, resolution,
                 min_spacing_m=min_spacing, max_spacing_m=max_spacing,
+                known_spacing_m=known_spacing,
             )
+            warning = None if known_spacing else crowns.spacing_warning(
+                geometry.spacing_m, flight.crop if flight else None
+            )
+            if warning:
+                click.secho(f"WARNING: {warning}", fg="yellow")
             units = crowns.build_row_segments(
                 surface.data, resolution, geometry,
                 segment_m=segment, width_m=row_width,
@@ -748,11 +844,6 @@ def detect_cmd(
         units, surface.transform, surface.crs, method=method, geometry=geometry
     )
 
-    flight = None
-    try:
-        flight = get_flight(settings.manifest_path, flight_id)
-    except ManifestError:
-        pass
     if clip_field and flight:
         field = _load_field(settings, flight.field_id)
         if field is not None:
@@ -760,6 +851,15 @@ def detect_cmd(
 
     if frame.empty:
         raise click.ClickException("no units survived clipping to the field outline")
+
+    if blocks_path is not None:
+        import geopandas as gpd
+
+        try:
+            frame = crowns.assign_blocks(frame, gpd.read_file(blocks_path),
+                                         label_column=block_field)
+        except crowns.DetectionError as exc:
+            raise click.ClickException(str(exc)) from exc
 
     path = out_dir / f"units_{method}.geojson"
     frame.to_file(path, driver="GeoJSON")
@@ -778,13 +878,16 @@ def detect_cmd(
                 else ""
             )
         ),
+        banner=_public_banner(flight),
     )
 
-    click.echo(_format_detection(frame, geometry, method, resolution))
+    click.echo(_format_detection(frame, geometry, method, resolution, known_spacing))
     click.echo(f"\n  {path}\n  {overlay}")
 
 
-def _format_detection(frame, geometry, method: str, resolution: float) -> str:
+def _format_detection(
+    frame, geometry, method: str, resolution: float, known_spacing: float | None = None
+) -> str:
     """Report what was detected and, for rows, the planting pattern behind it."""
     areas = frame.geometry.area
     rows = [
@@ -794,9 +897,12 @@ def _format_detection(frame, geometry, method: str, resolution: float) -> str:
         ("median unit area", f"{areas.median():.2f} m2"),
         ("total area", f"{areas.sum():.0f} m2 ({areas.sum() / 4046.86:.2f} acres)"),
     ]
+    if "block" in frame:
+        rows.append(("blocks", f"{frame['block'].nunique()}, units judged within each"))
     if geometry is not None:
         rows[2:2] = [
-            ("row spacing", f"{geometry.spacing_m:.3f} m"),
+            ("row spacing", f"{geometry.spacing_m:.3f} m"
+                            + ("  (given)" if known_spacing else "")),
             ("row direction", f"{geometry.direction_deg:.1f} deg (grid)"),
             ("signal strength", f"{geometry.strength:.1f}"
                                 f"{'' if geometry.confident else '  <- weak'}"),
@@ -908,6 +1014,9 @@ FLAG_COLOURS = {
 @click.option("--stressed-min-z", type=float, default=flags_mod.DEFAULT_STRESSED_MIN_Z,
               show_default=True,
               help="Also require this many robust sd below the median. 0 disables it.")
+@click.option("--within-blocks/--whole-field", default=True, show_default=True,
+              help="When detection assigned blocks, judge each unit against its own "
+                   "block rather than the whole flight.")
 @click.pass_obj
 def flag_cmd(
     settings: Settings,
@@ -917,6 +1026,7 @@ def flag_cmd(
     stressed_quantile: float,
     stressed_min_shortfall: float,
     stressed_min_z: float,
+    within_blocks: bool,
 ) -> None:
     """Classify units as HEALTHY, STRESSED, DEAD or MISSING, and find absent plants."""
     import geopandas as gpd
@@ -936,10 +1046,14 @@ def flag_cmd(
         stressed_min_z=stressed_min_z or None,
     )
     measured = gpd.read_file(metrics_path)
+    group = "block" if within_blocks and "block" in measured else None
     try:
-        flagged = flags_mod.classify_units(measured, method=method, rules=rules)
+        flagged = flags_mod.classify_units(measured, method=method, rules=rules,
+                                           group_column=group)
     except flags_mod.FlagError as exc:
         raise click.ClickException(str(exc)) from exc
+    if group:
+        click.echo(f"Judging units within {measured['block'].nunique()} block(s)\n")
 
     missing_frame = None
     n_missing_positions = 0
@@ -1039,12 +1153,15 @@ def report_cmd(settings: Settings, flight_id: str, method: str) -> None:
         pass
     field_id = flight.field_id if flight else None
     crop = (flight.crop if flight and flight.crop else "").strip()
+    source = flight.source if flight else None
+    banner = _public_banner(flight)
+    within = "block" if "block" in flagged else None
 
     ortho = settings.flight_odm(flight_id) / "odm_orthophoto" / "odm_orthophoto.tif"
     summary = report_mod.block_summary(
         flagged, flight_id=flight_id, field_id=field_id, method=method,
         flown_on=flight.flown_on.isoformat() if flight and flight.flown_on else None,
-        n_missing_positions=n_missing_positions,
+        n_missing_positions=n_missing_positions, source=source,
     )
     problems = summary["n_stressed"] + summary["n_dead"] + summary["n_missing"]
     total = summary["n_trees"] + n_missing_positions
@@ -1056,11 +1173,12 @@ def report_cmd(settings: Settings, flight_id: str, method: str) -> None:
             flagged, ortho if ortho.exists() else None, out_dir / "flag_overlay.png",
             title=heading,
             subtitle=f"{problems} of {total} {noun} need a look  -  drone flight {flight_id}",
-            missing_points=missing_points,
+            missing_points=missing_points, banner=banner,
         )
         histogram = report_mod.save_flag_histogram(
             flagged, method, out_dir / "flag_histogram.png",
-            title=f"{heading} - where the flagged {noun} sit",
+            title=f"{heading} - where the flagged {noun} sit", banner=banner,
+            within=within,
         )
     except report_mod.ReportError as exc:
         raise click.ClickException(str(exc)) from exc
@@ -1154,7 +1272,9 @@ def _format_join(joined: dict) -> str:
             entry["field_id"],
             str(entry.get("name", "-"))[:22],
             satellite,
-            "-" if drone is None else f"{drone['share_problem']:.0%} of {drone['n_trees']}",
+            "-" if drone is None else (
+                f"{drone['share_problem']:.0%} of {drone.get('n_judged') or drone['n_trees']}"
+            ),
             AGREEMENT_TEXT.get(entry["agreement"], entry["agreement"]),
         ))
     return _table(("FIELD", "NAME", "SATELLITE", "DRONE", "VERDICT"), rows, "<<><<")

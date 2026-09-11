@@ -327,3 +327,163 @@ def test_deepforest_absence_explains_itself() -> None:
             detect_crowns_deepforest("nonexistent.tif")
     else:
         pytest.skip("deepforest is installed, so the guidance path cannot run")
+
+
+# --------------------------------------------------------------------------- #
+# Real-world row patterns: plots, closed canopy, planter passes
+# --------------------------------------------------------------------------- #
+
+
+def cut_trial(
+    *, ripple: float, size: tuple[int, int] = (600, 800), spacing: float = 0.76,
+    plot_rows: int = 12, cut: tuple[int, ...] = (7, 8), shift_right_m: float = 0.0,
+) -> np.ndarray:
+    """A plot trial on 0.76 m rows, rows 8 and 9 of every plot cut to 30%.
+
+    That is the Purdue 2018 trial. ``ripple`` is how strongly the rows show at
+    the canopy top: high early, low once the canopy closes. ``shift_right_m``
+    moves the eastern half's rows sideways, as a second planter pass does.
+    """
+    y, x = np.mgrid[0:size[0], 0:size[1]] * RES
+    across = np.where(x > size[1] * RES / 2, x + shift_right_m, x)
+    row = np.floor(across / spacing).astype(int)
+    ridge = np.clip(np.cos(2 * math.pi * (across / spacing - row)), 0, None) ** 0.6
+    canopy = 2.0 + ripple * ridge
+    return np.where(np.isin(row % plot_rows, cut), 0.3 * canopy, canopy)
+
+
+def test_a_known_spacing_finds_rows_the_canopy_has_closed_over() -> None:
+    """Closed canopy: the plots' own pattern outshines the rows.
+
+    On the real July scan the rows stood 1.7x above the spectrum around them,
+    the plot pattern 3 to 4x; the free search locks onto the plot pattern.
+    Given the planter spacing, only direction and position remain to find.
+    """
+    canopy = cut_trial(ripple=0.15)
+    free = estimate_row_geometry(canopy, RES)
+    assert free.spacing_m > 1.2          # the trap this guards against
+
+    given = estimate_row_geometry(canopy, RES, known_spacing_m=0.76)
+    assert given.spacing_m == 0.76
+    difference = abs(given.direction_deg - 90.0) % 180.0
+    assert min(difference, 180.0 - difference) < 2.0
+
+
+def test_visible_rows_win_over_the_plot_pattern() -> None:
+    """While the rows still show, the free search must find them, not the plots."""
+    geometry = estimate_row_geometry(cut_trial(ripple=1.0), RES)
+    assert geometry.spacing_m == pytest.approx(0.76, rel=0.03)
+
+
+@pytest.mark.parametrize(
+    "spacing, crop, warns",
+    [(1.79, "grain sorghum", True), (0.76, "sorghum, 18-hybrid trial", False),
+     (1.52, "sugarcane", False), (0.76, "sugarcane", True), (2.9, None, False),
+     (1.8, "energy cane", False)],
+)
+def test_implausible_spacing_for_the_crop_is_called_out(spacing, crop, warns) -> None:
+    """The real 1.79 m reading on 0.76 m sorghum would have been caught here."""
+    from dosojos_drone.crowns import spacing_warning
+
+    message = spacing_warning(spacing, crop)
+    assert (message is not None) == warns
+    if warns:
+        assert "--spacing" in message
+
+
+def _centre_heights(canopy: np.ndarray, segments) -> tuple[np.ndarray, np.ndarray]:
+    """Canopy height under each segment's centre, and the centre's x in metres."""
+    xs = np.array([polygon.centroid.x for _, _, polygon in segments])
+    ys = np.array([polygon.centroid.y for _, _, polygon in segments])
+    cols = np.clip((xs / RES).astype(int), 0, canopy.shape[1] - 1)
+    rows = np.clip((ys / RES).astype(int), 0, canopy.shape[0] - 1)
+    return canopy[rows, cols], xs
+
+
+def test_segments_follow_rows_across_a_planter_pass_boundary() -> None:
+    """A second pass's rows sit 0.3 m off the first's; tracked, both are measured.
+
+    One straight comb for the whole field puts one half's segments on the rows
+    and the other half's in the furrows between them.
+    """
+    canopy = cut_trial(ripple=1.0, cut=(), shift_right_m=0.30)
+    geometry = estimate_row_geometry(canopy, RES, known_spacing_m=0.76)
+    east = 800 * RES / 2 + 2.0          # away from the join itself
+
+    tracked, xs = _centre_heights(canopy, build_row_segments(canopy, RES, geometry, segment_m=1.0))
+    fixed, xs_fixed = _centre_heights(
+        canopy, build_row_segments(canopy, RES, geometry, segment_m=1.0, track_rows=False)
+    )
+    ridge_top = canopy.max()
+    assert np.median(tracked[xs > east]) > 0.95 * ridge_top
+    assert np.median(tracked[xs < 16.0]) > 0.95 * ridge_top
+    # Without tracking, at least one half is measured off its rows.
+    assert min(np.median(fixed[xs_fixed > east]), np.median(fixed[xs_fixed < 16.0])) < 0.9 * ridge_top
+
+
+def test_row_tracking_changes_nothing_on_straight_rows() -> None:
+    """On a field one comb already fits, tracking must not move the segments."""
+    canopy = ridged_field(bearing_deg=0.0)
+    geometry = estimate_row_geometry(canopy, RES)
+    tracked, _ = _centre_heights(canopy, build_row_segments(canopy, RES, geometry))
+    assert np.median(tracked) > 0.95 * canopy.max()
+
+
+# --------------------------------------------------------------------------- #
+# Blocks
+# --------------------------------------------------------------------------- #
+
+
+def _two_blocks():
+    """Two blocks side by side, each 10 x 10 m, labelled by variety."""
+    import geopandas as gpd
+
+    return gpd.GeoDataFrame(
+        {"variety": ["tall", "short"]},
+        geometry=[box(600000, 2900000, 600010, 2900010), box(600010, 2900000, 600020, 2900010)],
+        crs=UTM,
+    )
+
+
+def _units(*polygons):
+    import geopandas as gpd
+
+    return gpd.GeoDataFrame(
+        {"unit_id": [f"r{i:03d}s000" for i in range(len(polygons))]},
+        geometry=list(polygons), crs=UTM,
+    )
+
+
+def test_units_are_labelled_with_their_block() -> None:
+    from dosojos_drone.crowns import assign_blocks
+
+    units = _units(box(600002, 2900002, 600004, 2900003), box(600012, 2900002, 600014, 2900003))
+    labelled = assign_blocks(units, _two_blocks())
+    assert dict(zip(labelled["unit_id"], labelled["block"])) == {
+        "r000s000": "tall", "r001s000": "short",
+    }
+
+
+def test_a_unit_across_a_block_boundary_is_split_with_unique_ids() -> None:
+    """Half its canopy belongs to each variety; judged whole it would be neither."""
+    from dosojos_drone.crowns import assign_blocks
+
+    labelled = assign_blocks(_units(box(600009, 2900002, 600011, 2900003)), _two_blocks())
+    assert sorted(labelled["unit_id"]) == ["r000s000@short", "r000s000@tall"]
+    assert labelled.geometry.area.sum() == pytest.approx(2.0)
+
+
+def test_units_outside_every_block_are_dropped() -> None:
+    """Alleys between plots are not crop."""
+    from dosojos_drone.crowns import assign_blocks
+
+    units = _units(box(600002, 2900002, 600004, 2900003), box(600030, 2900002, 600032, 2900003))
+    assert list(assign_blocks(units, _two_blocks())["unit_id"]) == ["r000s000"]
+
+
+def test_a_missing_block_column_is_named() -> None:
+    from dosojos_drone.crowns import assign_blocks
+
+    with pytest.raises(DetectionError, match="available: variety"):
+        assign_blocks(_units(box(600002, 2900002, 600004, 2900003)), _two_blocks(),
+                      label_column="plotId")

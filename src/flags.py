@@ -151,17 +151,53 @@ def robust_z(values: pd.Series) -> pd.Series:
 
 
 def classify_units(
-    metrics: gpd.GeoDataFrame, *, method: str, rules: FlagRules = FlagRules()
+    metrics: gpd.GeoDataFrame, *, method: str, rules: FlagRules = FlagRules(),
+    group_column: str | None = None,
 ) -> gpd.GeoDataFrame:
     """Assign one flag per unit, with the reason that decided it.
 
     Checks run from the most severe down, so a unit is reported for its worst
     problem. Units with no data at all are flagged as such rather than guessed.
+
+    With ``group_column`` every statistic is taken within each group rather than
+    across the flight, because a field holding two varieties or two planting
+    dates would otherwise see the shorter one called stressed for being itself.
     """
     if metrics.empty:
         raise FlagError("no metrics to classify; run 'metrics' first")
+    if group_column is not None and group_column not in metrics:
+        raise FlagError(f"no column {group_column!r} to judge units within")
 
-    frame = metrics.copy()
+    if group_column is None:
+        frame = _classify_group(metrics.copy(), method=method, rules=rules, scope="field")
+    else:
+        parts = [
+            _classify_group(part.copy(), method=method, rules=rules, scope="block")
+            for _, part in metrics.groupby(group_column, sort=False, dropna=False)
+        ]
+        frame = gpd.GeoDataFrame(pd.concat(parts).loc[metrics.index],
+                                 geometry=metrics.geometry.name, crs=metrics.crs)
+
+    counts = frame["flag"].value_counts().to_dict()
+    log.info("flags: %s", ", ".join(f"{k} {counts.get(k, 0)}" for k in FLAGS))
+    return frame
+
+
+#: A block with fewer units than this has no distribution worth comparing to;
+#: its units are reported as not assessed rather than judged on noise.
+MIN_GROUP_UNITS = 8
+
+
+def _classify_group(frame: gpd.GeoDataFrame, *, method: str, rules: FlagRules,
+                    scope: str) -> gpd.GeoDataFrame:
+    """Judge one set of units against its own distribution."""
+    if scope != "field" and len(frame) < MIN_GROUP_UNITS:
+        frame["size_z"] = np.nan
+        frame["exg_z"] = np.nan
+        frame["flag"] = "NO_DATA"
+        frame["reason"] = f"only {len(frame)} unit(s) in this block, too few to judge"
+        return frame
+
     size = frame[structure_column(method)]
     has_colour = "exg_mean" in frame and frame["exg_mean"].notna().any()
 
@@ -181,21 +217,19 @@ def classify_units(
             size=getattr(row, structure_column(method)),
             size_cut=size_cut, exg_cut=exg_cut, median_size=median_size,
             median_exg=median_exg, median_cover=median_cover,
-            median_area=median_area,
+            median_area=median_area, scope=scope,
         )
         flags.append(flag)
         reasons.append(reason)
 
     frame["flag"] = flags
     frame["reason"] = reasons
-    counts = frame["flag"].value_counts().to_dict()
-    log.info("flags: %s", ", ".join(f"{k} {counts.get(k, 0)}" for k in FLAGS))
     return frame
 
 
 def _verdict(
     row, *, method, rules, has_colour, size, size_cut, exg_cut, median_size,
-    median_exg, median_cover, median_area,
+    median_exg, median_cover, median_area, scope="field",
 ):
     """Decide one unit's flag, most severe first."""
     noun = "canopy height" if method == "rows" else "volume"
@@ -209,7 +243,7 @@ def _verdict(
         and area < rules.edge_area_fraction * median_area
     ):
         return "EDGE", (
-            f"clipped to {area / median_area:.0%} of a full segment at the field "
+            f"clipped to {area / median_area:.0%} of a full segment at the {scope} "
             "edge, not a fair sample of its row"
         )
 
@@ -220,17 +254,17 @@ def _verdict(
         and row.canopy_cover < rules.missing_cover_fraction * median_cover
     ):
         return "MISSING", (
-            f"{row.canopy_cover:.0%} canopy cover against a field median of "
+            f"{row.canopy_cover:.0%} canopy cover against a {scope} median of "
             f"{median_cover:.0%}, plants absent"
         )
 
     if median_size > 0 and size < rules.dead_volume_fraction * median_size:
         return "DEAD", (
-            f"{noun} is under {rules.dead_volume_fraction:.0%} of the field median"
+            f"{noun} is under {rules.dead_volume_fraction:.0%} of the {scope} median"
         )
     if has_colour and _colour_dead(row, rules, median_exg):
         return "DEAD", (
-            f"greenness {row.exg_z:+.1f} sd below the field median, under "
+            f"greenness {row.exg_z:+.1f} sd below the {scope} median, under "
             f"{rules.dead_colour_fraction:.0%} of its typical level"
         )
 
@@ -243,9 +277,9 @@ def _verdict(
     if small or pale:
         parts = []
         if small:
-            parts.append(f"{noun} in the bottom {rules.stressed_quantile:.0%}")
+            parts.append(f"{noun} in the bottom {rules.stressed_quantile:.0%} of the {scope}")
         if pale:
-            parts.append(f"greenness in the bottom {rules.stressed_quantile:.0%}")
+            parts.append(f"greenness in the bottom {rules.stressed_quantile:.0%} of the {scope}")
         return "STRESSED", " and ".join(parts)
 
     return "HEALTHY", ""

@@ -38,6 +38,13 @@ class Flight:
     crop: str | None = None
     notes: str | None = None
     ground_elevation_m: float | None = None
+    #: Where the data came from when it is not our own flight, e.g. a public
+    #: dataset. Printed on every figure so borrowed data is never mistaken for ours.
+    source: str | None = None
+    #: The planter's row spacing, when known. Row detection then only has to find
+    #: the direction and position of the rows, which it can still do after the
+    #: canopy closes over them and the spacing itself stops showing.
+    row_spacing_m: float | None = None
 
     @classmethod
     def from_dict(cls, flight_id: str, payload: dict[str, Any]) -> "Flight":
@@ -58,6 +65,8 @@ class Flight:
             crop=payload.get("crop"),
             notes=payload.get("notes"),
             ground_elevation_m=payload.get("ground_elevation_m"),
+            source=payload.get("source"),
+            row_spacing_m=payload.get("row_spacing_m"),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -65,7 +74,7 @@ class Flight:
         payload: dict[str, Any] = {"field_id": self.field_id}
         if self.flown_on:
             payload["flown_on"] = self.flown_on.isoformat()
-        for key in ("crop", "notes", "ground_elevation_m"):
+        for key in ("crop", "notes", "ground_elevation_m", "source", "row_spacing_m"):
             value = getattr(self, key)
             if value is not None:
                 payload[key] = value

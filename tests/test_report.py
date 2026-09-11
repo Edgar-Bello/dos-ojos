@@ -326,3 +326,42 @@ def test_histogram_needs_values(tmp_path: Path) -> None:
     flagged["height_mean_m"] = np.nan
     with pytest.raises(ReportError, match="no finite"):
         save_flag_histogram(flagged, "rows", tmp_path / "h.png", title="t")
+
+
+# --------------------------------------------------------------------------- #
+# Borrowed data and blocks
+# --------------------------------------------------------------------------- #
+
+
+def test_public_data_carries_its_source_into_the_joined_record() -> None:
+    """Whatever reads triage.json must be able to tell borrowed data from ours."""
+    source = "Purdue University, PURR doi:10.4231/MY7W-FH43, CC0"
+    summary = block_summary(_flagged(["HEALTHY"] * 9 + ["MISSING"]), flight_id="p",
+                            field_id="PUBLIC-x", method="rows", source=source)
+    assert summary["source"] == source
+    joined = join_with_satellite({"fields": [{"field_id": "PUBLIC-x", "flagged": False}]},
+                                 [summary])
+    assert joined["fields"][0]["drone"]["source"] == source
+
+
+def test_shares_state_how_many_units_were_actually_judged() -> None:
+    """Edge pieces are not judged, so '14% of all units' would overstate the base."""
+    summary = block_summary(_flagged(["HEALTHY"] * 6 + ["EDGE"] * 3 + ["STRESSED"]),
+                            flight_id="f", field_id="x", method="rows")
+    assert summary["n_trees"] == 10 and summary["n_judged"] == 7
+    assert summary["share_problem"] == pytest.approx(1 / 7, abs=1e-4)
+
+
+def test_figures_for_public_data_carry_a_banner(tmp_path: Path) -> None:
+    flagged = _flagged(["HEALTHY"] * 8 + ["STRESSED", "MISSING"])
+    banner = "FREE PUBLIC DATA, NOT OUR FLIGHT"
+    overlay = save_flag_overlay(flagged, None, tmp_path / "o.png", title="t", banner=banner)
+    histogram = save_flag_histogram(flagged, "rows", tmp_path / "h.png", title="t", banner=banner)
+    assert overlay.stat().st_size > 0 and histogram.stat().st_size > 0
+
+
+def test_block_judged_units_are_plotted_against_their_own_block(tmp_path: Path) -> None:
+    flagged = _flagged(["HEALTHY"] * 10).assign(
+        height_mean_m=[2.4] * 5 + [1.2] * 5, block=["a"] * 5 + ["b"] * 5)
+    path = save_flag_histogram(flagged, "rows", tmp_path / "h.png", title="t", within="block")
+    assert path.exists()

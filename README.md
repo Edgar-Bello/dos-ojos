@@ -19,6 +19,7 @@ be confirmed or dismissed from 60 metres.
 | 6 | Per-plant metrics and RGB indices | done |
 | 7 | Dead / missing / stressed flags | done |
 | 8 | Overlay, histogram, block summary JSON, satellite join | done |
+| — | Run on real public data (Purdue 2018 sorghum): import, blocks, known row spacing, row tracking | done |
 
 ## Setup
 
@@ -443,9 +444,10 @@ dilute them.
 ## The whole thing, start to finish
 
 ```bash
-dosojos-drone register f1 --field rgv-002 --crop "grain sorghum" --ground-elevation 12
+dosojos-drone register f1 --field rgv-002 --crop "grain sorghum" --ground-elevation 12 \
+    --row-spacing 0.762                       # 30-inch rows; see "Row spacing" below
 dosojos-drone survey  f1                      # worth running ODM?
-dosojos-drone odm     f1                      # hours
+dosojos-drone odm     f1                      # hours; or 'import' finished maps instead
 dosojos-drone chm     f1
 dosojos-drone detect  f1 --method rows        # or watershed for an orchard
 dosojos-drone metrics f1 --method rows
@@ -456,6 +458,111 @@ dosojos-drone join                            # merge with the satellite ranking
 
 Every step reads the previous step's output from disk, so any step can be re-run
 without redoing ODM.
+
+## Real data: the Purdue 2018 sorghum demo
+
+Everything above was first tested on synthetic fields. To see it on real data
+before our own flights exist, it was run end to end on a free public dataset:
+Purdue University's *Geospatial Image Data for Sorghum Phenotyping* (PURR,
+doi:10.4231/MY7W-FH43, CC0). It is a 72-plot trial of 18 sorghum hybrids at
+Purdue's research farm in Indiana, flown on 10 July 2018 with an RGB camera
+(1 cm) and a LiDAR scanner, plus a June 4 scan when the plants were small.
+
+It lives apart from our data in `../public_demo/purdue-sorghum-2018/`, with its
+own workspace for each half, and every figure carries a blue *FREE PUBLIC DATA*
+band. `SOURCE.md` there has the citation and `run_demo.sh` every command.
+
+The trial came with a built-in answer key: on 25 June Purdue harvested rows 8
+and 9 of every plot in replications 1 to 3 for biomass, and left replication 4
+alone. Scored against that:
+
+| | |
+|---|---|
+| Segment centres vs Purdue's own mapped rows | 0.9 cm median offset |
+| Harvested row segments flagged | 349 of 356 (98%) |
+| Rows 8-9 in replication 4, not harvested | 1 of 116 flagged |
+| Undisturbed rows | 1 of 2,327 flagged |
+| Row 11 in replications 1-2, where Purdue removed plants for sampling | 44 of 120 flagged |
+
+The satellite, judging the same field as of 10 July, did not flag it: the field
+was greener than its 2019-2022 normal. That is the join's *drone found what
+satellite missed* case, for real: two cut rows in twelve are invisible at 10 m.
+
+What the real data changed in the code, each measured before it was kept:
+
+- **Finished maps can be imported** (`import`), since Purdue delivered an
+  orthophoto and LiDAR, not photos. ODM never ran on this dataset.
+- **Known row spacing.** By July the canopy had closed over the rows: in the
+  height model they stood only 1.7x above the surrounding spectrum, while the
+  harvested strips, repeating every plot, stood 3-4x. The free search reported
+  1.79 m for 0.76 m rows. Growers know their spacing, so it can be recorded once.
+- **Crop sanity check.** A spacing implausible for the crop now prints a warning
+  saying what to do.
+- **Blocks.** A variety trial must be judged plot by plot; see below.
+- **Row tracking.** Segments now follow the rows where they drift or shift; see
+  below.
+
+## Maps made elsewhere (`import`)
+
+```bash
+dosojos-drone import f1 --ortho ortho.tif --dsm late.las --dtm early.las --crs EPSG:26916
+```
+
+Writes the products where ODM would have, so every later step runs unchanged,
+and records in `imported.json` that ODM did not build them. `--dsm`/`--dtm`
+accept GeoTIFFs or LAS/LAZ point clouds. A cloud becomes a DSM by taking the
+highest return per cell, and a DTM by taking the 5th percentile per 0.5 m cell
+(or ground-classified points when present) from a bare-soil or early flight.
+Surfaces are cropped to the orthophoto. A file without a coordinate system needs
+`--crs`; a `--crs` that contradicts the file is refused. Existing products are
+never overwritten without `--force`.
+
+## Row spacing, and a closed canopy
+
+Record the planter spacing with `register --row-spacing` (30 in = 0.762,
+38 in = 0.965, 40 in = 1.016, 5 ft cane = 1.524), or pass `detect --spacing`.
+Detection then only searches the direction and position of the rows, which it
+still finds after the canopy closes. Without it, the free search is confirmed
+on short strips along the rows, and a spacing outside the crop's usual range
+(sorghum 0.35-1.05 m, cane 1.2-2.2 m) prints a warning.
+
+## Row tracking
+
+A straight comb of rows laid across a whole field goes wrong on real ground: a
+quarter of a degree walks a row half a row sideways over 100 m, and planter
+passes rarely meet at exactly the row spacing. Detection measures where the
+rows sit in tiles of 8 rows by 5 m, after removing a running median that makes
+plot edges and gaps drop out, then fits a plane plus one offset per band of
+rows. It is only applied when it moves the rows more than 15% of a spacing;
+otherwise one comb, measured over the whole field, is more precise.
+
+On the synthetic field, tracking put 93% of segment centres on the rows instead
+of 3% (the old comb sat in the furrows, which full-width segments hid) and
+raised recall of affected segments from 75% to 85% at the same 99.6% precision.
+A two-row offset between planter passes is followed exactly.
+
+## Blocks
+
+```bash
+dosojos-drone detect f1 --blocks blocks.geojson --block-field variety
+```
+
+A block is any part of a field that should be judged on its own: a variety, a
+planting date, a ratoon age, a trial plot. Units are cut at block edges and
+dropped outside them (alleys), and `flag` then compares each unit only with its
+own block. Judged across a mixed field, the spread of the two varieties hides
+genuinely stunted plants of either; within blocks they stand out. Pass
+`flag --whole-field` to compare across the flight anyway.
+
+## Workspaces
+
+`--workspace DIR` on either tool keeps its manifest, data, cache and outputs in
+`DIR` instead of the project folder. Laid out as `DIR/dosojos_sat` and
+`DIR/dosojos_drone`, the two halves find each other exactly as the projects do.
+That is how the public demo stays out of our own `flights.json` and triage.
+
+A flight registered with `--source` carries that source on every figure, in
+`block_summary.json` and into `triage.json`.
 
 ## Video fallback
 

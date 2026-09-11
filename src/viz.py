@@ -128,9 +128,24 @@ def _caption(survey: FlightSurvey) -> str:
 
 CHM_CMAP = "YlGn"
 
+#: Header band marking data that is not our own; the same blue as the report's.
+BANNER_COLOR = "#1f5fa6"
+
+
+def _banner(axes, text: str | None, *, offset: float = 48) -> None:
+    """A solid band above the title, for data that did not come from our flights."""
+    if not text:
+        return
+    axes.annotate(
+        text, xy=(0, 1), xycoords="axes fraction", xytext=(0, offset),
+        textcoords="offset points", fontsize=10, color="white", fontweight="bold",
+        bbox={"boxstyle": "square,pad=0.45", "facecolor": BANNER_COLOR, "edgecolor": "none"},
+    )
+
 
 def save_chm_png(
-    chm, out_path: Path, *, resolution_m: float, title: str, subtitle: str = ""
+    chm, out_path: Path, *, resolution_m: float, title: str, subtitle: str = "",
+    banner: str | None = None,
 ) -> Path:
     """Render a canopy height model as a colourised PNG with a scale bar.
 
@@ -163,6 +178,7 @@ def save_chm_png(
             subtitle, xy=(0, 1), xycoords="axes fraction", xytext=(0, 8),
             textcoords="offset points", fontsize=10, color="#6f6e69",
         )
+    _banner(axes, banner)
     axes.set_xlabel("metres east", fontsize=11)
     axes.set_ylabel("metres north", fontsize=11)
     axes.tick_params(labelsize=9)
@@ -184,6 +200,7 @@ def save_units_overlay(
     subtitle: str = "",
     column: str | None = None,
     colors: dict[str, str] | None = None,
+    banner: str | None = None,
 ) -> Path:
     """Draw detected units over the canopy model.
 
@@ -235,6 +252,7 @@ def save_units_overlay(
             subtitle, xy=(0, 1), xycoords="axes fraction", xytext=(0, 8),
             textcoords="offset points", fontsize=10, color="#6f6e69",
         )
+    _banner(axes, banner)
     axes.set_xlabel("easting (m)", fontsize=11)
     axes.set_ylabel("northing (m)", fontsize=11)
     axes.tick_params(labelsize=8)

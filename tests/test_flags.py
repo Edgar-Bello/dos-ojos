@@ -399,3 +399,53 @@ def test_a_genuinely_stressed_plant_fails_both_guards() -> None:
     for rules in (FlagRules(), FlagRules(stressed_min_z=None),
                   FlagRules(stressed_min_shortfall=None)):
         assert classify_units(field, method="rows", rules=rules)["flag"].iloc[0] == "STRESSED"
+
+
+# --------------------------------------------------------------------------- #
+# Judging within blocks
+# --------------------------------------------------------------------------- #
+
+
+def _two_varieties(n: int = 60, seed: int = 4) -> gpd.GeoDataFrame:
+    """A tall and a short variety side by side, each with one stunted segment."""
+    rng = np.random.default_rng(seed)
+    tall = 2.4 + rng.normal(0, 0.05, n)
+    short = 1.2 + rng.normal(0, 0.03, n)
+    tall[5], short[5] = 1.4, 0.6
+    return _frame(
+        height_mean_m=list(np.concatenate([tall, short])),
+        block=["tall"] * n + ["short"] * n,
+        segment=list(range(2 * n)),
+    )
+
+
+def test_stunted_plants_are_found_within_their_own_variety() -> None:
+    """Two varieties make the flight's height distribution bimodal.
+
+    The spread guard then sees a huge normal range, so judged against the whole
+    flight neither stunted segment stands out: a 0.6 m plant of a 1.2 m variety
+    sits only 1.35 sd under a median that belongs to neither. Within its own
+    block each one is unmistakable, and no healthy plant of either is flagged.
+    """
+    frame = _two_varieties()
+    whole = classify_units(frame, method="rows")
+    assert not set(whole.index[whole["flag"] == "STRESSED"]) >= {5, 65}
+
+    within = classify_units(frame, method="rows", group_column="block")
+    stressed = within[within["flag"] == "STRESSED"]
+    assert sorted(stressed.index) == [5, 65]
+    assert all("block" in reason for reason in within.loc[within["flag"] != "HEALTHY", "reason"])
+
+
+def test_a_block_too_small_to_have_a_distribution_is_not_judged() -> None:
+    frame = _frame(height_mean_m=[1.0] * 20 + [0.2, 1.0, 1.0],
+                   block=["big"] * 20 + ["tiny"] * 3)
+    flagged = classify_units(frame, method="rows", group_column="block")
+    tiny = flagged[flagged["block"] == "tiny"]
+    assert set(tiny["flag"]) == {"NO_DATA"}
+    assert "too few" in tiny["reason"].iloc[0]
+
+
+def test_grouping_by_a_missing_column_is_an_error() -> None:
+    with pytest.raises(FlagError, match="no column"):
+        classify_units(_frame(height_mean_m=[1.0] * 10), method="rows", group_column="block")
