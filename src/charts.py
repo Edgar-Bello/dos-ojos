@@ -36,6 +36,8 @@ MEDIAN_COLOR = "#6f6e69"
 SEASON_COLOR = "#2a78d6"
 FLAG_COLOR = "#d03b3b"
 THIN_COLOR = "#eda100"
+#: Header band for data that is not our own; the drone figures use the same one.
+BANNER_COLOR = "#1f5fa6"
 
 FIG_SIZE = (11.0, 5.6)
 DPI = 150
@@ -80,6 +82,8 @@ def plot_field(
     flagged_dates: set[date] | None = None,
     verdict: str | None = None,
     run_start: date | None = None,
+    cutoff: date | None = None,
+    banner: str | None = None,
 ) -> Path:
     """Draw one field's season against its own baseline and save a PNG.
 
@@ -91,6 +95,9 @@ def plot_field(
         verdict: One-line judgement printed under the title.
         run_start: First date of the trailing below-normal run, shaded so a field
             flagged for a sustained shortfall shows why even with no red markers.
+        cutoff: The date the verdict was judged on. Later observations are drawn
+            faded, since the verdict could not have known them.
+        banner: A band above the title, for data that is not our own.
 
     Returns:
         Path to the written PNG.
@@ -98,6 +105,10 @@ def plot_field(
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     flagged_dates = flagged_dates or set()
+    later = season.iloc[0:0]
+    if cutoff is not None and not season.empty:
+        later = season[season["date"] > cutoff]
+        season = season[season["date"] <= cutoff]
 
     figure, axes = plt.subplots(figsize=FIG_SIZE, dpi=DPI)
     dates, p10, median, p90 = _baseline_series(baseline, year)
@@ -130,10 +141,31 @@ def plot_field(
                 edgecolor="white", linewidth=1.4, zorder=5,
                 label="below normal range",
             )
+    if not later.empty:
+        axes.plot(
+            list(later["date"]), later["median"].to_numpy(dtype=float),
+            color=SEASON_COLOR, linewidth=1.4, alpha=0.3, marker="o", markersize=4,
+            label="after the judged date", zorder=2,
+        )
+    if cutoff is not None:
+        axes.axvline(cutoff, color=MEDIAN_COLOR, linewidth=1.4, linestyle=":", zorder=2)
+        axes.annotate(
+            f"judged as of {cutoff.day} {cutoff:%b}", xy=(cutoff, 1), xycoords=("data", "axes fraction"),
+            xytext=(4, -4), textcoords="offset points", fontsize=FONT_SIZES["legend"] - 1,
+            color=MEDIAN_COLOR, va="top",
+        )
 
     _shade_run(axes, run_start, season, year)
     _style_axes(axes, index_name, year)
     _add_titles(figure, axes, name, crop, index_name, history_years, verdict)
+    if banner:
+        # Above the title, which _add_titles pads 46 points over the axes.
+        axes.annotate(
+            banner, xy=(0, 1), xycoords="axes fraction", xytext=(0, 84),
+            textcoords="offset points", fontsize=FONT_SIZES["legend"], color="white",
+            fontweight="bold",
+            bbox={"boxstyle": "square,pad=0.45", "facecolor": BANNER_COLOR, "edgecolor": "none"},
+        )
 
     path = chart_path(out_dir, field_id, index_name)
     figure.savefig(path, bbox_inches="tight", facecolor="white")

@@ -39,6 +39,22 @@ class BaselineParams:
     history_years: int = 4
     doy_window: int = 12
     smooth_window: int = 15
+    #: An explicit history, for a past season whose preceding years predate
+    #: Sentinel-2 L2A (global from 2017). May lie after the season, never on it.
+    history_start: int | None = None
+    history_end: int | None = None
+
+    def __post_init__(self) -> None:
+        if (self.history_start is None) != (self.history_end is None):
+            raise ValueError("give both ends of an explicit history, or neither")
+        if self.history_start is not None:
+            if self.history_start > self.history_end:
+                raise ValueError(f"history {self.history_start}-{self.history_end} runs backwards")
+            if self.history_start <= self.season <= self.history_end:
+                raise ValueError(
+                    f"season {self.season} cannot be part of its own baseline "
+                    f"({self.history_start}-{self.history_end})"
+                )
 
     @property
     def year_range(self) -> tuple[int, int]:
@@ -47,6 +63,8 @@ class BaselineParams:
         Season 2026 with four years of history reads 2022 to 2025; the season
         being judged is never part of the baseline it is judged against.
         """
+        if self.history_start is not None:
+            return self.history_start, self.history_end
         return self.season - self.history_years, self.season - 1
 
 

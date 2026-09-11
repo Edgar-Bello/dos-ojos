@@ -49,7 +49,27 @@ wheels on 3.13+ yet, and 3.14 will fail to install.
 | `status` | Coverage per field, gaps, disk use, data-quality warnings |
 | `scenes` | Diagnostic: search and mask one field without writing anything |
 
-Global flags: `--offline`, `--db <path>`, `-v` for debug logging.
+Global flags: `--offline`, `--db <path>`, `--workspace <dir>`, `-v` for debug
+logging.
+
+### Past seasons and demo data
+
+```bash
+dosojos-sat --workspace ../public_demo/purdue-sorghum-2018/dosojos_sat \
+    baseline --season 2018 --history 2019-2022
+dosojos-sat --workspace ... score --season 2018 --as-of 2018-07-10
+dosojos-sat --workspace ... chart --season 2018 --as-of 2018-07-10 --banner "FREE PUBLIC DATA ..."
+```
+
+- `--workspace` keeps `cache/` and `out/` in another folder, so demo fields
+  never mix with ours.
+- `baseline --history START-END` sets the normal's years explicitly. Sentinel-2
+  L2A is only global from 2017, so a 2018 season has no four years before it;
+  the years may follow the season but can never include it.
+- `score --as-of` and `chart --as-of` judge the season as it stood on a date,
+  such as a drone flight's. Charts draw later points faded, and `flags.json`
+  records `as_of`.
+- `chart --banner` puts a band above the title, used to mark public data.
 
 ## How it works
 

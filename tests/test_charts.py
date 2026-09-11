@@ -89,3 +89,14 @@ def test_leap_year_baseline_is_trimmed_for_a_common_year(baseline) -> None:
     assert len(dates_2026) == 365
     assert len(dates_2028) == 366
     assert max(dates_2026) == date(2026, 12, 31)
+
+
+def test_a_past_date_is_marked_and_later_points_faded(tmp_path: Path, baseline, season) -> None:
+    """Judging a season as it stood on a drone flight's date must not break rendering."""
+    path = _plot(tmp_path, baseline, season, cutoff=date(2026, 7, 11))
+    assert path.exists() and path.stat().st_size > 10_000
+
+
+def test_public_data_charts_carry_a_banner(tmp_path: Path, baseline, season) -> None:
+    path = _plot(tmp_path, baseline, season, banner="FREE PUBLIC DATA, NOT OUR FIELD")
+    assert path.exists() and path.stat().st_size > 10_000

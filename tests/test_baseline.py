@@ -243,3 +243,28 @@ def test_doy_label_is_platform_independent() -> None:
     assert _doy_label(1) == "1 Jan"
     assert _doy_label(60) == "29 Feb"      # a leap year is used for labelling
     assert _doy_label(366) == "31 Dec"
+
+
+# --------------------------------------------------------------------------- #
+# Explicit history, for seasons older than the archive allows
+# --------------------------------------------------------------------------- #
+
+
+def test_an_explicit_history_may_follow_the_season() -> None:
+    """Sentinel-2 L2A is global from 2017, so 2018 has no four years before it."""
+    params = BaselineParams(season=2018, history_start=2019, history_end=2022)
+    assert params.year_range == (2019, 2022)
+
+
+def test_the_default_history_still_precedes_the_season() -> None:
+    assert BaselineParams(season=2026).year_range == (2022, 2025)
+
+
+@pytest.mark.parametrize(
+    "start, end, message",
+    [(2016, 2019, "own baseline"), (2020, 2019, "backwards"), (2019, None, "both ends")],
+)
+def test_an_explicit_history_must_make_sense(start, end, message) -> None:
+    """Above all, a season can never be part of the normal it is judged against."""
+    with pytest.raises(ValueError, match=message):
+        BaselineParams(season=2018, history_start=start, history_end=end)

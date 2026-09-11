@@ -32,12 +32,23 @@ log = logging.getLogger(__name__)
     default=False,
     help="Forbid all network access and work purely from the cache.",
 )
+@click.option(
+    "--workspace",
+    type=click.Path(file_okay=False, path_type=Path),
+    default=None,
+    help="Keep cache/ and out/ here instead of the project folder, e.g. to keep "
+         "public demo fields apart from your own.",
+)
 @click.option("-v", "--verbose", count=True, help="Show debug logging.")
 @click.pass_context
-def cli(ctx: click.Context, db_path: Path | None, offline: bool, verbose: int) -> None:
+def cli(
+    ctx: click.Context, db_path: Path | None, offline: bool, workspace: Path | None,
+    verbose: int,
+) -> None:
     """Dos Ojos - Sentinel-2 crop-stress triage for Rio Grande Valley fields."""
     setup_logging(verbose)
-    settings = Settings.from_root(default_root(), db_path=db_path, offline=offline or None)
+    root = workspace.resolve() if workspace else default_root()
+    settings = Settings.from_root(root, db_path=db_path, offline=offline or None)
     settings.ensure_dirs()
     if settings.offline:
         stac.install_offline_guard()
@@ -283,6 +294,9 @@ def _format_summaries(summaries: list[pipeline.FetchSummary]) -> str:
               help="Comma-separated field ids  [default: all registered fields]")
 @click.option("--history-years", type=int, default=4, show_default=True,
               help="Full calendar years of history behind the baseline.")
+@click.option("--history", "history_span", default=None, metavar="START-END",
+              help="Explicit history years, e.g. 2019-2022, for a past season whose "
+                   "preceding years predate Sentinel-2. Overrides --history-years.")
 @click.option("--doy-window", type=int, default=12, show_default=True,
               help="Days either side of a date pooled into its bin.")
 @click.option("--smooth-window", type=int, default=15, show_default=True,
@@ -294,17 +308,32 @@ def baseline_cmd(
     season: int | None,
     field_csv: str | None,
     history_years: int,
+    history_span: str | None,
     doy_window: int,
     smooth_window: int,
 ) -> None:
     """Build and cache each field's day-of-year climatology from its own history."""
     season = season or date.today().year
-    params = baseline_mod.BaselineParams(
-        season=season,
-        history_years=history_years,
-        doy_window=doy_window,
-        smooth_window=smooth_window,
-    )
+    start = end = None
+    if history_span:
+        try:
+            start, end = (int(part) for part in history_span.split("-"))
+        except ValueError as exc:
+            raise click.ClickException(
+                f"--history {history_span!r} is not START-END, e.g. 2019-2022"
+            ) from exc
+        history_years = end - start + 1
+    try:
+        params = baseline_mod.BaselineParams(
+            season=season,
+            history_years=history_years,
+            doy_window=doy_window,
+            smooth_window=smooth_window,
+            history_start=start,
+            history_end=end,
+        )
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
     indices = (
         list(INDEX_NAMES) if index_choice.lower() == "all" else [index_choice.upper()]
     )
@@ -470,12 +499,16 @@ if __name__ == "__main__":  # pragma: no cover
               default=None, help="Where to write the ranked JSON  [default: out/flags.json]")
 @click.option("--fields", "field_csv", default=None,
               help="Comma-separated field ids  [default: all registered fields]")
+@click.option("--as-of", "as_of", type=click.DateTime(formats=["%Y-%m-%d"]), default=None,
+              help="Judge the season as it stood on this date, e.g. a drone flight's.")
 @click.pass_obj
 def score_cmd(
-    settings: Settings, season: int | None, out_path: Path | None, field_csv: str | None
+    settings: Settings, season: int | None, out_path: Path | None, field_csv: str | None,
+    as_of: datetime | None,
 ) -> None:
     """Rank fields by how far this season has drifted below their own normal."""
-    season = season or date.today().year
+    season = season or (as_of.year if as_of else date.today().year)
+    cutoff = as_of.date() if as_of else None
     out_path = out_path or (settings.out_dir / "flags.json")
     ids = [p.strip() for p in field_csv.split(",") if p.strip()] if field_csv else None
 
@@ -501,9 +534,9 @@ def score_cmd(
                     year_range=(int(info.get("year_min", season - 4)),
                                 int(info.get("year_max", season - 1))),
                 )
-                season_obs = cache.get_observations(
+                season_obs = _until(cache.get_observations(
                     conn, field.field_id, index_name, year_range=(season, season)
-                )
+                ), cutoff)
                 per_index[index_name] = baseline_mod.score_observations(
                     season_obs, base, history
                 )
@@ -522,17 +555,25 @@ def score_cmd(
 
     ranked = baseline_mod.rank_fields(scores)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(
-        json.dumps({"season": season, "generated": _utc_now(), "fields": ranked}, indent=2),
-        encoding="utf-8",
-    )
+    payload = {"season": season, "generated": _utc_now(), "fields": ranked}
+    if cutoff:
+        payload["as_of"] = cutoff.isoformat()
+    out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
-    click.echo(f"Season {season} triage, worst first")
+    click.echo(f"Season {season} triage, worst first"
+               + (f", as it stood on {cutoff}" if cutoff else ""))
     click.echo()
     click.echo(_format_scores(ranked))
     click.echo()
     flagged = sum(1 for r in ranked if r["flagged"])
     click.echo(f"{flagged}/{len(ranked)} field(s) flagged. Written to {out_path}")
+
+
+def _until(observations, cutoff: date | None):
+    """Drop observations after ``cutoff``, so a past date is judged on what was known then."""
+    if cutoff is None or observations.empty:
+        return observations
+    return observations[observations["date"] <= cutoff].reset_index(drop=True)
 
 
 def _utc_now() -> str:
@@ -576,6 +617,10 @@ def _format_scores(ranked: list[dict]) -> str:
               help="Season to overlay  [default: the current year]")
 @click.option("--out", "out_dir", type=click.Path(file_okay=False, path_type=Path),
               default=None, help="Directory for the PNGs  [default: out/]")
+@click.option("--as-of", "as_of", type=click.DateTime(formats=["%Y-%m-%d"]), default=None,
+              help="Judge the season as it stood on this date; later points are faded.")
+@click.option("--banner", default=None,
+              help="Text for a band above the title, e.g. to mark public demo data.")
 @click.pass_obj
 def chart_cmd(
     settings: Settings,
@@ -583,9 +628,12 @@ def chart_cmd(
     index_choice: str,
     season: int | None,
     out_dir: Path | None,
+    as_of: datetime | None,
+    banner: str | None,
 ) -> None:
     """Draw each field's season against its own baseline as a PNG."""
-    season = season or date.today().year
+    season = season or (as_of.year if as_of else date.today().year)
+    cutoff = as_of.date() if as_of else None
     out_dir = out_dir or settings.out_dir
     indices = (
         list(INDEX_NAMES) if index_choice.lower() == "all" else [index_choice.upper()]
@@ -616,13 +664,15 @@ def chart_cmd(
                 hist_obs = cache.get_observations(
                     conn, field.field_id, index_name, year_range=history
                 )
-                scored = baseline_mod.score_observations(season_obs, baseline, hist_obs)
+                scored = baseline_mod.score_observations(
+                    _until(season_obs, cutoff), baseline, hist_obs
+                )
                 flagged = {s.obs_date for s in scored if s.below_p10}
 
                 ndmi = baseline_mod.score_observations(
-                    cache.get_observations(
+                    _until(cache.get_observations(
                         conn, field.field_id, "NDMI", year_range=(season, season)
-                    ),
+                    ), cutoff),
                     cache.get_baseline(conn, field.field_id, "NDMI"),
                     cache.get_observations(
                         conn, field.field_id, "NDMI", year_range=history
@@ -641,6 +691,7 @@ def chart_cmd(
                         flagged_dates=flagged,
                         verdict=_verdict(summary),
                         run_start=scored[-run].obs_date if run else None,
+                        cutoff=cutoff, banner=banner,
                     )
                 )
 
