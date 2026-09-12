@@ -56,6 +56,54 @@ def make_terrain(shape: tuple[int, int], res_m: float, rng) -> np.ndarray:
     return terrain + rng.normal(0, 0.01, shape)
 
 
+def make_water_terrain(shape: tuple[int, int], res_m: float, rng
+                       ) -> tuple[np.ndarray, np.ndarray]:
+    """Ground for the water pattern, and the high spot on it.
+
+    Falls 0.15% from north to south along the rows, as a furrow field graded
+    for water to run that way, with one 9 cm high spot it was never leveled out
+    of. Grid y grows southward (row 0 is the north edge).
+    """
+    rows, cols = shape
+    y, x = np.mgrid[0:rows, 0:cols] * res_m
+    extent = rows * res_m
+    bump = 0.09 * np.exp(-((x - 0.35 * extent) ** 2 + (y - 0.45 * extent) ** 2)
+                         / (2 * 5.0 ** 2))
+    swell = 0.012 * np.sin(2 * math.pi * x / 23.0) * np.cos(2 * math.pi * y / 31.0)
+    terrain = 12.0 - 0.0015 * y + 0.0004 * x + bump + swell
+    return terrain + rng.normal(0, 0.004, shape), bump
+
+
+def water_stress(canopy: np.ndarray, res_m: float, rng, bump: np.ndarray, *,
+                 spacing_m: float, bearing_deg: float) -> list[dict]:
+    """Stunt the crop where the water does not reach: the row tails and the high spot.
+
+    Modifies ``canopy`` in place and returns the ground truth for both.
+    """
+    rows, cols = canopy.shape
+    y, x = np.mgrid[0:rows, 0:cols] * res_m
+    extent = rows * res_m
+    theta = math.radians(bearing_deg)
+    row_index = ((x * math.cos(theta) + y * math.sin(theta)) / spacing_m).astype(int)
+    truth: list[dict] = []
+    tail = y > 2 * extent / 3
+    for target in np.unique(row_index[tail]):
+        if rng.random() > 0.55:
+            continue
+        start = rng.uniform(2 * extent / 3, extent - 3.0)
+        length = rng.uniform(3.0, 9.0)
+        patch = (row_index == target) & (y >= start) & (y < start + length) & (canopy > 0)
+        if patch.any():
+            canopy[patch] *= 0.45
+            truth.append({"kind": "water_tail", "row": int(target),
+                          "along_start_m": float(start), "length_m": float(length),
+                          "n_pixels": int(patch.sum())})
+    high = (bump > 0.04) & (canopy > 0)
+    canopy[high] *= 0.5
+    truth.append({"kind": "water_high_spot", "peak_cm": 9.0, "n_pixels": int(high.sum())})
+    return truth
+
+
 def row_canopy(
     shape: tuple[int, int],
     res_m: float,
@@ -241,6 +289,10 @@ def main() -> None:
     parser.add_argument("--stress-fraction", type=float, default=0.12)
     parser.add_argument("--holes", type=int, default=14)
     parser.add_argument("--seed", type=int, default=11)
+    parser.add_argument("--water-pattern", action="store_true",
+                        help="rows only: grade the ground north to south with one high "
+                             "spot, and stunt the crop at the row tails and on the spot, "
+                             "as when irrigation water does not reach")
     parser.add_argument("--fields-geojson", type=Path,
                         default=Path(__file__).resolve().parents[2]
                         / "dosojos_sat" / "fields.geojson")
@@ -259,7 +311,12 @@ def main() -> None:
     east, north = field_origin(args.fields_geojson, args.field)
     dem_transform = from_origin(east, north + args.extent, dem_res, dem_res)
 
-    terrain = make_terrain(shape, dem_res, rng)
+    if args.water_pattern and args.pattern != "rows":
+        raise SystemExit("--water-pattern needs --pattern rows")
+    if args.water_pattern:
+        terrain, bump = make_water_terrain(shape, dem_res, rng)
+    else:
+        terrain, bump = make_terrain(shape, dem_res, rng), None
     if args.pattern == "rows":
         canopy, truth = row_canopy(
             shape, dem_res, rng,
@@ -267,6 +324,9 @@ def main() -> None:
             height_m=args.canopy_height, gap_fraction=args.gap_fraction,
             stress_fraction=args.stress_fraction,
         )
+        if bump is not None:
+            truth += water_stress(canopy, dem_res, rng, bump, spacing_m=args.row_spacing,
+                                  bearing_deg=args.row_bearing)
     else:
         canopy, truth = tree_canopy(
             shape, dem_res, rng,
@@ -313,6 +373,7 @@ def main() -> None:
         "dem_resolution_m": dem_res, "canopy_height_m": args.canopy_height,
         "row_spacing_m": args.row_spacing, "row_bearing_deg": args.row_bearing,
         "tree_spacing_m": args.tree_spacing,
+        "water_pattern": bool(args.water_pattern),
         "mean_canopy_height_m": float(np.nanmean(canopy)),
         "max_canopy_height_m": float(np.nanmax(canopy)),
         "anomalies": truth,

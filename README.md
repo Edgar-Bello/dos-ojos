@@ -459,11 +459,76 @@ dosojos-drone detect  f1 --method rows        # or watershed for an orchard
 dosojos-drone metrics f1 --method rows
 dosojos-drone flag    f1 --method rows
 dosojos-drone report  f1 --method rows
-dosojos-drone join                            # merge with the satellite ranking
+dosojos-drone terrain f1                      # is the ground level; does the stress follow it?
+dosojos-drone join                            # merge with the satellite ranking and water
 ```
 
 Every step reads the previous step's output from disk, so any step can be re-run
 without redoing ODM.
+
+## Ground and water (`terrain`)
+
+Most Valley fields are watered down furrows. The water runs downhill along the
+rows from a head ditch and soaks in as it goes. It fails in two ways. On uneven
+ground, high spots stay dry and low spots pond. On rows too long or too flat for
+the stream, the tail ends never get their share. `terrain` checks both from the
+drone's ground model (the DTM) and the flags:
+
+- **Grade.** A robust plane is fitted to the ground, ignoring ditches and stray
+  points beyond 3 MAD. Its tilt is split into along the rows and across them.
+- **Evenness.** What is left over is the relief. It reports the share within
+  3 cm of the plane (laser-level tolerance), its spread, and the cut to level it.
+- **Spots.** High and low spots are patches standing 4 cm or more off the plane,
+  traced after 2 m smoothing.
+- **Links.** Each judged row piece gets its height off the plane and its position
+  from the head of the rows to the tail. Fisher's exact test then asks whether
+  flagged pieces bunch at the tail, the head, on high ground, low ground, or any
+  one spot. A link needs a 1.5x higher rate, p < 0.01 and at least 10 flagged
+  pieces, so a small spot cannot pass on chance.
+- **Advice.** Each finding gets plain-language advice, most urgent first:
+  - leveling, with soil to move in yd³/acre
+  - cutting down a high spot the water runs around
+  - shorter runs, cutback or surge valves for dry row tails, adjusted for how
+    fast the soil takes water (from the satellite's soil survey)
+  - drainage for low spots
+  - "not the water" when the stress follows neither the ground nor the row ends
+
+The ground is judged only under the crop: the rows' footprint, or the outline
+minus a 3 m headland. Borders and turn rows otherwise pass for spots.
+
+The water's direction comes from the field's `water_enters` side in
+`../dosojos_sat/fields.geojson` (N, S, E or W). Otherwise it is taken as
+downhill along the rows. A level field with no side set skips the row-end test
+and says so. `irrigation` on the field (furrow, flood, drip, none, ...) shapes
+the advice: a rainfed field hears about drainage, not sets.
+
+Outputs in `out/<flight>/`:
+
+- `terrain.png`: the relief map with spots, flagged pieces and flow arrow, plus
+  a bar chart of where the flagged pieces sit
+- `terrain.json`: every number and the advice
+- `ground_relief.tif`: cm above or below the plane, for a leveling contractor
+- `terrain_spots.geojson`
+
+Cautions it prints:
+
+- A photogrammetry model can bow into a bowl or dome without ground control.
+  Over 5 cm of curvature is flagged; confirm with GCPs or an RTK drone before
+  leveling.
+- Ground under a standing crop is interpolated. For leveling decisions, fly the
+  field bare.
+
+`python tools/make_synthetic_field.py <id> --pattern rows --water-pattern`
+builds a field falling 0.15% north to south with one 9 cm high spot, and stunts
+the crop at the row tails and on the spot. `terrain` recovers the 0.15% grade,
+the spot (95% of its row pieces flagged against 14%), and the tail link (20% vs
+11%). On Purdue's field, where the flags are harvest sampling, it finds no link
+at all (14% at the tail vs 14% elsewhere), which is the right answer.
+
+`join` now reads the satellite's `out/water.json` too. The table gains a WATER
+column, and a **where to water first** list follows it. It gives each field's
+days left and date, inches to put back (stored and delivered), the crop stage if
+sensitive, and the top ground advice from its latest flight.
 
 ## Real data: the Purdue 2018 sorghum demo
 
@@ -645,7 +710,7 @@ unaffected by that, but reported GSD is coarser than the real camera's.
 ./.venv/Scripts/python.exe -m pytest -q
 ```
 
-215 tests, none needing Docker, a network, or real imagery.
+282 tests, none needing Docker, a network, or real imagery.
 
 ## Layout
 
@@ -661,7 +726,8 @@ src/
   crowns.py           row geometry, segmentation, watershed crowns
   metrics.py          zonal volume, height, cover, RGB indices
   flags.py            classification, planting grid, missing plants, gaps
-  report.py           flag overlay, histogram, block summary, satellite join
+  terrain.py          ground grade and evenness, spots, stress links, irrigation advice
+  report.py           flag overlay, histogram, terrain map, block summary, satellite join
   odm_runner.py       docker invocation, staging, verification, diagnosis
   video.py            MP4 + SRT -> geotagged JPEGs
   viz.py              quicklook now, overlays and histograms later
@@ -674,6 +740,7 @@ tools/                synthetic flight and video generators
 ## How the two halves join
 
 The drone side reads `../dosojos_sat/fields.geojson` by path to get field
-outlines, and shares nothing else. There is no import between the codebases. The
-join key is the `field_id` string recorded in `flights.json`, which is the same
-identifier the satellite pipeline writes into `out/flags.json`.
+outlines and water settings, and `../dosojos_sat/out/flags.json` and `water.json`
+for the join. It shares nothing else. There is no import between the codebases.
+The join key is the `field_id` string recorded in `flights.json`, which is the
+same identifier the satellite pipeline writes into its outputs.

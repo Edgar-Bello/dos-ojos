@@ -14,6 +14,14 @@
       "flown_on": "2026-09-06",
       "crop": "citrus"
     },
+    "chm-water": {
+      "field_id": "rgv-002",
+      "flown_on": "2026-09-10",
+      "crop": "grain sorghum",
+      "notes": "Water not reaching the row tails and a high spot, planted on purpose",
+      "source": "Synthetic: tools/make_synthetic_field.py --water-pattern",
+      "row_spacing_m": 0.76
+    },
     "demo-001": {
       "field_id": "rgv-002",
       "flown_on": "2026-09-05",

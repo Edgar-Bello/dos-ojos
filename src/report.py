@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+import textwrap
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -259,14 +260,15 @@ def _legend_patch(flag: str, count: int) -> Patch:
     )
 
 
-def _scale_bar(axes: plt.Axes, bounds: tuple[float, float, float, float]) -> None:
+def _scale_bar(axes: plt.Axes, bounds: tuple[float, float, float, float],
+               *, inset: float = 0.04) -> None:
     """A round-numbered scale bar in the lower left, in metres."""
     width = bounds[2] - bounds[0]
     target = width / 5
     magnitude = 10 ** math.floor(math.log10(target))
     length = min((m * magnitude for m in (1, 2, 5, 10)), key=lambda v: abs(v - target))
     x0 = bounds[0] + 0.04 * width
-    y0 = bounds[1] + 0.04 * (bounds[3] - bounds[1])
+    y0 = bounds[1] + inset * (bounds[3] - bounds[1])
     axes.plot([x0, x0 + length], [y0, y0], color="white", linewidth=6, solid_capstyle="butt")
     axes.plot([x0, x0 + length], [y0, y0], color=INK, linewidth=3, solid_capstyle="butt")
     axes.annotate(
@@ -361,6 +363,200 @@ def save_flag_histogram(
     plt.close(figure)
     log.info("wrote %s", out_path)
     return out_path
+
+
+# --------------------------------------------------------------------------- #
+# Terrain map
+# --------------------------------------------------------------------------- #
+
+#: Brown where the ground stands high (it stays dry), teal where it is low
+#: (water gathers). Diverging around the plane, never the flag colours.
+RELIEF_CMAP = "BrBG_r"
+HIGH_SPOT_COLOR = "#6b3d10"
+LOW_SPOT_COLOR = "#0b6e79"
+FIELD_SHARE_COLOR = INK_MUTED
+
+
+def save_terrain_map(
+    ground,
+    report,
+    flags: gpd.GeoDataFrame | None,
+    extent,
+    out_path: Path,
+    *,
+    title: str,
+    banner: str | None = None,
+) -> Path:
+    """The ground against a smooth plane, the flagged pieces on it, and where they bunch.
+
+    Left: relief in cm, high and low spots outlined, flagged row pieces as dots,
+    and an arrow for the way the irrigation water runs. Right: the share of row
+    pieces flagged at the head, middle and tail of the rows and on high, level
+    and low ground, against the field's own share.
+    """
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    figure, (axes, bars) = plt.subplots(
+        1, 2, figsize=(14, 9.2), dpi=150, gridspec_kw={"width_ratios": [2.3, 1], "wspace": 0.28},
+    )
+    figure.patch.set_facecolor(SURFACE)
+
+    relief = ground.relief_cm
+    finite = relief[np.isfinite(relief)]
+    limit = max(6.0, float(np.ceil(np.percentile(np.abs(finite), 98))))
+    shape_ = relief.shape
+    image = axes.imshow(np.ma.masked_invalid(relief), cmap=RELIEF_CMAP, vmin=-limit, vmax=limit,
+                        extent=_extent(ground.transform, shape_), interpolation="nearest")
+    gpd.GeoSeries([extent], crs=ground.crs).boundary.plot(ax=axes, color=INK, linewidth=0.9)
+
+    for spot in report.spots:
+        color = HIGH_SPOT_COLOR if spot.kind == "high" else LOW_SPOT_COLOR
+        gpd.GeoSeries([spot.geometry]).boundary.plot(ax=axes, color=color, linewidth=1.6,
+                                                     linestyle="--")
+        c = spot.geometry.representative_point()
+        axes.annotate(f"{spot.label} {spot.peak_cm:+.0f} cm", xy=(c.x, c.y), ha="center",
+                      va="center", fontsize=10.5, color=color, fontweight="bold",
+                      bbox={"boxstyle": "round,pad=0.2", "facecolor": "white",
+                            "edgecolor": "none", "alpha": 0.8})
+
+    n_flagged = 0
+    if flags is not None and not flags.empty:
+        problems = flags[flags["flag"].isin(("STRESSED", "DEAD", "MISSING"))]
+        n_flagged = len(problems)
+        if n_flagged:
+            points = problems.geometry.centroid
+            axes.scatter(points.x, points.y, s=5, color=INK, alpha=0.75, linewidths=0, zorder=4)
+
+    minx, miny, maxx, maxy = extent.bounds
+    if report.flow:
+        _, tail = report.flow.split(" to ")
+        vectors = {"N": (0, 1), "NE": (0.707, 0.707), "E": (1, 0), "SE": (0.707, -0.707),
+                   "S": (0, -1), "SW": (-0.707, -0.707), "W": (-1, 0), "NW": (-0.707, 0.707)}
+        fx, fy = vectors[tail]
+        cx, cy = (minx + maxx) / 2, (miny + maxy) / 2
+        reach = 0.36 * min(maxx - minx, maxy - miny) if min(maxx - minx, maxy - miny) > 0 else 1
+        axes.annotate("", xy=(cx + fx * reach, cy + fy * reach),
+                      xytext=(cx - fx * reach, cy - fy * reach),
+                      arrowprops={"arrowstyle": "-|>,head_width=0.6,head_length=1.2",
+                                  "color": "white", "linewidth": 5}, zorder=5)
+        axes.annotate("", xy=(cx + fx * reach, cy + fy * reach),
+                      xytext=(cx - fx * reach, cy - fy * reach),
+                      arrowprops={"arrowstyle": "-|>,head_width=0.5,head_length=1.0",
+                                  "color": "#1f5fa6", "linewidth": 2.6}, zorder=6)
+        irrigated = report.method not in ("none", "drip", "sprinkler", "pivot")
+        axes.annotate("water flows" if irrigated else "downhill",
+                      xy=(cx - fx * reach, cy - fy * reach), xytext=(6, 6),
+                      textcoords="offset points", fontsize=11, color="#1f5fa6",
+                      fontweight="bold", zorder=7,
+                      bbox={"boxstyle": "round,pad=0.2", "facecolor": "white",
+                            "edgecolor": "none", "alpha": 0.85})
+
+    margin = 0.03 * max(maxx - minx, maxy - miny)
+    # A deeper margin below the field holds the scale bar clear of the map.
+    bounds = (minx - margin, miny - 3.5 * margin, maxx + margin, maxy + margin)
+    axes.set_xlim(bounds[0], bounds[2])
+    axes.set_ylim(bounds[1], bounds[3])
+    axes.set_aspect("equal")
+    axes.set_xticks([])
+    axes.set_yticks([])
+    for side in axes.spines.values():
+        side.set_visible(False)
+    _scale_bar(axes, bounds, inset=0.012)
+    bar = figure.colorbar(image, ax=axes, orientation="horizontal", fraction=0.04, pad=0.03)
+    bar.set_label("ground above (+) or below (-) a smooth plane, cm", fontsize=11,
+                  color=INK_SECONDARY)
+    axes.legend(handles=[
+        Line2D([], [], marker="o", color="none", markerfacecolor=INK, markersize=5,
+               label=f"flagged row pieces ({n_flagged})"),
+        Line2D([], [], color=HIGH_SPOT_COLOR, linestyle="--", label="high spot"),
+        Line2D([], [], color=LOW_SPOT_COLOR, linestyle="--", label="low spot"),
+    ], loc="upper left", bbox_to_anchor=(0.0, -0.13), ncol=3, frameon=False, fontsize=11,
+        labelcolor=INK_SECONDARY)
+
+    _terrain_bars(bars, report)
+
+    if report.along_pct is not None and report.row_bearing_deg is not None:
+        along = f"falls {report.along_pct:.2f}% along the rows" + (
+            f", {report.flow}" if report.flow else "")
+    elif report.along_pct is not None and report.flow:
+        along = f"falls {report.along_pct:.2f}% from {report.flow}"
+    else:
+        along = f"slope {report.slope_pct:.2f}% toward the {report.downhill}"
+    # The header spans both panels, so it sits on the figure rather than on either axes.
+    figure.subplots_adjust(top=0.80)
+    lines = [(title, 19, INK, 0.935),
+             (f"Ground {along}  -  {report.within_tolerance:.0%} within 3 cm of a smooth "
+              f"plane  -  from {report.ground_source}", 12, INK_SECONDARY, 0.9)]
+    top = report.advice[0] if report.advice else None
+    if top is not None:
+        wrapped = textwrap.fill(f"{top.finding} {top.advice}", 125, max_lines=2,
+                                placeholder=" ...")
+        lines.append((wrapped, 11.5, "#b3261e" if top.priority == 1 else INK_SECONDARY, 0.872))
+    for text, size, color, y in lines:
+        figure.text(0.125, y, text, fontsize=size, color=color, va="top", ha="left")
+    if banner:
+        figure.text(0.125, 0.99, banner, fontsize=12, color="white", fontweight="bold",
+                    va="top", ha="left",
+                    bbox={"boxstyle": "square,pad=0.45", "facecolor": BANNER, "edgecolor": "none"})
+
+    figure.savefig(out_path, bbox_inches="tight", facecolor=SURFACE)
+    plt.close(figure)
+    log.info("wrote %s", out_path)
+    return out_path
+
+
+def _terrain_bars(axes: plt.Axes, report) -> None:
+    """Share of row pieces flagged in each part of the field, against the whole."""
+    order = [("head", "head of rows"), ("middle", "middle"), ("tail", "tail of rows"),
+             (None, ""), ("high ground", "high ground"), ("level ground", "level ground"),
+             ("low ground", "low ground")]
+    labels, values, colors = [], [], []
+    for key, label in order:
+        entry = report.shares.get(key) if key else None
+        if key is None:
+            if labels:
+                labels.append("")
+                values.append(0.0)
+                colors.append("none")
+            continue
+        if entry is None or entry["share"] is None:
+            continue
+        labels.append(f"{entry.get('label', label)}\n({entry['n']})")
+        values.append(entry["share"] * 100)
+        colors.append({"high ground": HIGH_SPOT_COLOR, "low ground": LOW_SPOT_COLOR}.get(
+            key, "#4c8a3c"))
+    if not labels or all(c == "none" for c in colors):
+        axes.axis("off")
+        axes.text(0.5, 0.5, "no flags to compare\nwith the ground", ha="center",
+                  va="center", fontsize=13, color=INK_MUTED, transform=axes.transAxes)
+        return
+    while labels and labels[-1] == "":
+        labels.pop(), values.pop(), colors.pop()
+    positions = np.arange(len(labels))[::-1]
+    axes.barh(positions, values, color=colors, height=0.66)
+    for y, value, color in zip(positions, values, colors):
+        if color != "none":
+            axes.annotate(f"{value:.0f}%", xy=(value, y), xytext=(4, 0),
+                          textcoords="offset points", va="center", fontsize=11, color=INK)
+    if report.field_problem_share is not None:
+        axes.axvline(report.field_problem_share * 100, color=FIELD_SHARE_COLOR,
+                     linestyle="--", linewidth=1.4)
+        axes.annotate(f"whole field {report.field_problem_share:.0%}",
+                      xy=(report.field_problem_share * 100, positions.max() + 0.6),
+                      xytext=(4, 0), textcoords="offset points", fontsize=10.5,
+                      color=FIELD_SHARE_COLOR, va="bottom")
+    axes.set_yticks(positions)
+    axes.set_yticklabels(labels, fontsize=11, color=INK_SECONDARY)
+    axes.set_xlabel("row pieces flagged, %", fontsize=11, color=INK_SECONDARY)
+    axes.set_xlim(0, max(max(values) * 1.3, 10))
+    axes.set_ylim(-0.6, positions.max() + 1.4)
+    axes.set_title("Where the flagged pieces sit", fontsize=14, color=INK, loc="left", pad=12)
+    for side in ("top", "right"):
+        axes.spines[side].set_visible(False)
+    for side in ("left", "bottom"):
+        axes.spines[side].set_color(GRID)
+    axes.tick_params(axis="x", labelsize=10.5, colors=INK_SECONDARY)
+    axes.tick_params(axis="y", length=0)
 
 
 # --------------------------------------------------------------------------- #
@@ -469,14 +665,21 @@ def agreement(satellite: dict | None, drone: dict | None, *, concern: float) -> 
 
 
 def join_with_satellite(
-    satellite: dict, drone_summaries: list[dict], *, concern: float = DRONE_CONCERN_SHARE
+    satellite: dict, drone_summaries: list[dict], *, concern: float = DRONE_CONCERN_SHARE,
+    water: dict | None = None, terrain: dict | None = None,
 ) -> dict:
     """Merge drone block summaries into the satellite's ranked list on field_id.
 
     The satellite's ranking and fields are kept exactly; each field gains a
     ``drone`` object and an ``agreement`` verdict. Where one field has several
     flights, the most recent is used and the rest are counted.
+
+    ``water`` is the satellite's water checkbook by field id, and ``terrain`` the
+    latest flight's terrain report by field id; either adds a ``water`` or an
+    ``irrigation`` object to each field it covers.
     """
+    water = water or {}
+    terrain = terrain or {}
     latest: dict[str, dict] = {}
     extra: dict[str, int] = {}
     for summary in drone_summaries:
@@ -507,13 +710,45 @@ def join_with_satellite(
                 "agreement": agreement(None, drone, concern=concern),
             })
 
+    for merged in fields:
+        merged["water"] = _water_view(water.get(merged["field_id"]))
+        merged["irrigation"] = _terrain_view(terrain.get(merged["field_id"]))
+
+    as_of = next((w.get("as_of") for w in water.values() if w.get("as_of")), None)
     return {
         "season": satellite.get("season"),
         "satellite_generated": satellite.get("generated"),
         "generated": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "drone_concern_share": concern,
+        "water_as_of": as_of,
         "fields": fields,
     }
+
+
+def _water_view(entry: dict | None) -> dict | None:
+    """The checkbook fields worth carrying into the joined record."""
+    if not entry:
+        return None
+    keep = ("rank", "status", "days_left", "days_range", "water_by", "water_left_in",
+            "until_stress_in", "refill_net_in", "refill_gross_in", "method", "confidence",
+            "sensitive", "as_of", "soil")
+    return {key: entry.get(key) for key in keep}
+
+
+def _terrain_view(report: dict | None) -> dict | None:
+    """The terrain findings worth carrying: grade, evenness, links and top advice."""
+    if not report:
+        return None
+    keep = ("flight_id", "flow", "along_pct", "cross_pct", "sd_cm", "within_tolerance",
+            "cut_yd3_per_acre", "ground_source")
+    view = {key: report.get(key) for key in keep}
+    view["linked"] = ([l["place"] for l in report.get("links", []) if l.get("linked")]
+                      + [s["label"] for s in report.get("spots", []) if s.get("linked")])
+    view["advice"] = [
+        {k: a[k] for k in ("topic", "finding", "advice", "priority")}
+        for a in report.get("advice", []) if a.get("priority", 3) <= 2
+    ][:4]
+    return view
 
 
 def _drone_view(summary: dict | None, n_other_flights: int) -> dict | None:

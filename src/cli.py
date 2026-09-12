@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import sys
+import textwrap
 from datetime import datetime
 from pathlib import Path
 from typing import Sequence
@@ -18,6 +19,7 @@ from . import flags as flags_mod
 from . import report as report_mod
 from . import metrics as metrics_mod
 from . import odm_runner, video, viz
+from . import terrain as terrain_mod
 from .config import (
     Flight,
     ManifestError,
@@ -33,9 +35,16 @@ log = logging.getLogger(__name__)
 
 
 def _public_banner(flight: Flight | None) -> str | None:
-    """The band printed on every figure of a flight that is not ours."""
+    """The band printed on every figure of a flight that is not ours.
+
+    Borrowed public data and our own synthetic test fields are both marked, and
+    worded differently so neither is taken for the other.
+    """
     if flight is None or not flight.source:
         return None
+    if flight.source.lower().startswith("synthetic"):
+        detail = flight.source[len("synthetic"):].lstrip(" :,-")
+        return "SYNTHETIC TEST DATA, NOT A REAL FIELD" + (f"  -  {detail}" if detail else "")
     return f"FREE PUBLIC DATA, NOT OUR FLIGHT  -  {flight.source}"
 
 
@@ -1205,6 +1214,169 @@ def _format_block_summary(summary: dict) -> str:
     return "\n".join(f"  {label:<{width}}  {value}" for label, value in rows)
 
 
+# --------------------------------------------------------------------------- #
+# Terrain and irrigation advice
+# --------------------------------------------------------------------------- #
+
+_SIDE_WORDS = {"n": "N", "north": "N", "s": "S", "south": "S",
+               "e": "E", "east": "E", "w": "W", "west": "W"}
+
+
+def _field_settings(settings: Settings, field_id: str | None) -> dict:
+    """A field's outline and water settings from the satellite project's fields file.
+
+    Read as plain GeoJSON: the two halves share this file and a field id, and
+    nothing else.
+    """
+    if not field_id or not settings.fields_geojson.exists():
+        return {}
+    from shapely.geometry import shape
+
+    payload = json.loads(settings.fields_geojson.read_text(encoding="utf-8"))
+    for feature in payload.get("features", []):
+        props = feature.get("properties") or {}
+        if str(props.get("id")) == field_id:
+            side = _SIDE_WORDS.get(str(props.get("water_enters") or "").strip().lower())
+            method = str(props.get("irrigation") or "").strip().lower() or None
+            return {"geometry": shape(feature["geometry"]), "irrigation": method,
+                    "water_enters": side}
+    return {}
+
+
+def _satellite_water(settings: Settings) -> dict:
+    """The satellite's water checkbook by field id, or empty if it has not run."""
+    if not settings.satellite_water.exists():
+        return {}
+    payload = json.loads(settings.satellite_water.read_text(encoding="utf-8"))
+    return {entry["field_id"]: entry for entry in payload.get("fields", [])}
+
+
+@cli.command("terrain")
+@click.argument("flight_id")
+@click.option("--method", type=click.Choice(list(crowns.METHODS)), default="rows",
+              show_default=True, help="Whose flags to compare with the ground.")
+@click.option("--water-enters", type=click.Choice(["N", "S", "E", "W"], case_sensitive=False),
+              default=None,
+              help="Side the irrigation water comes in from  [default: the field's "
+                   "water_enters, else downhill along the rows]")
+@click.option("--cell", type=float, default=terrain_mod.GROUND_CELL_M, show_default=True,
+              help="Analysis grid, metres.")
+@click.pass_obj
+def terrain_cmd(settings: Settings, flight_id: str, method: str, water_enters: str | None,
+                cell: float) -> None:
+    """Check whether the ground is level and whether the stress follows it; advise how to irrigate."""
+    import geopandas as gpd
+    import rasterio
+    from shapely.geometry import box
+
+    project = settings.flight_odm(flight_id)
+    dtm_path = project / "odm_dem" / "dtm.tif"
+    if not dtm_path.exists():
+        raise click.ClickException(
+            f"no ground model at {dtm_path}. Run 'dosojos-drone odm {flight_id}' or "
+            "'dosojos-drone import' first."
+        )
+    out_dir = settings.flight_out(flight_id)
+    settings.ensure_dirs(flight_id)
+    flight = None
+    try:
+        flight = get_flight(settings.manifest_path, flight_id)
+    except ManifestError:
+        pass
+    field_id = flight.field_id if flight else None
+    field = _field_settings(settings, field_id)
+
+    with rasterio.open(dtm_path) as dataset:
+        crs, footprint = dataset.crs, box(*dataset.bounds)
+    extent = footprint
+    if field.get("geometry") is not None:
+        outline = gpd.GeoSeries([field["geometry"]], crs=4326).to_crs(crs).iloc[0]
+        clipped = outline.intersection(footprint)
+        if clipped.is_empty:
+            click.secho(f"WARNING: the flight does not overlap field {field_id}; judging the "
+                        "whole flight footprint.", fg="yellow")
+        else:
+            extent = clipped
+
+    flags_path = out_dir / f"flags_{method}.geojson"
+    units_path = out_dir / f"units_{method}.geojson"
+    flags = gpd.read_file(flags_path).to_crs(crs) if flags_path.exists() else None
+    units = flags if flags is not None else (
+        gpd.read_file(units_path).to_crs(crs) if units_path.exists() else None)
+    extent, judged_over = terrain_mod.cropped_area(extent, units)
+    try:
+        ground = terrain_mod.load_ground(dtm_path, extent, cell_m=cell)
+    except terrain_mod.TerrainError as exc:
+        raise click.ClickException(str(exc)) from exc
+    canopy = None
+    chm_path = out_dir / "chm.tif"
+    if chm_path.exists():
+        canopy = float(np.nanmedian(chm_mod.load_surface(chm_path).data))
+    soil = (_satellite_water(settings).get(field_id or "") or {}).get("soil") or {}
+
+    report = terrain_mod.analyse(
+        ground, flight_id=flight_id, field_id=field_id, extent=extent, flags=flags,
+        method=field.get("irrigation"),
+        water_enters=(water_enters.upper() if water_enters else field.get("water_enters")),
+        ground_source=terrain_mod.ground_source(project), canopy_median_m=canopy,
+        intake=soil.get("intake"),
+    )
+    report.notes.insert(0, f"ground judged over {judged_over}")
+    json_path = out_dir / "terrain.json"
+    json_path.write_text(json.dumps(report.to_dict(), indent=2), encoding="utf-8")
+    relief_path = terrain_mod.write_relief(ground, out_dir / "ground_relief.tif")
+    spots_path = terrain_mod.write_spots(report, crs, out_dir / "terrain_spots.geojson")
+    map_path = report_mod.save_terrain_map(
+        ground, report, flags, extent, out_dir / "terrain.png",
+        title=f"{field_id or flight_id} - ground and water",
+        banner=_public_banner(flight),
+    )
+
+    click.echo(_format_terrain(report))
+    click.echo("\nWhat to do")
+    for number, item in enumerate(report.advice, start=1):
+        mark = {1: "ACT", 2: "NOTE", 3: "OK"}[item.priority]
+        click.echo(f"  {number}. [{mark}] {item.finding}")
+        click.echo(f"     {item.advice}")
+    for note in report.notes:
+        click.secho(f"  NOTE: {note}", fg="yellow")
+    click.echo("")
+    for path in (map_path, json_path, relief_path, spots_path):
+        if path is not None:
+            click.echo(f"  {path}")
+
+
+def _format_terrain(report) -> str:
+    """The ground in numbers: grade, evenness, and where the flagged pieces bunch."""
+    rows = [
+        ("ground from", f"{report.ground_source}, {report.cell_m:g} m grid, "
+                        f"{report.area_m2 / 4046.86:.1f} acres"),
+        ("irrigation", report.method or "not set on the field"),
+        ("overall slope", f"{report.slope_pct:.2f}% toward the {report.downhill}"),
+    ]
+    if report.along_pct is not None:
+        label = "along the rows" if report.row_bearing_deg is not None else "along the flow"
+        rows.append((label, f"{report.along_pct:.2f}%"
+                     + (f", water runs {report.flow} ({report.flow_source})"
+                        if report.flow else ", water's direction unknown")))
+    if report.cross_pct is not None:
+        rows.append(("across the rows", f"{report.cross_pct:.2f}%, low side "
+                                        f"{report.cross_low_side}"))
+    rows += [
+        ("evenness", f"{report.within_tolerance:.0%} within 3 cm of a smooth plane, "
+                     f"spread {report.sd_cm:.1f} cm"),
+        ("to level", f"{report.cut_m3:,.0f} m3 of cut ({report.cut_yd3_per_acre:,.0f} yd3/acre)"),
+        ("spots", ", ".join(f"{s.label} {s.peak_cm:+.0f} cm {s.area_m2:,.0f} m2"
+                            for s in report.spots) or "none over 4 cm"),
+    ]
+    for item in report.links:
+        rows.append((item.place, f"{item.share_in:.0%} flagged vs {item.share_out:.0%} "
+                                 f"elsewhere (n={item.n_in}, p={item.p_value:.3g})"
+                                 + ("  <- linked" if item.linked else "")))
+    width = max(len(label) for label, _ in rows)
+    return "\n".join(f"  {label:<{width}}  {value}" for label, value in rows)
+
+
 AGREEMENT_TEXT = {
     "confirmed": "CONFIRMED - both eyes see it",
     "not_confirmed": "not confirmed - check for harvest",
@@ -1247,13 +1419,63 @@ def join_cmd(
             "flight first. Writing the satellite ranking on its own.", fg="yellow",
         )
 
-    joined = report_mod.join_with_satellite(satellite, summaries, concern=concern)
+    terrain: dict[str, dict] = {}
+    for path in sorted(settings.out_dir.glob("*/terrain.json")):
+        report = json.loads(path.read_text(encoding="utf-8"))
+        flight = next((s for s in summaries if s.get("flight_id") == report.get("flight_id")), {})
+        field_id = report.get("field_id")
+        current = terrain.get(field_id or "")
+        if field_id and (current is None or (flight.get("flown_on") or "")
+                         >= (current.get("_flown_on") or "")):
+            terrain[field_id] = {**report, "_flown_on": flight.get("flown_on") or ""}
+
+    water = _satellite_water(settings)
+    joined = report_mod.join_with_satellite(satellite, summaries, concern=concern,
+                                            water=water, terrain=terrain)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(joined, indent=2), encoding="utf-8")
 
     click.echo(_format_join(joined))
+    if water:
+        click.echo("")
+        click.echo(_format_water_plan(joined))
     click.echo("")
     click.echo(f"  {out_path}")
+
+
+def _format_water_plan(joined: dict) -> str:
+    """Fields in the order they need water: when, how much, and how, where the drone knows."""
+    entries = [f for f in joined["fields"] if f.get("water")]
+    entries.sort(key=lambda f: f["water"].get("rank") or 999)
+    lines = [f"Where to water first (checkbook as of {joined.get('water_as_of')})"]
+    for entry in entries:
+        w = entry["water"]
+        name = str(entry.get("name") or "")[:24]
+        if w["status"] == "harvested":
+            when = "harvested, nothing needed"
+        elif w["days_left"] == 0:
+            when = "WATER NOW"
+        elif w["days_left"] is None:
+            when = "ok for over six weeks"
+        else:
+            low, high = w["days_range"] or (w["days_left"], w["days_left"])
+            when = f"in about {w['days_left']} days ({low}-{high}), by {w['water_by']}"
+        amount = ""
+        if w.get("refill_net_in") and w["status"] != "harvested":
+            amount = f"; about {w['refill_net_in']:.1f} in into the root zone"
+            if w.get("refill_gross_in"):
+                amount += f", {w['refill_gross_in']:.1f} in delivered by {w['method']}"
+        lines.append(f"  {w.get('rank')}. {entry['field_id']}  {name}: {when}{amount}"
+                     f"  [confidence {w.get('confidence')}]")
+        if w.get("sensitive"):
+            lines.append(f"     stage: {w['sensitive']}")
+        irrigation = entry.get("irrigation")
+        if irrigation:
+            for item in irrigation["advice"][:3]:
+                lines.append(textwrap.fill(
+                    f"ground: {item['finding']} {item['advice']}", 110,
+                    initial_indent="     ", subsequent_indent="       "))
+    return "\n".join(lines)
 
 
 def _format_join(joined: dict) -> str:
@@ -1264,6 +1486,7 @@ def _format_join(joined: dict) -> str:
         satellite = "-"
         if "score" in entry:
             satellite = f"{entry['score']:.0f}" + (" FLAG" if entry.get("flagged") else "")
+        water = entry.get("water")
         rows.append((
             entry["field_id"],
             str(entry.get("name", "-"))[:22],
@@ -1271,9 +1494,23 @@ def _format_join(joined: dict) -> str:
             "-" if drone is None else (
                 f"{drone['share_problem']:.0%} of {drone.get('n_judged') or drone['n_trees']}"
             ),
+            _water_cell(water),
             AGREEMENT_TEXT.get(entry["agreement"], entry["agreement"]),
         ))
-    return _table(("FIELD", "NAME", "SATELLITE", "DRONE", "VERDICT"), rows, "<<><<")
+    return _table(("FIELD", "NAME", "SATELLITE", "DRONE", "WATER", "VERDICT"), rows, "<<>><<")
+
+
+def _water_cell(water: dict | None) -> str:
+    """The water column: now, days left, or harvested."""
+    if not water:
+        return "-"
+    if water["status"] == "harvested":
+        return "harvested"
+    if water["days_left"] == 0:
+        return "NOW"
+    if water["days_left"] is None:
+        return "ok 6+ wk"
+    return f"{water['days_left']} days"
 
 
 if __name__ == "__main__":  # pragma: no cover  (last, once every command is registered)
