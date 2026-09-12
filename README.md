@@ -18,6 +18,12 @@ python -m venv .venv
 ./.venv/Scripts/python.exe -m pip install -e . --no-deps
 ```
 
+On Windows 11, Smart App Control may refuse `dosojos-sat` with "An Application
+Control policy has blocked this file": it blocks the unsigned launcher pip
+builds. Every command works the same through Python, which it allows:
+`./.venv/Scripts/python.exe -m dosojos_sat <command>`, or `python -m dosojos_sat`
+with the venv active.
+
 Then the four-command demo:
 
 ```bash

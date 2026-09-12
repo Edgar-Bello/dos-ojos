@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 from datetime import date
 from pathlib import Path
 
 import pandas as pd
+import pytest
 from click.testing import CliRunner
 
 from dosojos_sat.cli import _until, cli
@@ -44,3 +48,28 @@ def test_observations_after_the_judged_date_are_dropped() -> None:
     kept = _until(frame, date(2018, 7, 10))
     assert list(kept["date"]) == [date(2018, 7, 1), date(2018, 7, 10)]
     assert _until(frame, None) is frame
+
+
+@pytest.mark.parametrize("module", ["dosojos_sat", "dosojos_sat.cli"])
+def test_python_dash_m_reaches_every_command(module: str) -> None:
+    """The way in when Windows blocks the .exe launcher must expose the whole CLI."""
+    result = subprocess.run(
+        [sys.executable, "-m", module, "--help"], capture_output=True, check=False,
+        encoding="utf-8", errors="replace", env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+    )
+    assert result.returncode == 0, result.stderr
+    listed = {line.split()[0] for line in result.stdout.split("Commands:")[1].splitlines()
+              if line.strip()}
+    assert set(cli.commands) <= listed
+
+
+def test_python_dash_m_ignores_a_folder_named_like_the_package(tmp_path: Path) -> None:
+    """Dos_Ojos/ and every demo hold a dosojos_sat folder, which must not hide the package."""
+    (tmp_path / "dosojos_sat" / "config").mkdir(parents=True)
+    result = subprocess.run(
+        [sys.executable, "-m", "dosojos_sat", "--help"], cwd=tmp_path, capture_output=True,
+        check=False, encoding="utf-8", errors="replace",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+    )
+    assert result.returncode == 0, result.stderr
+    assert "init-fields" in result.stdout

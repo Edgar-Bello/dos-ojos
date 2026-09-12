@@ -488,10 +488,6 @@ def _clip_cache_summary(settings: Settings) -> str:
     return f"{len(clips)} file(s), {total_mb:.1f} MB in {settings.clips_dir}"
 
 
-if __name__ == "__main__":  # pragma: no cover
-    cli()
-
-
 @cli.command("score")
 @click.option("--season", type=int, default=None,
               help="Season to judge  [default: the current year]")
@@ -711,3 +707,7 @@ def _verdict(summary: baseline_mod.FieldScore) -> str:
         )
         return f"FLAGGED  -  score {summary.score:.0f}/100  -  {kind}  ({route})"
     return f"not flagged  -  score {summary.score:.0f}/100"
+
+
+if __name__ == "__main__":  # pragma: no cover  (last, once every command is registered)
+    cli()
