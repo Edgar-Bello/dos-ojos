@@ -364,10 +364,6 @@ def _table(
     return "\n".join([render(headers), rule, *(render(row) for row in rows)])
 
 
-if __name__ == "__main__":  # pragma: no cover
-    cli()
-
-
 @cli.command("ingest-video")
 @click.argument("flight_id")
 @click.option("--video", "video_path", required=True,
@@ -1278,3 +1274,7 @@ def _format_join(joined: dict) -> str:
             AGREEMENT_TEXT.get(entry["agreement"], entry["agreement"]),
         ))
     return _table(("FIELD", "NAME", "SATELLITE", "DRONE", "VERDICT"), rows, "<<><<")
+
+
+if __name__ == "__main__":  # pragma: no cover  (last, once every command is registered)
+    cli()

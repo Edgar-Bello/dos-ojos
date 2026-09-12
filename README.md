@@ -29,6 +29,12 @@ python -m venv .venv
 ./.venv/Scripts/python.exe -m pip install -e . --no-deps
 ```
 
+On Windows 11, Smart App Control may refuse `dosojos-drone` with "An Application
+Control policy has blocked this file": it blocks the unsigned launcher pip
+builds. Every command works the same through Python, which it allows:
+`./.venv/Scripts/python.exe -m dosojos_drone <command>`, or `python -m dosojos_drone`
+with the venv active.
+
 Python 3.11 or 3.12. ffmpeg ships with the project via `imageio-ffmpeg`, so the
 video path needs no system install; a system ffmpeg on PATH is preferred if
 present.
@@ -470,7 +476,9 @@ Purdue's research farm in Indiana, flown on 10 July 2018 with an RGB camera
 
 It lives apart from our data in `../public_demo/purdue-sorghum-2018/`, with its
 own workspace for each half, and every figure carries a blue *FREE PUBLIC DATA*
-band. `SOURCE.md` there has the citation and `run_demo.sh` every command.
+band. `SOURCE.md` there has the citation and `run_demo.sh` every command; from
+PowerShell, `.\run_demo.cmd` in that folder runs it through Git Bash (PowerShell's
+own `bash` is WSL's, which cannot start the Windows tools).
 
 The trial came with a built-in answer key: on 25 June Purdue harvested rows 8
 and 9 of every plot in replications 1 to 3 for biomass, and left replication 4
