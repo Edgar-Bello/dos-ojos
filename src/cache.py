@@ -6,6 +6,7 @@ enter the database; clipped rasters go to disk and are referenced by path.
 
 from __future__ import annotations
 
+import json
 import logging
 import sqlite3
 from contextlib import contextmanager
@@ -29,7 +30,15 @@ if TYPE_CHECKING:  # type-only, so the offline path never imports odc-stac
 
 log = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 1
+#: 2 added the field water settings and the weather and soils tables.
+SCHEMA_VERSION = 2
+
+#: Columns version 2 added to ``fields``; older caches gain them in place.
+_FIELD_COLUMNS_V2 = (
+    ("irrigation", "TEXT"),
+    ("water_enters", "TEXT"),
+    ("soil_awc_in_ft", "REAL"),
+)
 
 FieldSyncStatus = Literal["inserted", "unchanged", "metadata-updated", "geometry-changed"]
 
@@ -51,7 +60,10 @@ CREATE TABLE IF NOT EXISTS fields (
     geometry_wkt   TEXT    NOT NULL,
     geom_hash      TEXT    NOT NULL,
     source_file    TEXT,
-    updated_at     TEXT    NOT NULL
+    updated_at     TEXT    NOT NULL,
+    irrigation     TEXT,                      -- furrow | flood | ... | none
+    water_enters   TEXT,                      -- N | S | E | W
+    soil_awc_in_ft REAL                       -- overrides the soil survey
 );
 
 CREATE TABLE IF NOT EXISTS scenes (
@@ -132,6 +144,24 @@ CREATE TABLE IF NOT EXISTS baseline_doy (
     run_id       INTEGER NOT NULL REFERENCES baseline_runs(run_id),
     PRIMARY KEY (field_id, index_name, doy)
 );
+
+CREATE TABLE IF NOT EXISTS weather (
+    field_id   TEXT NOT NULL REFERENCES fields(field_id) ON DELETE CASCADE,
+    date       TEXT NOT NULL,
+    source     TEXT NOT NULL,                 -- gridmet | station:<file name>
+    eto_mm     REAL,                          -- short-grass reference evapotranspiration
+    rain_mm    REAL,
+    fetched_at TEXT NOT NULL,
+    PRIMARY KEY (field_id, date, source)
+);
+
+CREATE TABLE IF NOT EXISTS soils (
+    field_id     TEXT PRIMARY KEY REFERENCES fields(field_id) ON DELETE CASCADE,
+    geom_hash    TEXT NOT NULL,               -- the outline the survey was read for
+    source       TEXT NOT NULL,               -- ssurgo | manual
+    profile_json TEXT NOT NULL,
+    fetched_at   TEXT NOT NULL
+);
 """
 
 
@@ -179,6 +209,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
     if _schema_is_current(conn):
         return
     conn.executescript(_SCHEMA)
+    _add_missing_columns(conn, "fields", _FIELD_COLUMNS_V2)
     conn.execute(
         "INSERT INTO meta(key, value) VALUES('schema_version', ?) "
         "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -200,6 +231,21 @@ def _schema_is_current(conn: sqlite3.Connection) -> bool:
     except sqlite3.OperationalError:
         return False  # the meta table does not exist yet
     return row is not None and row["value"] == str(SCHEMA_VERSION)
+
+
+def _add_missing_columns(
+    conn: sqlite3.Connection, table: str, columns: Sequence[tuple[str, str]]
+) -> None:
+    """Add columns a newer schema defines, so an older cache upgrades in place.
+
+    ``CREATE TABLE IF NOT EXISTS`` leaves an existing table alone, which would
+    leave a version 1 cache without the columns version 2 reads.
+    """
+    present = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+    for name, kind in columns:
+        if name not in present:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {kind}")
+            log.info("cache upgraded: %s.%s added", table, name)
 
 
 def _now() -> str:
@@ -227,7 +273,8 @@ def upsert_fields(
     results: list[tuple[str, FieldSyncStatus]] = []
     for field in fields:
         existing = conn.execute(
-            "SELECT name, crop, acres_declared, geom_hash FROM fields WHERE field_id = ?",
+            "SELECT name, crop, acres_declared, geom_hash, irrigation, water_enters, "
+            "soil_awc_in_ft FROM fields WHERE field_id = ?",
             (field.field_id,),
         ).fetchone()
         status = _field_status(field, existing)
@@ -243,8 +290,14 @@ def _field_status(field: Field, existing: sqlite3.Row | None) -> FieldSyncStatus
         return "inserted"
     if existing["geom_hash"] != field.geom_hash:
         return "geometry-changed"
-    metadata = (existing["name"], existing["crop"], existing["acres_declared"])
-    if metadata != (field.name, field.crop, field.acres_declared):
+    metadata = (
+        existing["name"], existing["crop"], existing["acres_declared"],
+        existing["irrigation"], existing["water_enters"], existing["soil_awc_in_ft"],
+    )
+    if metadata != (
+        field.name, field.crop, field.acres_declared,
+        field.irrigation, field.water_enters, field.soil_awc_in_ft,
+    ):
         return "metadata-updated"
     return "unchanged"
 
@@ -256,9 +309,13 @@ def _write_field(conn: sqlite3.Connection, field: Field, source_file: str | None
         """
         INSERT INTO fields (field_id, name, crop, acres_declared, acres_computed,
                             utm_epsg, centroid_lon, centroid_lat, geometry_wkt,
-                            geom_hash, source_file, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            geom_hash, source_file, updated_at,
+                            irrigation, water_enters, soil_awc_in_ft)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(field_id) DO UPDATE SET
+            irrigation     = excluded.irrigation,
+            water_enters   = excluded.water_enters,
+            soil_awc_in_ft = excluded.soil_awc_in_ft,
             name           = excluded.name,
             crop           = excluded.crop,
             acres_declared = excluded.acres_declared,
@@ -284,6 +341,9 @@ def _write_field(conn: sqlite3.Connection, field: Field, source_file: str | None
             field.geom_hash,
             source_file,
             _now(),
+            field.irrigation,
+            field.water_enters,
+            field.soil_awc_in_ft,
         ),
     )
 
@@ -324,6 +384,9 @@ def _row_to_field(row: sqlite3.Row) -> Field:
         utm_epsg=row["utm_epsg"],
         acres_computed=row["acres_computed"],
         acres_declared=row["acres_declared"],
+        irrigation=row["irrigation"],
+        water_enters=row["water_enters"],
+        soil_awc_in_ft=row["soil_awc_in_ft"],
     )
 
 
@@ -750,3 +813,107 @@ def fetch_log_summary(conn: sqlite3.Connection) -> pd.DataFrame:
         """,
         conn,
     )
+
+
+# --------------------------------------------------------------------------- #
+# Weather and soils, the water checkbook's inputs
+# --------------------------------------------------------------------------- #
+
+
+def upsert_weather(
+    conn: sqlite3.Connection, field_id: str, frame: pd.DataFrame, source: str
+) -> int:
+    """Store daily ``eto_mm`` and ``rain_mm`` for one field and source.
+
+    Re-fetched days overwrite, since gridMET revises its most recent week.
+    """
+    now = _now()
+    rows = [
+        (field_id, day.isoformat(), source, _none_if_nan(eto), _none_if_nan(rain), now)
+        for day, eto, rain in zip(frame["date"], frame["eto_mm"], frame["rain_mm"])
+    ]
+    conn.executemany(
+        """
+        INSERT INTO weather (field_id, date, source, eto_mm, rain_mm, fetched_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(field_id, date, source) DO UPDATE SET
+            eto_mm = excluded.eto_mm, rain_mm = excluded.rain_mm,
+            fetched_at = excluded.fetched_at
+        """,
+        rows,
+    )
+    return len(rows)
+
+
+def weather_dates(conn: sqlite3.Connection, field_id: str, source: str) -> set[date]:
+    """Days already stored for one field and source."""
+    rows = conn.execute(
+        "SELECT date FROM weather WHERE field_id = ? AND source = ? AND eto_mm IS NOT NULL",
+        (field_id, source),
+    ).fetchall()
+    return {date.fromisoformat(row["date"]) for row in rows}
+
+
+def get_weather(
+    conn: sqlite3.Connection, field_id: str, start: date, end: date
+) -> pd.DataFrame:
+    """One field's daily weather, oldest first, one row per day.
+
+    Where a day has both a station reading and gridMET, the station wins: it
+    stands in the valley rather than averaging 4 km around it.
+    """
+    frame = pd.read_sql_query(
+        """
+        SELECT date, source, eto_mm, rain_mm FROM weather
+        WHERE field_id = ? AND date BETWEEN ? AND ?
+        ORDER BY date, CASE WHEN source = 'gridmet' THEN 1 ELSE 0 END
+        """,
+        conn, params=[field_id, start.isoformat(), end.isoformat()],
+    )
+    if frame.empty:
+        return frame
+    frame = frame.drop_duplicates("date", keep="first").reset_index(drop=True)
+    frame["date"] = pd.to_datetime(frame["date"]).dt.date
+    return frame
+
+
+def weather_summary(conn: sqlite3.Connection) -> pd.DataFrame:
+    """Per field and source: first and last day, count, and totals."""
+    return pd.read_sql_query(
+        """
+        SELECT field_id, source, MIN(date) AS first_date, MAX(date) AS last_date,
+               COUNT(*) AS n_days, SUM(eto_mm) AS eto_mm, SUM(rain_mm) AS rain_mm
+        FROM weather GROUP BY field_id, source ORDER BY field_id, source
+        """,
+        conn,
+    )
+
+
+def upsert_soil(
+    conn: sqlite3.Connection, field_id: str, geom_hash: str, source: str, profile: dict
+) -> None:
+    """Store one field's soil water profile, tied to the outline it was read for."""
+    conn.execute(
+        """
+        INSERT INTO soils (field_id, geom_hash, source, profile_json, fetched_at)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(field_id) DO UPDATE SET
+            geom_hash = excluded.geom_hash, source = excluded.source,
+            profile_json = excluded.profile_json, fetched_at = excluded.fetched_at
+        """,
+        (field_id, geom_hash, source, json.dumps(profile), _now()),
+    )
+
+
+def get_soil(conn: sqlite3.Connection, field_id: str) -> dict | None:
+    """One field's stored soil profile with its ``source`` and ``geom_hash``, or None."""
+    row = conn.execute(
+        "SELECT geom_hash, source, profile_json, fetched_at FROM soils WHERE field_id = ?",
+        (field_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    return {
+        "geom_hash": row["geom_hash"], "source": row["source"],
+        "fetched_at": row["fetched_at"], "profile": json.loads(row["profile_json"]),
+    }

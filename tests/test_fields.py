@@ -167,3 +167,29 @@ def test_geom_hash_tracks_redrawn_polygon(tmp_path: Path) -> None:
     )
     shifted = load_fields(_write(tmp_path, _collection(_feature(geometry=moved))))[0]
     assert original.geom_hash != shifted.geom_hash
+
+
+# --------------------------------------------------------------------------- #
+# Optional water settings
+# --------------------------------------------------------------------------- #
+
+
+def test_water_settings_accept_plain_words(tmp_path: Path) -> None:
+    feature = _feature(irrigation="Rainfed", water_enters="north", soil_awc_in_ft="1.8")
+    field = load_fields(_write(tmp_path, _collection(feature)))[0]
+    assert (field.irrigation, field.water_enters, field.soil_awc_in_ft) == ("none", "N", 1.8)
+
+
+def test_water_settings_are_optional(tmp_path: Path) -> None:
+    field = load_fields(_write(tmp_path, _collection(_feature())))[0]
+    assert (field.irrigation, field.water_enters, field.soil_awc_in_ft) == (None, None, None)
+
+
+@pytest.mark.parametrize("props, message", [
+    ({"irrigation": "bucket"}, "irrigation"),
+    ({"water_enters": "uphill"}, "water_enters"),
+    ({"soil_awc_in_ft": 9}, "inches per foot"),
+])
+def test_bad_water_settings_are_rejected(tmp_path: Path, props: dict, message: str) -> None:
+    with pytest.raises(FieldValidationError, match=message):
+        load_fields(_write(tmp_path, _collection(_feature(**props))))

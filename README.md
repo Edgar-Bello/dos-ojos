@@ -52,6 +52,9 @@ wheels on 3.13+ yet, and 3.14 will fail to install.
 | `baseline` | Builds the day-of-year climatology from prior full years |
 | `score` | Ranks fields by deviation, writes `out/flags.json` |
 | `chart` | Writes a PNG per field: baseline band plus this season |
+| `weather` | Daily reference ET and rain per field from gridMET, or a station CSV |
+| `soil` | Each field's soil water capacity from the USDA soil survey (SSURGO) |
+| `water` | The water checkbook: water left, days until it runs short, who first |
 | `status` | Coverage per field, gaps, disk use, data-quality warnings |
 | `scenes` | Diagnostic: search and mask one field without writing anything |
 
@@ -76,6 +79,83 @@ dosojos-sat --workspace ... chart --season 2018 --as-of 2018-07-10 --banner "FRE
   such as a drone flight's. Charts draw later points faded, and `flags.json`
   records `as_of`.
 - `chart --banner` puts a band above the title, used to mark public data.
+
+## Water: how long each field has
+
+```bash
+dosojos-sat weather --season 2026     # gridMET ETo and rain, a few KB per field
+dosojos-sat soil                      # USDA soil survey, once per outline
+dosojos-sat water                     # as of today; --as-of for a past date
+```
+
+The checkbook (FAO-56, chapter 8) treats each root zone as a bank account:
+
+- **Balance.** The available water the soil holds, read from SSURGO's
+  pre-summed storage to 25, 50, 100 and 150 cm under the field outline. Each
+  soil is weighted by the share of the field it covers.
+- **Withdrawals.** The weather's demand (short-grass reference ET) times a
+  crop coefficient.
+- **Deposits.** Rain (showers under 20% of the day's ET evaporate) and
+  irrigations.
+
+Once the account falls past the crop's allowed depletion `p` (FAO-56 Table 22,
+eased on hot weeks), the crop starts closing its pores. That is when to water.
+
+What comes from our own eye is the crop's size. The crop coefficient scales
+linearly with NDVI between bare soil and full canopy, anchored on each crop's
+FAO-56 table values, and the root zone deepens as the canopy fills. A thin stand
+or a late crop draws less than a calendar would assume.
+
+The farm supplies a small `field_log.csv` beside `cache/` and `out/`. It lists
+plantings, irrigations (inches delivered, or blank for a full one), rain gauge
+readings and harvests:
+
+```
+field_id,date,event,inches,notes
+rgv-002,2026-02-26,planted,,
+rgv-002,4/6/2026,irrigated,4,district ticket
+rgv-002,2026-05-26,irrigated,,
+rgv-002,2026-07-16,harvested,,
+```
+
+Optional per-field settings in `fields.geojson`:
+
+- `irrigation`: furrow, flood, border, basin, drip, sprinkler, pivot or none
+- `water_enters`: N, S, E or W, the side the water comes in from, read by the
+  drone's terrain step
+- `soil_awc_in_ft`: a measured capacity that overrides the survey
+
+`water` prints the fields ranked by who needs water first, with:
+
+- days left, with a range for a hotter or milder week than the last
+- the date to water by, if it doesn't rain
+- the water left, and how far it is from the stress point
+- the inches to put back, stored and delivered after the method's losses
+  (furrow 65%, drip 90%, ...)
+- a confidence level
+
+It also writes `out/water.json`, a chart per field (`out/<id>_water.png`) and a
+daily CSV (`out/water/<id>_daily.csv`).
+
+The notes say what the answer rests on:
+
+- a start assumed for lack of records
+- gridMET's one- or two-day lag, filled with the week before it
+- a stale satellite image
+- a crop at the stage that can least afford stress (sorghum boot to flowering,
+  cotton first bloom, ...)
+- a field that reads as bare ground where the log or the label says a crop
+  stands
+
+Limits worth knowing:
+
+- gridMET is a 4 km grid, and in irrigated semi-arid country its ETo runs a
+  little high. A TexasET or farm station file (`weather --station`) wins
+  wherever it has a reading.
+- The projection holds the last week's weather; it is not a forecast.
+- NDVI-to-coefficient scaling is linear and FAO values are tabled for standard
+  climates; tune both with AgriLife data.
+- Nothing is known about an irrigation that is not logged.
 
 ## How it works
 
@@ -160,11 +240,15 @@ src/
   cache.py            SQLite schema and all read/write
   baseline.py         climatology and deviation scoring
   pipeline.py         fetch orchestration over a thread pool
+  weather.py          gridMET point reads and station files
+  soils.py            SSURGO soil water profile under an outline
+  water.py            the water checkbook: log, balance, projection, ranking
   charts.py           matplotlib output
   cli.py              click commands
+examples/             an EXAMPLE field log for the placeholder fields, not records
 cache/                sqlite database and clipped GeoTIFFs
-out/                  flags.json and chart PNGs
-tests/                157 tests, no network required
+out/                  flags.json, water.json and chart PNGs
+tests/                232 tests, no network required
 ```
 
 `fields.py`, `charts.py`, `config.py` and `pipeline.py` are additions to the
@@ -176,7 +260,7 @@ original module plan.
 ./.venv/Scripts/python.exe -m pytest -q
 ```
 
-157 tests, none of which touch the network. They cover index arithmetic against
+232 tests, none of which touch the network. They cover index arithmetic against
 hand-computed values, the reflectance transform, SCL masking, tile selection,
 circular day-of-year distance and windowing, percentile pooling against a known
 distribution, robust z, run detection, and both flag triggers.

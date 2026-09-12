@@ -22,6 +22,25 @@ log = logging.getLogger(__name__)
 
 _POLYGONAL: frozenset[str] = frozenset({"Polygon", "MultiPolygon"})
 
+#: How a field is watered, as the optional ``irrigation`` property. The water
+#: checkbook turns delivered inches into stored inches with it, and the drone's
+#: terrain advice depends on it.
+IRRIGATION_METHODS: tuple[str, ...] = (
+    "furrow", "flood", "border", "basin", "drip", "sprinkler", "pivot", "none",
+)
+_IRRIGATION_ALIASES = {
+    "rainfed": "none", "dryland": "none", "center pivot": "pivot",
+    "centre pivot": "pivot", "surface": "furrow", "gravity": "furrow",
+    "micro": "drip", "microsprinkler": "sprinkler",
+}
+#: Side of the field the irrigation water comes in from, ``water_enters``.
+WATER_SIDES: dict[str, str] = {
+    "n": "N", "north": "N", "s": "S", "south": "S",
+    "e": "E", "east": "E", "w": "W", "west": "W",
+}
+#: Plausible range for ``soil_awc_in_ft``, inches of water a foot of soil holds.
+SOIL_AWC_RANGE_IN_FT: tuple[float, float] = (0.3, 4.0)
+
 
 class FieldValidationError(ValueError):
     """Raised when a fields file is malformed or holds an unusable geometry."""
@@ -29,7 +48,12 @@ class FieldValidationError(ValueError):
 
 @dataclass(frozen=True)
 class Field:
-    """One validated field polygon in WGS84, with its UTM zone and area."""
+    """One validated field polygon in WGS84, with its UTM zone and area.
+
+    The last three attributes are optional water settings: how the field is
+    irrigated, the side the water comes in from, and a measured soil water
+    capacity that overrides the soil survey.
+    """
 
     field_id: str
     name: str
@@ -38,6 +62,9 @@ class Field:
     utm_epsg: int
     acres_computed: float
     acres_declared: float | None = None
+    irrigation: str | None = None
+    water_enters: str | None = None
+    soil_awc_in_ft: float | None = None
 
     @property
     def geometry_wkt(self) -> str:
@@ -130,6 +157,54 @@ def _optional_acres(props: dict[str, Any], where: str) -> float | None:
     return acres
 
 
+def _optional_irrigation(props: dict[str, Any], where: str) -> str | None:
+    """Pull the optional ``irrigation`` method, accepting common synonyms."""
+    value = props.get("irrigation")
+    if value is None or str(value).strip() == "":
+        return None
+    text = str(value).strip().lower()
+    text = _IRRIGATION_ALIASES.get(text, text)
+    if text not in IRRIGATION_METHODS:
+        raise FieldValidationError(
+            f"{where}: 'irrigation' {value!r} is not one of {', '.join(IRRIGATION_METHODS)}"
+        )
+    return text
+
+
+def _optional_side(props: dict[str, Any], where: str) -> str | None:
+    """Pull the optional ``water_enters`` side as N, S, E or W."""
+    value = props.get("water_enters")
+    if value is None or str(value).strip() == "":
+        return None
+    side = WATER_SIDES.get(str(value).strip().lower())
+    if side is None:
+        raise FieldValidationError(
+            f"{where}: 'water_enters' {value!r} must be N, S, E or W (the side "
+            "the irrigation water comes in from)"
+        )
+    return side
+
+
+def _optional_awc(props: dict[str, Any], where: str) -> float | None:
+    """Pull the optional ``soil_awc_in_ft``, inches of water per foot of soil."""
+    value = props.get("soil_awc_in_ft")
+    if value is None or value == "":
+        return None
+    try:
+        awc = float(value)
+    except (TypeError, ValueError) as exc:
+        raise FieldValidationError(
+            f"{where}: 'soil_awc_in_ft' is not a number: {value!r}"
+        ) from exc
+    low, high = SOIL_AWC_RANGE_IN_FT
+    if not (low <= awc <= high):
+        raise FieldValidationError(
+            f"{where}: 'soil_awc_in_ft' {awc} is outside {low}-{high} inches per foot; "
+            "sands hold about 0.5-1, loams 1.5-2, clays 1.8-2.4"
+        )
+    return awc
+
+
 def _polygonal_parts(geom: BaseGeometry) -> BaseGeometry | None:
     """Reduce a geometry to its polygonal parts, or ``None`` if it has none.
 
@@ -202,6 +277,9 @@ def _build_field(feature: dict[str, Any], where: str) -> Field:
         utm_epsg=utm_epsg,
         acres_computed=compute_acres(geometry, utm_epsg),
         acres_declared=_optional_acres(props, where),
+        irrigation=_optional_irrigation(props, where),
+        water_enters=_optional_side(props, where),
+        soil_awc_in_ft=_optional_awc(props, where),
     )
 
 

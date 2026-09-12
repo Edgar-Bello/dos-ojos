@@ -229,3 +229,59 @@ def test_no_observations_gives_an_empty_gap_frame(conn: sqlite3.Connection) -> N
     result = cache.observation_gaps(conn)
     assert result.empty
     assert list(result.columns) == ["field_id", "gap_start", "gap_end", "days"]
+
+
+# --------------------------------------------------------------------------- #
+# Version 2: water settings, weather and soils
+# --------------------------------------------------------------------------- #
+
+
+def test_a_version_1_cache_upgrades_in_place(tmp_path: Path) -> None:
+    """Existing caches gain the water columns and tables without losing a row."""
+    path = tmp_path / "old.sqlite"
+    old = sqlite3.connect(path)
+    old.executescript(
+        """
+        CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
+        INSERT INTO meta VALUES ('schema_version', '1');
+        CREATE TABLE fields (
+            field_id TEXT PRIMARY KEY, name TEXT NOT NULL, crop TEXT NOT NULL,
+            acres_declared REAL, acres_computed REAL NOT NULL, utm_epsg INTEGER NOT NULL,
+            centroid_lon REAL NOT NULL, centroid_lat REAL NOT NULL,
+            geometry_wkt TEXT NOT NULL, geom_hash TEXT NOT NULL, source_file TEXT,
+            updated_at TEXT NOT NULL
+        );
+        INSERT INTO fields VALUES ('f1', 'Old', 'cane', NULL, 5, 32614, -97.9, 26.2,
+                                   'POINT (0 0)', 'h', NULL, 'then');
+        """
+    )
+    old.close()
+
+    with cache.session(path) as conn:
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(fields)")}
+        version = conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()
+        field = cache.get_fields(conn)[0]
+    assert {"irrigation", "water_enters", "soil_awc_in_ft"} <= columns
+    assert version["value"] == str(cache.SCHEMA_VERSION)
+    assert field.name == "Old" and field.irrigation is None
+
+
+def test_a_station_reading_beats_gridmet_on_the_same_day(conn: sqlite3.Connection) -> None:
+    import pandas as pd
+
+    days = [date(2026, 7, 1), date(2026, 7, 2)]
+    cache.upsert_weather(conn, "f1", pd.DataFrame({"date": days, "eto_mm": [7.0, 7.5],
+                                                   "rain_mm": [0.0, 0.0]}), "gridmet")
+    cache.upsert_weather(conn, "f1", pd.DataFrame({"date": days[:1], "eto_mm": [6.2],
+                                                   "rain_mm": [3.0]}), "station:mcallen.csv")
+    frame = cache.get_weather(conn, "f1", days[0], days[1])
+    assert frame["eto_mm"].tolist() == [6.2, 7.5]
+    assert frame["source"].tolist() == ["station:mcallen.csv", "gridmet"]
+    assert cache.weather_dates(conn, "f1", "gridmet") == set(days)
+
+
+def test_a_soil_profile_is_stored_with_its_outline(conn: sqlite3.Connection) -> None:
+    cache.upsert_soil(conn, "f1", "hash-1", "ssurgo", {"name": "Mercedes clay"})
+    stored = cache.get_soil(conn, "f1")
+    assert stored["geom_hash"] == "hash-1" and stored["profile"]["name"] == "Mercedes clay"
+    assert cache.get_soil(conn, "nobody") is None

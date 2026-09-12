@@ -9,7 +9,8 @@
         "id": "rgv-001",
         "name": "Llano Grande West",
         "crop": "sugarcane",
-        "acres": 60
+        "acres": 60,
+        "irrigation": "furrow"
       },
       "geometry": {
         "type": "Polygon",
@@ -31,7 +32,9 @@
         "id": "rgv-002",
         "name": "Mercedes North 40",
         "crop": "grain sorghum",
-        "acres": 40
+        "acres": 40,
+        "irrigation": "furrow",
+        "water_enters": "N"
       },
       "geometry": {
         "type": "Polygon",
@@ -52,7 +55,8 @@
         "id": "rgv-003",
         "name": "Weslaco Citrus Block C",
         "crop": "citrus",
-        "acres": 28
+        "acres": 28,
+        "irrigation": "flood"
       },
       "geometry": {
         "type": "Polygon",

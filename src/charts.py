@@ -258,3 +258,148 @@ def _add_titles(
             color=FLAG_COLOR if flagged else "#6f6e69",
             fontweight="medium" if flagged else "normal",
         )
+
+
+# --------------------------------------------------------------------------- #
+# Water checkbook
+# --------------------------------------------------------------------------- #
+
+WATER_COLOR = SEASON_COLOR
+RAIN_COLOR = "#7fb8e6"
+IRRIGATION_COLOR = "#0e7c86"
+WEEK_COLOR = "#b07a00"
+MM_PER_INCH = 25.4
+
+
+def water_chart_path(out_dir: Path, field_id: str) -> Path:
+    """Where one field's water checkbook chart is written."""
+    return Path(out_dir) / f"{field_id}_water.png"
+
+
+def water_verdict(status: dict) -> tuple[str, str]:
+    """The line under the title, and its colour, from a checkbook status."""
+    word, days = status["status"], status["days_left"]
+    if word == "harvested":
+        return "Harvested: no water needed until the next crop", MEDIAN_COLOR
+    if days == 0:
+        return "WATER NOW: the crop is already short of water", FLAG_COLOR
+    if days is None:
+        return "OK for now: more than six weeks of water at the current rate", MEDIAN_COLOR
+    when = date.fromisoformat(status["water_by"])
+    low, high = status["days_range"] or (days, days)
+    text = f"Water in about {days} days ({low}-{high}), by {when.day} {when:%b}, if it doesn't rain"
+    color = FLAG_COLOR if days <= 3 else (WEEK_COLOR if days <= 7 else MEDIAN_COLOR)
+    return text, color
+
+
+def plot_water(
+    *,
+    status: dict,
+    daily: pd.DataFrame,
+    projection: pd.DataFrame,
+    out_dir: Path,
+    banner: str | None = None,
+) -> Path:
+    """Draw one field's water checkbook: water left, the stress line, rain and irrigation.
+
+    The top panel is the root zone as a tank, in inches: its size grows with the
+    roots, the dashed red line is where the crop starts to suffer, and the dotted
+    line runs on from the judged date as if no rain came. The strip below shows
+    the deposits.
+    """
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    figure, (axes, strip) = plt.subplots(
+        2, 1, figsize=(FIG_SIZE[0], FIG_SIZE[1] + 1.4), dpi=DPI, sharex=True,
+        gridspec_kw={"height_ratios": [4.2, 1.0], "hspace": 0.08},
+    )
+    dates = list(daily["date"])
+    capacity = daily["taw_mm"].to_numpy(dtype=float) / MM_PER_INCH
+    stress = (daily["taw_mm"] - daily["raw_mm"]).to_numpy(dtype=float) / MM_PER_INCH
+    left = (daily["taw_mm"] - daily["dr_mm"]).to_numpy(dtype=float) / MM_PER_INCH
+
+    axes.fill_between(dates, 0, stress, color=FLAG_COLOR, alpha=0.06, linewidth=0, zorder=0)
+    axes.fill_between(dates, 0, left, color=WATER_COLOR, alpha=0.16, linewidth=0, zorder=1)
+    axes.plot(dates, capacity, color=MEDIAN_COLOR, linewidth=1.6, linestyle="--",
+              label="soil full", zorder=2)
+    axes.plot(dates, stress, color=FLAG_COLOR, linewidth=1.8, linestyle="--",
+              label="crop starts to suffer below this", zorder=2)
+    axes.plot(dates, left, color=WATER_COLOR, linewidth=2.6, label="water in the root zone",
+              zorder=3)
+
+    as_of = date.fromisoformat(status["as_of"])
+    ends = [dates[-1]]
+    if not projection.empty:
+        taw = float(daily["taw_mm"].iloc[-1])
+        path_dates = list(projection["date"])
+        path = (taw - projection["dr_mm"].to_numpy(dtype=float)) / MM_PER_INCH
+        axes.plot(path_dates, path, color=WATER_COLOR, linewidth=2.2, linestyle=":",
+                  label="if it doesn't rain", zorder=3)
+        ends.append(path_dates[-1])
+        if status["days_left"]:
+            axes.scatter([path_dates[-1]], [path[-1]], s=110, color=FLAG_COLOR,
+                         edgecolor="white", linewidth=1.4, zorder=5)
+            when = path_dates[-1]
+            axes.annotate(f"water by {when.day} {when:%b}", xy=(when, path[-1]),
+                          xytext=(8, 10), textcoords="offset points",
+                          fontsize=FONT_SIZES["annotation"], color=FLAG_COLOR,
+                          fontweight="medium")
+    # A harvested field's balance stops at the harvest, which is the date worth
+    # marking; the judged date may lie weeks past the end of the plot.
+    mark = dates[-1] if status["status"] == "harvested" else as_of
+    label = "harvested" if status["status"] == "harvested" else "as of"
+    axes.axvline(mark, color=MEDIAN_COLOR, linewidth=1.2, linestyle=":", zorder=2)
+    axes.annotate(f"{label} {mark.day} {mark:%b}", xy=(mark, 1), xycoords=("data", "axes fraction"),
+                  xytext=(-4, -4), textcoords="offset points", ha="right", va="top",
+                  fontsize=FONT_SIZES["legend"] - 1, color=MEDIAN_COLOR)
+
+    rain = daily["rain_effective_mm"].to_numpy(dtype=float) / MM_PER_INCH
+    irrigation = daily["irrigation_mm"].to_numpy(dtype=float) / MM_PER_INCH
+    strip.bar(dates, rain, width=1.0, color=RAIN_COLOR, label="rain")
+    strip.bar(dates, irrigation, width=1.6, color=IRRIGATION_COLOR, label="irrigation (stored)")
+    strip.set_ylabel("in", fontsize=FONT_SIZES["tick"])
+    strip.legend(loc="upper left", fontsize=FONT_SIZES["legend"] - 1, frameon=False, ncol=2)
+
+    for panel in (axes, strip):
+        panel.tick_params(axis="both", labelsize=FONT_SIZES["tick"])
+        panel.grid(axis="y", color="#e1e0d9", linewidth=0.8)
+        panel.set_axisbelow(True)
+        for side in ("top", "right"):
+            panel.spines[side].set_visible(False)
+        for side in ("left", "bottom"):
+            panel.spines[side].set_color("#c3c2b7")
+    locator = mdates.AutoDateLocator(minticks=4, maxticks=9)
+    strip.xaxis.set_major_locator(locator)
+    strip.xaxis.set_major_formatter(mdates.ConciseDateFormatter(locator))
+    strip.set_xlim(dates[0], max(ends) + timedelta(days=2))
+    # Headroom above the full line, so the two-row legend never sits on the data.
+    axes.set_ylim(0, max(float(np.nanmax(capacity)) * 1.38, 0.5))
+    axes.set_ylabel("inches of water", fontsize=FONT_SIZES["axis"])
+    axes.legend(loc="upper left", fontsize=FONT_SIZES["legend"], frameon=False, ncol=2)
+
+    soil = status.get("soil") or {}
+    axes.set_title(f"{status['name']} - {status['crop']}", fontsize=FONT_SIZES["title"],
+                   fontweight="medium", loc="left", pad=46)
+    axes.annotate(
+        f"Water checkbook  -  soil {soil.get('name', 'unknown')} "
+        f"({soil.get('awc_in_per_ft', 0):.1f} in/ft)  -  confidence {status['confidence']}",
+        xy=(0, 1), xycoords="axes fraction", xytext=(0, 26), textcoords="offset points",
+        fontsize=FONT_SIZES["subtitle"], color="#6f6e69",
+    )
+    verdict, color = water_verdict(status)
+    axes.annotate(verdict, xy=(0, 1), xycoords="axes fraction", xytext=(0, 7),
+                  textcoords="offset points", fontsize=FONT_SIZES["annotation"],
+                  color=color, fontweight="medium")
+    if banner:
+        axes.annotate(
+            banner, xy=(0, 1), xycoords="axes fraction", xytext=(0, 84),
+            textcoords="offset points", fontsize=FONT_SIZES["legend"], color="white",
+            fontweight="bold",
+            bbox={"boxstyle": "square,pad=0.45", "facecolor": BANNER_COLOR, "edgecolor": "none"},
+        )
+
+    path = water_chart_path(out_dir, status["field_id"])
+    figure.savefig(path, bbox_inches="tight", facecolor="white")
+    plt.close(figure)
+    log.info("wrote %s", path)
+    return path

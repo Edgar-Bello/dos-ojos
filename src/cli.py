@@ -11,7 +11,9 @@ from typing import Sequence
 import click
 
 from . import baseline as baseline_mod
-from . import cache, charts, pipeline, stac
+from . import cache, charts, pipeline, soils, stac
+from . import water as water_mod
+from . import weather as weather_mod
 from .config import INDEX_NAMES, Settings, default_root, setup_logging
 from .fields import FieldValidationError, format_field_table, load_fields
 
@@ -707,6 +709,292 @@ def _verdict(summary: baseline_mod.FieldScore) -> str:
         )
         return f"FLAGGED  -  score {summary.score:.0f}/100  -  {kind}  ({route})"
     return f"not flagged  -  score {summary.score:.0f}/100"
+
+
+# --------------------------------------------------------------------------- #
+# Water: weather, soil and the checkbook
+# --------------------------------------------------------------------------- #
+
+#: gridMET revises its last week or so; these days are re-read on every fetch.
+WEATHER_REFRESH_DAYS = 10
+
+
+def _ids(field_csv: str | None) -> list[str] | None:
+    return [p.strip() for p in field_csv.split(",") if p.strip()] if field_csv else None
+
+
+@cli.command("weather")
+@click.option("--season", type=int, default=None,
+              help="Year to cover  [default: the current year]")
+@click.option("--start", type=click.DateTime(formats=["%Y-%m-%d"]), default=None,
+              help="First day  [default: 1 January of the season]")
+@click.option("--end", type=click.DateTime(formats=["%Y-%m-%d"]), default=None,
+              help="Last day  [default: today, or 31 December of a past season]")
+@click.option("--fields", "field_csv", default=None,
+              help="Comma-separated field ids  [default: all registered fields]")
+@click.option("--station", type=click.Path(exists=True, dir_okay=False, path_type=Path),
+              default=None,
+              help="Load a weather station CSV (a date column plus ETo and rain with "
+                   "their units, e.g. eto_in, rain_in) for the chosen fields instead.")
+@click.option("--force", is_flag=True, help="Re-fetch days already cached.")
+@click.pass_obj
+def weather_cmd(
+    settings: Settings, season: int | None, start: datetime | None, end: datetime | None,
+    field_csv: str | None, station: Path | None, force: bool,
+) -> None:
+    """Fetch each field's daily reference ET and rain from gridMET, or load a station."""
+    today = date.today()
+    season = season or (start.year if start else today.year)
+    window_start = start.date() if start else date(season, 1, 1)
+    window_end = end.date() if end else min(today, date(season, 12, 31))
+    if window_start > window_end:
+        raise click.ClickException(f"start {window_start} is after end {window_end}")
+
+    rows = []
+    with cache.session(settings.db_path) as conn:
+        try:
+            fields = cache.get_fields(conn, _ids(field_csv))
+        except KeyError as exc:
+            raise click.ClickException(str(exc)) from exc
+        if not fields:
+            raise click.ClickException(
+                "no fields registered. Run 'dosojos-sat init-fields <geojson>' first."
+            )
+
+        if station is not None:
+            try:
+                frame = weather_mod.read_station_csv(station)
+            except weather_mod.WeatherError as exc:
+                raise click.ClickException(str(exc)) from exc
+            source = weather_mod.station_source(station)
+            for field in fields:
+                written = cache.upsert_weather(conn, field.field_id, frame, source)
+                rows.append(_weather_row(field.field_id, source, frame, written))
+        else:
+            try:
+                stac.assert_online(settings, "fetch weather from gridMET")
+            except stac.OfflineViolation as exc:
+                raise click.ClickException(str(exc)) from exc
+            for field in fields:
+                cached = cache.weather_dates(conn, field.field_id, weather_mod.GRIDMET_SOURCE)
+                wanted = [window_start + timedelta(days=i)
+                          for i in range((window_end - window_start).days + 1)]
+                stale = today - timedelta(days=WEATHER_REFRESH_DAYS)
+                needed = [d for d in wanted if force or d not in cached or d >= stale]
+                if not needed:
+                    rows.append((field.field_id, "gridmet", str(window_start), str(window_end),
+                                 "-", "-", "-", "cached"))
+                    continue
+                lon, lat = field.centroid_lonlat
+                try:
+                    frame = weather_mod.fetch_gridmet(lat, lon, min(needed), window_end)
+                except weather_mod.WeatherError as exc:
+                    raise click.ClickException(f"{field.field_id}: {exc}") from exc
+                written = cache.upsert_weather(conn, field.field_id, frame,
+                                               weather_mod.GRIDMET_SOURCE)
+                rows.append(_weather_row(field.field_id, "gridmet", frame, written))
+
+    click.echo(_table(("FIELD", "SOURCE", "FROM", "TO", "DAYS", "ETO IN", "RAIN IN", "STORED"),
+                      rows, "<<<<>>>>"))
+    if station is None and rows:
+        click.echo("\ngridMET runs a day or two behind; the checkbook fills the gap with "
+                   "the week before it.")
+
+
+def _weather_row(field_id: str, source: str, frame, written: int) -> tuple[str, ...]:
+    """One line of the weather table: span, day count and inch totals."""
+    if frame.empty:
+        return (field_id, source, "-", "-", "0", "-", "-", str(written))
+    mm = weather_mod.MM_PER_INCH
+    return (
+        field_id, source, str(min(frame["date"])), str(max(frame["date"])),
+        str(int(frame["eto_mm"].notna().sum())),
+        f"{frame['eto_mm'].sum() / mm:.1f}", f"{frame['rain_mm'].sum() / mm:.1f}",
+        str(written),
+    )
+
+
+@cli.command("soil")
+@click.option("--fields", "field_csv", default=None,
+              help="Comma-separated field ids  [default: all registered fields]")
+@click.option("--force", is_flag=True, help="Re-read soils already cached.")
+@click.pass_obj
+def soil_cmd(settings: Settings, field_csv: str | None, force: bool) -> None:
+    """Read how much water each field's soil holds, from the USDA soil survey."""
+    rows = []
+    with cache.session(settings.db_path) as conn:
+        try:
+            fields = cache.get_fields(conn, _ids(field_csv))
+        except KeyError as exc:
+            raise click.ClickException(str(exc)) from exc
+        for field in fields:
+            cached = cache.get_soil(conn, field.field_id)
+            if field.soil_awc_in_ft:
+                profile = soils.manual_profile(field.soil_awc_in_ft)
+                cache.upsert_soil(conn, field.field_id, field.geom_hash, "manual",
+                                  profile.to_dict())
+                note = "from fields.geojson"
+            elif (cached and not force and cached["source"] == "ssurgo"
+                  and cached["geom_hash"] == field.geom_hash):
+                profile = soils.SoilProfile.from_dict(cached["profile"])
+                note = "cached"
+            else:
+                try:
+                    stac.assert_online(settings, "read the soil survey")
+                    profile = soils.fetch_ssurgo(field.geometry)
+                except stac.OfflineViolation as exc:
+                    raise click.ClickException(str(exc)) from exc
+                except soils.SoilError as exc:
+                    raise click.ClickException(f"{field.field_id}: {exc}") from exc
+                cache.upsert_soil(conn, field.field_id, field.geom_hash, "ssurgo",
+                                  profile.to_dict())
+                note = "USDA SSURGO"
+            rows.append((
+                field.field_id, profile.name[:40], f"{profile.awc_in_per_ft:.2f}",
+                f"{profile.taw_mm(1.2) / weather_mod.MM_PER_INCH:.1f}",
+                profile.texture, profile.intake, profile.drainage or "-", note,
+            ))
+
+    click.echo(_table(
+        ("FIELD", "SOIL", "IN/FT", "IN TO 4 FT", "TEXTURE", "INTAKE", "DRAINAGE", "SOURCE"),
+        rows, "<<>><<<<",
+    ))
+
+
+def _soil_note(profile: soils.SoilProfile) -> dict:
+    """The soil facts carried into each field's checkbook result."""
+    return {
+        "name": profile.name[:48], "source": profile.source,
+        "awc_in_per_ft": round(profile.awc_in_per_ft, 2), "texture": profile.texture,
+        "intake": profile.intake, "hydgrp": profile.hydgrp, "drainage": profile.drainage,
+    }
+
+
+@cli.command("water")
+@click.option("--as-of", "as_of", type=click.DateTime(formats=["%Y-%m-%d"]), default=None,
+              help="Judge the fields as they stood on this date  [default: today]")
+@click.option("--log", "log_path", type=click.Path(dir_okay=False, path_type=Path),
+              default=None,
+              help="Field log of plantings, irrigations and rain gauge readings  "
+                   "[default: field_log.csv beside cache/ and out/]")
+@click.option("--fields", "field_csv", default=None,
+              help="Comma-separated field ids  [default: all registered fields]")
+@click.option("--out", "out_path", type=click.Path(dir_okay=False, path_type=Path),
+              default=None, help="Ranked JSON  [default: out/water.json]")
+@click.option("--banner", default=None,
+              help="Text for a band above each chart's title, e.g. to mark demo data.")
+@click.pass_obj
+def water_cmd(
+    settings: Settings, as_of: datetime | None, log_path: Path | None,
+    field_csv: str | None, out_path: Path | None, banner: str | None,
+) -> None:
+    """Work out how much water each field has left, and who needs it first."""
+    cutoff = as_of.date() if as_of else date.today()
+    log_path = log_path or (settings.root / "field_log.csv")
+    out_path = out_path or (settings.out_dir / "water.json")
+    try:
+        events = water_mod.read_field_log(log_path)
+    except water_mod.FieldLogError as exc:
+        raise click.ClickException(str(exc)) from exc
+    if not log_path.exists():
+        click.secho(f"NOTE: no field log at {log_path}; every start will be assumed. Add "
+                    "rows of field_id,date,event,inches (planted / irrigated / rain / "
+                    "harvested) for a real answer.", fg="yellow")
+
+    statuses, failures = [], []
+    daily_dir = settings.out_dir / "water"
+    daily_dir.mkdir(parents=True, exist_ok=True)
+    with cache.session(settings.db_path) as conn:
+        try:
+            fields = cache.get_fields(conn, _ids(field_csv))
+        except KeyError as exc:
+            raise click.ClickException(str(exc)) from exc
+        known = {f.field_id for f in cache.get_fields(conn)}
+        strays = sorted({e.field_id for e in events} - known)
+        if strays:
+            click.secho(f"WARNING: the field log names unregistered field(s): "
+                        f"{', '.join(strays)}", fg="yellow")
+
+        for field in fields:
+            if field.soil_awc_in_ft:
+                profile = soils.manual_profile(field.soil_awc_in_ft)
+            else:
+                cached = cache.get_soil(conn, field.field_id)
+                if cached is None:
+                    failures.append(f"{field.field_id}: no soil cached. Run 'dosojos-sat soil'.")
+                    continue
+                if cached["geom_hash"] != field.geom_hash:
+                    click.secho(f"WARNING: {field.field_id} was redrawn after its soil was "
+                                "read; run 'dosojos-sat soil --force'.", fg="yellow")
+                profile = soils.SoilProfile.from_dict(cached["profile"])
+            weather = cache.get_weather(conn, field.field_id,
+                                        cutoff - timedelta(days=400), cutoff)
+            ndvi = cache.get_observations(conn, field.field_id, "NDVI",
+                                          year_range=(cutoff.year - 1, cutoff.year))
+            try:
+                status, daily, projection = water_mod.checkbook(
+                    field_id=field.field_id, name=field.name, crop_text=field.crop,
+                    soil=profile, soil_note=_soil_note(profile), weather=weather, ndvi=ndvi,
+                    events=[e for e in events if e.field_id == field.field_id],
+                    as_of=cutoff, method=field.irrigation,
+                )
+            except water_mod.WaterError as exc:
+                failures.append(f"{field.field_id}: {exc}")
+                continue
+            daily.to_csv(daily_dir / f"{field.field_id}_daily.csv", index=False)
+            charts.plot_water(status=status.to_dict(), daily=daily, projection=projection,
+                              out_dir=settings.out_dir, banner=banner)
+            statuses.append(status)
+
+    for failure in failures:
+        click.secho(f"WARNING: {failure}", fg="yellow")
+    if not statuses:
+        raise click.ClickException("no field could be judged; see the warnings above")
+
+    ranked = water_mod.rank(statuses)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps({
+        "as_of": cutoff.isoformat(), "generated": _utc_now(),
+        "field_log": str(log_path) if log_path.exists() else None,
+        "fields": [s.to_dict() for s in ranked],
+    }, indent=2), encoding="utf-8")
+
+    click.echo(f"Water checkbook as of {cutoff}, who needs water first\n")
+    click.echo(_format_water(ranked))
+    for status in ranked:
+        extra = ([status.sensitive] if status.sensitive else []) + status.notes
+        for line in extra:
+            click.echo(f"  {status.field_id}: {line}")
+    click.echo(f"\nWritten to {out_path}, with a chart and a daily CSV per field.")
+
+
+def _format_water(ranked: Sequence[water_mod.WaterStatus]) -> str:
+    """The ranked table: urgency, water left, when, and how much to put back."""
+    def inches(value: float | None) -> str:
+        return "-" if value is None else f"{value:.1f}"
+
+    rows = []
+    for s in ranked:
+        days = "-" if s.days_left is None else (
+            "now" if s.days_left == 0 else
+            f"{s.days_left} ({s.days_range[0]}-{s.days_range[1]})" if s.days_range else str(s.days_left)
+        )
+        harvested = s.status == water_mod.STATUS_HARVESTED
+        if harvested:
+            days = "-"
+        refill = "-" if s.refill_net_in is None else (
+            f"{s.refill_net_in:.1f}" + (f" / {s.refill_gross_in:.1f}" if s.refill_gross_in else "")
+        )
+        rows.append((
+            str(s.rank), s.field_id, str(s.name)[:22], str(s.crop)[:14], s.status.upper(),
+            days, s.water_by or "-", "-" if harvested else inches(s.water_left_in),
+            inches(s.until_stress_in), refill, s.confidence,
+        ))
+    return _table(
+        ("#", "FIELD", "NAME", "CROP", "STATUS", "DAYS LEFT", "WATER BY", "LEFT IN",
+         "TO STRESS", "REFILL NET/GROSS", "CONF"),
+        rows, "><<<<><>>><",
+    )
 
 
 if __name__ == "__main__":  # pragma: no cover  (last, once every command is registered)

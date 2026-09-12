@@ -63,6 +63,66 @@ def test_python_dash_m_reaches_every_command(module: str) -> None:
     assert set(cli.commands) <= listed
 
 
+def test_the_water_command_ranks_fields_and_draws_each_one(tmp_path: Path) -> None:
+    """From a cached season, a field log and a soil, to water.json, a chart and a CSV."""
+    from datetime import timedelta
+
+    from dosojos_sat import cache
+    from dosojos_sat.indices import IndexStats
+    from dosojos_sat.soils import manual_profile
+
+    feature = json.loads(json.dumps(FIELD))
+    feature["features"][0]["properties"]["irrigation"] = "furrow"
+    fields = tmp_path / "fields.geojson"
+    fields.write_text(json.dumps(feature), encoding="utf-8")
+    workspace = tmp_path / "demo"
+    runner = CliRunner()
+    assert runner.invoke(cli, ["--workspace", str(workspace), "init-fields", str(fields)]).exit_code == 0
+
+    start, as_of = date(2026, 4, 1), date(2026, 6, 10)
+    with cache.session(workspace / "cache" / "dosojos.sqlite") as conn:
+        field = cache.get_fields(conn)[0]
+        for offset in range(0, 70, 5):
+            median = min(0.85, 0.2 + offset / 80)
+            stats = IndexStats(mean=median, median=median, p10=median, p25=median, p75=median,
+                               p90=median, std=0.01, valid_fraction=1.0, n_valid_px=9,
+                               n_total_px=9)
+            cache.upsert_observation(conn, cache.ObservationRecord(
+                field_id=field.field_id, obs_date=start + timedelta(days=offset),
+                index_name="NDVI", stats=stats, scene_id="S2"))
+        days = [start + timedelta(days=i) for i in range((as_of - start).days + 1)]
+        cache.upsert_weather(conn, field.field_id, pd.DataFrame(
+            {"date": days, "eto_mm": 6.0, "rain_mm": 0.0}), "gridmet")
+        cache.upsert_soil(conn, field.field_id, field.geom_hash, "manual",
+                          manual_profile(1.6).to_dict())
+    (workspace / "field_log.csv").write_text(
+        "field_id,date,event,inches,notes\n"
+        "PUBLIC-test,2026-04-01,planted,,\nPUBLIC-test,2026-06-01,irrigated,,\n",
+        encoding="utf-8")
+
+    result = runner.invoke(cli, ["--workspace", str(workspace), "water", "--as-of", "2026-06-10"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads((workspace / "out" / "water.json").read_text(encoding="utf-8"))
+    entry = payload["fields"][0]
+    assert entry["field_id"] == "PUBLIC-test" and entry["rank"] == 1
+    assert entry["days_left"] is not None and entry["method"] == "furrow"
+    assert (workspace / "out" / "PUBLIC-test_water.png").exists()
+    assert (workspace / "out" / "water" / "PUBLIC-test_daily.csv").exists()
+    assert "who needs water first" in result.output
+
+
+def test_the_water_command_needs_a_soil_first(tmp_path: Path) -> None:
+    fields = tmp_path / "fields.geojson"
+    fields.write_text(json.dumps(FIELD), encoding="utf-8")
+    workspace = tmp_path / "demo"
+    runner = CliRunner()
+    runner.invoke(cli, ["--workspace", str(workspace), "init-fields", str(fields)])
+    result = runner.invoke(cli, ["--workspace", str(workspace), "water"])
+    assert result.exit_code != 0
+    assert "dosojos-sat soil" in result.output
+
+
 def test_python_dash_m_ignores_a_folder_named_like_the_package(tmp_path: Path) -> None:
     """Dos_Ojos/ and every demo hold a dosojos_sat folder, which must not hide the package."""
     (tmp_path / "dosojos_sat" / "config").mkdir(parents=True)
