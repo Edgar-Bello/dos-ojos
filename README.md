@@ -147,6 +147,11 @@ The notes say what the answer rests on:
 - a field that reads as bare ground where the log or the label says a crop
   stands
 
+To show the example live, run `examples\run_water_example.cmd` from PowerShell.
+It runs the placeholder fields with the made-up `field_log_EXAMPLE.csv` and the
+synthetic drone flights, pinned to 12 Sep 2026 so the numbers never drift, then
+the drone's terrain step and join.
+
 Limits worth knowing:
 
 - gridMET is a 4 km grid, and in irrigated semi-arid country its ETo runs a
