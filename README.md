@@ -67,7 +67,7 @@ From any folder in PowerShell, `C:\Users\edgar\Projects\Dos_Ojos\dosojos_sms\sms
 
 | Command | What it does |
 |---|---|
-| `serve --sim` | The web side: Twilio's webhook, the map and upload pages, and the phone simulator at http://localhost:8080/sim |
+| `serve --sim [--open]` | The web side: Twilio's webhook, the map and upload pages, and the phone simulator at http://localhost:8080/sim (`--open` opens it in the browser) |
 | `chat` | Text the bot from the terminal as a pretend farmer |
 | `fields` | Every field, what is known and what is missing |
 | `farmers`, `messages` | Who has texted in; the conversation log |

@@ -9,6 +9,5 @@ if not exist "%DATA%\sms\sms.sqlite" (
     echo The demo is not set up yet: run setup_sms_demo.cmd first.
     exit /b 1
 )
-start "" "http://localhost:8080/sim"
-"%PY%" -m dosojos_sms --data "%DATA%" serve --sim
+"%PY%" -m dosojos_sms --data "%DATA%" serve --sim --open
 exit /b %ERRORLEVEL%

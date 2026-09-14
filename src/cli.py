@@ -6,6 +6,7 @@ import json
 import logging
 import subprocess
 import sys
+import webbrowser
 import xml.etree.ElementTree as ElementTree
 from dataclasses import dataclass, replace
 from datetime import date, datetime, time, timedelta
@@ -82,8 +83,11 @@ def _app(ctx: Context, **options) -> App:
 @click.option("--sim", is_flag=True, help="Also serve the phone simulator at /sim.")
 @click.option("--no-verify", is_flag=True,
               help="Accept webhook calls without Twilio's signature. Testing only.")
+@click.option("--open", "open_browser", is_flag=True,
+              help="Open the simulator (or the front page) in the browser once listening.")
 @click.pass_obj
-def serve_cmd(ctx: Context, port: int, host: str, sim: bool, no_verify: bool) -> None:
+def serve_cmd(ctx: Context, port: int, host: str, sim: bool, no_verify: bool,
+              open_browser: bool) -> None:
     """Run the web side: Twilio's webhook, the map and upload pages, the simulator."""
     if ctx.settings.public_url == f"http://localhost:{DEFAULT_PORT}" and port != DEFAULT_PORT:
         # Links in texts point here until a public address is set.
@@ -112,6 +116,10 @@ def serve_cmd(ctx: Context, port: int, host: str, sim: bool, no_verify: bool) ->
         click.echo("  Twilio     not set up: texts stay on this computer (simulator, 'chat')")
     if ctx.as_of:
         click.secho(f"  pinned to {ctx.as_of} (--as-of)", fg="yellow")
+    if open_browser:
+        # The socket is already listening, so the page's first request waits for us
+        # instead of failing as it would if the browser raced the start-up.
+        webbrowser.open(f"{local}/sim" if sim else local)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
