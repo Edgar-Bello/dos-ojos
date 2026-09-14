@@ -1,0 +1,38 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "note": "EXAMPLE: the placeholder outline of rgv-002 'Mercedes North 40' from dosojos_sat/fields.geojson, not a surveyed field"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              -97.914013,
+              26.216188
+            ],
+            [
+              -97.909987,
+              26.216188
+            ],
+            [
+              -97.909987,
+              26.219812
+            ],
+            [
+              -97.914013,
+              26.219812
+            ],
+            [
+              -97.914013,
+              26.216188
+            ]
+          ]
+        ]
+      }
+    }
+  ]
+}

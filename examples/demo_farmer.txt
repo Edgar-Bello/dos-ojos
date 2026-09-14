@@ -1,0 +1,17 @@
+# EXAMPLE: a made-up farmer on a pretend 555 number, registering the placeholder field
+# "Mercedes North 40" (rgv-002) by text. Used by setup_sms_demo.cmd. Not a real farmer.
+hola
+1
+Juan Ejemplo
+si
+Mercedes Norte
+40
+26.2180, -97.9120
+sorgo
+7/20
+si
+surcos
+norte
+8/18 4
+si
+no
