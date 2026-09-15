@@ -673,6 +673,15 @@ def lidar_cmd(settings: Settings, flight_id: str, field_id: str, force: bool) ->
         ground = lidar_mod.fetch_ground(outline, folder)
     except lidar_mod.LidarError as exc:
         raise click.ClickException(str(exc)) from exc
+    covered = lidar_mod.covered_share(ground)
+    if covered > lidar_mod.COVERED_REFUSE:
+        raise click.ClickException(
+            f"when the {ground.project} survey flew in {ground.year}, the laser hit plants "
+            f"taller than 1 m over {covered:.0%} of this field (a standing crop such as cane), "
+            "so its ground model is mostly guessed and the terrain check would judge the crop, "
+            "not the ground. Nothing was registered. A bare-soil drone flight is the way to "
+            "map this field."
+        )
     source = f"USGS 3DEP lidar {ground.project}, flown {ground.year} (public domain)"
     try:
         register_flight(settings.manifest_path, Flight(
@@ -689,7 +698,6 @@ def lidar_cmd(settings: Settings, flight_id: str, field_id: str, force: bool) ->
             for item in done]
     click.echo(_table(("PRODUCT", "CELLS", "GRID"), rows, "<>>"))
     click.echo(f"\n  {source}, {ground.tiles} tile(s); read only the field's window.")
-    covered = lidar_mod.covered_share(ground)
     if covered > lidar_mod.COVERED_WARN:
         click.secho(f"  WARNING: the laser hit plants or trees taller than 1 m over {covered:.0%} "
                     "of the field; the ground under them is interpolated, so treat spots and "

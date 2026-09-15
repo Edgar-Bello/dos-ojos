@@ -22,16 +22,17 @@ SIZE = 400                       # 800 m of 2 m cells
 FIELD = box(590_200.0, 2_897_400.0, 590_600.0, 2_897_700.0)    # 400 x 300 m, in UTM
 
 
-def tile(folder: Path, name: str, *, canopy_share: float = 0.0) -> Path:
+def tile(folder: Path, name: str, *, canopy_share: float = 0.0,
+         transform=TRANSFORM, stem: str | None = None) -> Path:
     """A 2 m lidar tile: a gently sloping field; the surface adds 2 m trees on a share."""
     rows, cols = np.mgrid[0:SIZE, 0:SIZE]
     ground = 10.0 + rows * 0.002 * 2.0                      # 0.2% fall toward the south
     if name == "dsm":
         ground = ground + np.where(cols < canopy_share * SIZE, 2.0, 0.0)
     folder.mkdir(parents=True, exist_ok=True)
-    path = folder / f"{name}.tif"
+    path = folder / f"{stem or name}.tif"
     with rasterio.open(path, "w", driver="GTiff", height=SIZE, width=SIZE, count=1,
-                       dtype="float32", crs=f"EPSG:{EPSG}", transform=TRANSFORM) as out:
+                       dtype="float32", crs=f"EPSG:{EPSG}", transform=transform) as out:
         out.write(ground.astype("float32"), 1)
     return path
 
@@ -147,3 +148,59 @@ def test_the_command_refuses_a_field_the_satellite_half_does_not_know(tmp_path: 
     result = CliRunner().invoke(cli, ["--workspace", str(tmp_path / "drone"), "lidar", "L1",
                                       "--field", "nope"])
     assert result.exit_code != 0 and "satellite half must know the field" in result.output
+
+
+def test_a_catalog_that_misplaces_the_tile_is_not_believed(tmp_path: Path) -> None:
+    """TX_South_B7_2018 lists its tiles mirrored north to south: the one the catalog
+    puts over the field lies 30 km away, and the right one is listed elsewhere."""
+    tiles = tmp_path / "tiles"
+    far = from_origin(590_000.0, 2_928_000.0, 2.0, 2.0)
+    for kind in ("dtm", "dsm"):
+        tile(tiles, kind)
+        tile(tiles, kind, transform=far, stem=f"far_{kind}")
+    searches = []
+
+    def fetch(url: str, body: bytes | None) -> dict:
+        if "token" in url:
+            return {"token": "sv=test&sig=x"}
+        request = json.loads(body)
+        kind = "dtm" if request["collections"][0].endswith("dtm") else "dsm"
+        west, south, east, north = request["bbox"]
+        searches.append(north - south)
+
+        def item(row: int, stem: str) -> dict:
+            return {"id": f"USGS_LPC_TX_South_B7_2018_LAS_2019-{kind}-2m-14-{row}",
+                    "properties": {"start_datetime": "2019-01-01T00:00:00Z"},
+                    "assets": {"data": {"href": str(tiles / f"{stem}.tif")}}}
+
+        wide = north - south > 1.0
+        return {"features": [item(5, f"far_{kind}")] + ([item(3, kind)] if wide else [])}
+
+    ground = lidar.fetch_ground(outline(), tmp_path / "out", fetch=fetch, opener=open_local)
+    assert ground.project == "TX_South_B7_2018" and ground.tiles == 1
+    with rasterio.open(ground.dtm) as dtm:
+        assert dtm.bounds.bottom < FIELD.bounds[1] and dtm.bounds.top > FIELD.bounds[3]
+    assert [span > 1.0 for span in searches] == [False, True, False, True]
+
+
+def test_a_field_under_a_standing_crop_is_refused(tmp_path: Path, monkeypatch) -> None:
+    """Cane still standing when the survey flew: the laser saw the crop, not the ground."""
+    tiles = tmp_path / "tiles"
+    tile(tiles, "dtm")
+    tile(tiles, "dsm", canopy_share=0.9)
+    fetch, _ = fake_service(tiles)
+    real = lidar.fetch_ground
+    monkeypatch.setattr(lidar, "fetch_ground",
+                        lambda shape, folder: real(shape, folder, fetch=fetch, opener=open_local))
+    (tmp_path / "dosojos_sat").mkdir()
+    (tmp_path / "dosojos_sat" / "fields.geojson").write_text(json.dumps({
+        "type": "FeatureCollection", "features": [{
+            "type": "Feature", "geometry": outline().__geo_interface__,
+            "properties": {"id": "PUBLIC-f1", "name": "F", "crop": "grain sorghum"}}]}),
+        encoding="utf-8")
+    workspace = tmp_path / "drone"
+    result = CliRunner().invoke(cli, ["--workspace", str(workspace), "lidar", "L1", "--field",
+                                      "PUBLIC-f1"])
+    assert result.exit_code != 0
+    assert "the terrain check would judge the crop" in " ".join(result.output.split())
+    assert not (workspace / "flights.json").exists()

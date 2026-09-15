@@ -11,6 +11,11 @@ It is older and coarser than a drone. The Valley was flown in 2018-19, so a
 field leveled since will not show it, and a 2 m cell sees broad high and low
 spots but not a single furrow. Good for a first look at whether the water can
 cross a field evenly; a bare-soil drone flight is still the sharper check.
+
+The catalog's tile footprints are not trusted: survey TX_South_B7_2018 (around
+Elsa and Edcouch) lists each column of tiles mirrored north to south, up to 60 km
+off. Each tile's own header says where it lies, and when the tiles the catalog
+offers all miss the field, a wider band is searched the same way.
 """
 
 from __future__ import annotations
@@ -36,6 +41,8 @@ TOKEN = "https://planetarycomputer.microsoft.com/api/sas/v1/token/{collection}"
 COLLECTIONS = {"dtm": "3dep-lidar-dtm", "dsm": "3dep-lidar-dsm"}
 #: Ground kept around the field, so its edge cells have neighbours.
 MARGIN_M = 20.0
+#: How far north and south to look again when the catalog's tiles miss the field.
+WIDEN_DEG = 0.8
 SOURCE = "USGS 3DEP lidar (public domain), via Microsoft Planetary Computer"
 
 _GDAL = {"GDAL_DISABLE_READDIR_ON_OPEN": "EMPTY_DIR", "GDAL_HTTP_MAX_RETRY": "4",
@@ -68,11 +75,31 @@ def _http_json(url: str, body: bytes | None = None) -> dict:
 
 
 def search(bbox: tuple[float, float, float, float], collection: str, *,
-           fetch: Fetcher | None = None) -> list[dict]:
-    """The STAC items of ``collection`` touching a lon/lat box."""
+           fetch: Fetcher | None = None, limit: int = 100) -> list[dict]:
+    """The STAC items of ``collection`` whose catalog footprint touches a lon/lat box."""
     fetch = fetch or _http_json
-    body = json.dumps({"collections": [collection], "bbox": list(bbox), "limit": 100}).encode()
+    body = json.dumps({"collections": [collection], "bbox": list(bbox), "limit": limit}).encode()
     return fetch(STAC_SEARCH, body).get("features", [])
+
+
+def _year(item: dict) -> str:
+    props = item["properties"]
+    return str(props.get("start_datetime") or props.get("datetime") or "")[:4]
+
+
+def _open_covering(items: list[dict], token: str, opener: Callable[[str], rasterio.DatasetReader],
+                   bbox: tuple[float, float, float, float]) -> list[tuple[dict, object]]:
+    """The items whose rasters really overlap a lon/lat box, opened; the rest closed."""
+    west, south, east, north = bbox
+    kept = []
+    for item in items:
+        source = opener(_signed(item["assets"]["data"]["href"], token))
+        w, s, e, n = transform_bounds(source.crs, "EPSG:4326", *source.bounds, densify_pts=21)
+        if w < east and e > west and s < north and n > south:
+            kept.append((item, source))
+        else:
+            source.close()
+    return kept
 
 
 def _signed(href: str, token: str) -> str:
@@ -103,27 +130,34 @@ def fetch_ground(outline: BaseGeometry, folder: Path, *, fetch: Fetcher | None =
     written: dict[str, Path] = {}
     project, year, resolution, tiles = "", 0, math.nan, 0
     for kind, collection in COLLECTIONS.items():
-        try:
-            items = search(bbox, collection, fetch=fetch)
-            token = fetch(TOKEN.format(collection=collection), None)["token"]
-        except (OSError, KeyError, ValueError) as exc:
-            raise LidarError(f"could not reach the Planetary Computer for {kind}: {exc}") from exc
-        if not items:
-            raise LidarError(
-                "no USGS 3DEP lidar covers this field (most of the lower 48 is flown; "
-                "check the outline). A bare-soil drone flight is the other way to map the ground."
-            )
-        # The newest survey wins where two overlap: the ground it saw is the latest.
-        newest = max(str(i["properties"].get("start_datetime") or i["properties"].get("datetime")
-                         or "")[:4] for i in items)
-        items = [i for i in items if str(i["properties"].get("start_datetime")
-                                         or i["properties"].get("datetime") or "")[:4] == newest]
-        project, year, tiles = _project(items[0]), int(newest or 0), len(items)
         with rasterio.Env(**_GDAL):
             try:
-                sources = [opener(_signed(i["assets"]["data"]["href"], token)) for i in items]
+                token = fetch(TOKEN.format(collection=collection), None)["token"]
+                found = _open_covering(search(bbox, collection, fetch=fetch), token, opener, bbox)
+                if not found:
+                    wide = (bbox[0] - 0.02, bbox[1] - WIDEN_DEG, bbox[2] + 0.02, bbox[3] + WIDEN_DEG)
+                    log.info("lidar %s: the catalog's tiles miss the field; looking %.1f degrees "
+                             "north and south", kind, WIDEN_DEG)
+                    found = _open_covering(search(wide, collection, fetch=fetch, limit=500),
+                                           token, opener, bbox)
+            except (OSError, KeyError, ValueError) as exc:
+                raise LidarError(f"could not reach the Planetary Computer for {kind}: {exc}") from exc
             except rasterio.RasterioIOError as exc:
                 raise LidarError(f"could not open the lidar tiles: {exc}") from exc
+            if not found:
+                raise LidarError(
+                    "no USGS 3DEP lidar covers this field (most of the lower 48 is flown; "
+                    "check the outline). A bare-soil drone flight is the other way to map the "
+                    "ground."
+                )
+            # The newest survey wins where two overlap: the ground it saw is the latest.
+            newest = max(_year(item) for item, _ in found)
+            for item, source in found:
+                if _year(item) != newest:
+                    source.close()
+            found = [(item, source) for item, source in found if _year(item) == newest]
+            project, year, tiles = _project(found[0][0]), int(newest or 0), len(found)
+            sources = [source for _, source in found]
             try:
                 crs = sources[0].crs
                 if any(s.crs != crs for s in sources):
@@ -149,7 +183,7 @@ def fetch_ground(outline: BaseGeometry, folder: Path, *, fetch: Fetcher | None =
             out.write(mosaic[0], 1)
         written[kind] = path
         log.info("lidar %s: %s x %s cells at %.1f m from %d tile(s) of %s", kind,
-                 mosaic.shape[2], mosaic.shape[1], resolution, len(items), project)
+                 mosaic.shape[2], mosaic.shape[1], resolution, tiles, project)
     (folder / "source.json").write_text(json.dumps({
         "source": SOURCE, "project": project, "year": year, "resolution_m": resolution,
         "tiles": tiles, "collections": list(COLLECTIONS.values()),
@@ -160,6 +194,9 @@ def fetch_ground(outline: BaseGeometry, folder: Path, *, fetch: Fetcher | None =
 #: Past this share of cells with something over 1 m above the ground, the ground
 #: under it is mostly interpolated between the few returns that reached the soil.
 COVERED_WARN = 0.15
+#: Over this share the laser mostly hit the crop, not the ground (cane in a winter
+#: survey), and the ground model is a guess: the terrain check would judge the crop.
+COVERED_REFUSE = 0.5
 
 
 def covered_share(ground: LidarGround, *, above_m: float = 1.0) -> float:

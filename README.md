@@ -610,6 +610,14 @@ dosojos-drone terrain F002-lidar
 - **Trees hide the ground.** Where the laser hit canopy (surface over 1 m above
   the ground on more than 15% of the field), `lidar` warns. Under the citrus
   grove it was 30%, so orchards need a drone after all.
+- **So can a standing crop.** Over half covered, `lidar` refuses and registers
+  nothing. A sorghum field near Elsa stood under a crop over 1 m tall (probably
+  cane) on 85% of it when the survey flew. Its "ground" had 2 m high spots and
+  asked for 1,000 cubic yards per acre of leveling.
+- **The catalog's footprints aren't trusted.** Survey TX_South_B7_2018, around
+  Elsa and Edcouch, lists each column of tiles mirrored north to south, up to
+  60 km off. `lidar` reads each tile's own extent, and when the offered tiles all
+  miss the field it searches 0.8° north and south.
 - **One plane per field.** The check fits a single smooth plane, so the outline
   must be one field. The first Valley corn pick was two fields across a farm road,
   each draining to the road ditch. The check called that an "uneven" field with
@@ -766,7 +774,7 @@ unaffected by that, but reported GSD is coarser than the real camera's.
 ./.venv/Scripts/python.exe -m pytest -q
 ```
 
-293 tests, none needing Docker, a network, or real imagery.
+295 tests, none needing Docker, a network, or real imagery.
 
 ## Layout
 
