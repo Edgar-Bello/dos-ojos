@@ -20,7 +20,7 @@ be confirmed or dismissed from 60 metres.
 | 7 | Dead / missing / stressed flags | done |
 | 8 | Overlay, histogram, block summary JSON, satellite join | done |
 | — | Run on real public data (Purdue 2018 sorghum): import, blocks, known row spacing, row tracking | done |
-| — | Ground without a drone: public USGS 3DEP lidar (`lidar`) under real Valley cotton, corn and sorghum | done |
+| — | Ground without a drone: public USGS 3DEP lidar (`lidar`) under real Valley cotton and corn | done |
 | — | Real public citrus photos (USDA Fort Pierce grove): registered and surveyed; ODM waits on Docker | waiting |
 
 ## Setup
@@ -623,7 +623,7 @@ dosojos-drone terrain F002-lidar
   each draining to the road ditch. The check called that an "uneven" field with
   a low middle and asked for leveling neither field needs. The satellite half's
   `cropmap` now passes over such blocks.
-- Used on real Valley cotton, corn and sorghum in `../public_demo/rgv-crops-2025/`;
+- Used on real Valley cotton and corn in `../public_demo/rgv-crops-2025/`;
   its `SOURCE.md` has the results.
 
 ## Real data: a USDA citrus grove (waiting on Docker)
