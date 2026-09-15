@@ -57,6 +57,8 @@ wheels on 3.13+ yet, and 3.14 will fail to install.
 | `water` | The water checkbook: water left, days until it runs short, who first |
 | `status` | Coverage per field, gaps, disk use, data-quality warnings |
 | `scenes` | Diagnostic: search and mask one field without writing anything |
+| `cropmap` | Picks real fields of each crop from USDA's Cropland Data Layer, for demos |
+| `recheck-offsets` | Re-reads cached days whose scenes were wrongly flagged unharmonised |
 
 Global flags: `--offline`, `--db <path>`, `--workspace <dir>`, `-v` for debug
 logging.
@@ -79,6 +81,39 @@ dosojos-sat --workspace ... chart --season 2018 --as-of 2018-07-10 --banner "FRE
   such as a drone flight's. Charts draw later points faded, and `flags.json`
   records `as_of`.
 - `chart --banner` puts a band above the title, used to mark public data.
+
+**Real fields of other crops, from public data.** `cropmap` reads the USDA NASS
+Cropland Data Layer (30 m, public domain) over a box of the Valley. For each crop:
+
+- It traces blocks of pixels of that crop 45 m inside their edge.
+- It keeps those at least 90% that crop and 15 to 250 acres.
+- It picks the most solid, squarest ones at least 3 km apart.
+
+It writes them as a fields file with ids like `PUBLIC-rgv-cotton-1`, plus
+`out/cropmap_<year>.png`.
+
+A block can be two fields of the same crop with a farm road between them, since
+the road is narrower than a map cell. The first Valley corn pick was exactly that,
+and the lidar ground check read the two fields' separate grades as one "uneven"
+field. Two checks now catch it:
+
+- **A waist is cut.** Where the map lost only a stretch of the road, the block
+  narrows to a waist. An 80 m opening severs it, and the larger field is kept.
+- **Earlier years must agree.** For annual crops, one crop has to cover at least
+  75% of the outline in each of the four earlier years' maps too. Split halves
+  rarely grew the same crop every year. `--history` sets the years; this means a
+  small crop-map download per candidate.
+- **Groves are exempt.** Citrus and cane skip the history check, because the map
+  often calls an old grove "grass".
+
+```bash
+dosojos-sat --workspace ../public_demo/rgv-crops-2025/dosojos_sat cropmap \
+    --crops sorghum,cotton,corn,citrus --out ../public_demo/rgv-crops-2025/dosojos_sat/fields.geojson
+```
+
+`../public_demo/rgv-crops-2025/run_demo.cmd` runs the whole four-crop demo
+(sorghum, cotton, corn, citrus); its `SOURCE.md` says what each result means.
+The outlines are the map's pixels, not surveys.
 
 ## Water: how long each field has
 
@@ -206,9 +241,18 @@ NDVI down alone points at disease, nutrient deficiency, or a harvest.
 `earthsearch:boa_offset_applied: true`, meaning the COG mirror already folded it
 in. The declared offset describes ESA's original convention, not the bytes in the
 file. Applying it a second time drove ~70% of a field's green and red reflectance
-negative and pinned NDVI at 1.0. The flag is the authority, not the offset.
-`stac.warn_if_implausible` now shouts if any band comes back >25% negative, and
-`status` reports indices pinned at their bound.
+negative and pinned NDVI at 1.0. `stac.warn_if_implausible` now shouts if any band
+comes back >25% negative, and `status` reports indices pinned at their bound.
+
+**...but the flag is sometimes wrong.** Some items from 2022 on (processing baseline
+04.00+) say `boa_offset_applied: false` although their bytes already carry the
+offset: 12 scenes over the first four Valley demo fields. A raw file cannot read below DN
+1000 (the offset) over land, so when an item declares a nonzero offset and says it
+is not applied, `stac.harmonised` reads the red band's small overview once and
+looks at its darkest pixels (2nd percentile). Below 1000, the offset is already in
+and is not applied again; the check is logged and cached per scene. Items from
+before 2022 declare no offset and are left alone. `recheck-offsets` finds cached
+days read before this check and re-reads just those (`--dry-run` lists them).
 
 **MGRS tiles overlap by ~10 km.** A small field routinely sits wholly inside four
 tiles of the same acquisition. Reading all four costs four times the requests for
@@ -249,11 +293,12 @@ src/
   soils.py            SSURGO soil water profile under an outline
   water.py            the water checkbook: log, balance, projection, ranking
   charts.py           matplotlib output
+  cropmap.py          real fields of each crop from the USDA Cropland Data Layer
   cli.py              click commands
 examples/             an EXAMPLE field log for the placeholder fields, not records
 cache/                sqlite database and clipped GeoTIFFs
 out/                  flags.json, water.json and chart PNGs
-tests/                232 tests, no network required
+tests/                253 tests, no network required
 ```
 
 `fields.py`, `charts.py`, `config.py` and `pipeline.py` are additions to the
@@ -265,7 +310,7 @@ original module plan.
 ./.venv/Scripts/python.exe -m pytest -q
 ```
 
-232 tests, none of which touch the network. They cover index arithmetic against
+253 tests, none of which touch the network. They cover index arithmetic against
 hand-computed values, the reflectance transform, SCL masking, tile selection,
 circular day-of-year distance and windowing, percentile pooling against a known
 distribution, robust z, run detection, and both flag triggers.

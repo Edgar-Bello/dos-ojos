@@ -11,7 +11,7 @@ from typing import Sequence
 import click
 
 from . import baseline as baseline_mod
-from . import cache, charts, pipeline, soils, stac
+from . import cache, charts, cropmap, pipeline, soils, stac
 from . import water as water_mod
 from . import weather as weather_mod
 from .config import INDEX_NAMES, Settings, default_root, setup_logging
@@ -995,6 +995,156 @@ def _format_water(ranked: Sequence[water_mod.WaterStatus]) -> str:
          "TO STRESS", "REFILL NET/GROSS", "CONF"),
         rows, "><<<<><>>><",
     )
+
+
+@cli.command("recheck-offsets")
+@click.option("--fields", "field_csv", default=None,
+              help="Comma-separated field ids  [default: all registered fields]")
+@click.option("--dry-run", is_flag=True, help="List the days without reading them again.")
+@click.pass_obj
+def recheck_offsets_cmd(settings: Settings, field_csv: str | None, dry_run: bool) -> None:
+    """Re-read cached days whose scenes were wrongly flagged as still needing the offset.
+
+    Some Earth Search items say ``earthsearch:boa_offset_applied: false`` although
+    their files already carry the -0.1 offset. Days fetched before this was caught
+    had it subtracted twice. This finds them by the scenes' own pixels and reads
+    them again, correctly.
+    """
+    try:
+        stac.assert_online(settings, "look the cached scenes up again")
+    except stac.OfflineViolation as exc:
+        raise click.ClickException(str(exc)) from exc
+    with cache.session(settings.db_path) as conn:
+        try:
+            fields = cache.get_fields(conn, _ids(field_csv))
+        except KeyError as exc:
+            raise click.ClickException(str(exc)) from exc
+        wanted = {f.field_id for f in fields}
+        days = [(r["field_id"], date.fromisoformat(r["date"]), r["scene_id"]) for r in conn.execute(
+            "SELECT DISTINCT field_id, date, scene_id FROM observations WHERE index_name = 'NDVI'")
+            if r["field_id"] in wanted]
+        scene_ids = sorted({part for _, _, joined in days for part in joined.split("+")})
+        client = stac.open_client(settings)
+        items = []
+        for start in range(0, len(scene_ids), 100):
+            batch = scene_ids[start:start + 100]
+            items += list(client.search(collections=[settings.collection], ids=batch).items())
+        doubled = {s.scene_id for s in stac._to_scene_refs(items)
+                   if not s.boa_offset_applied and stac.harmonised(s)}
+        redo: dict[str, list[date]] = {}
+        for field_id, day, joined in days:
+            if doubled & set(joined.split("+")):
+                redo.setdefault(field_id, []).append(day)
+        rows = [(f.field_id, str(len(redo.get(f.field_id, []))),
+                 ", ".join(str(d) for d in sorted(redo.get(f.field_id, []))[:6])
+                 + (" ..." if len(redo.get(f.field_id, [])) > 6 else "")) for f in fields]
+        click.echo(f"{len(scene_ids)} cached scene(s) looked up; {len(doubled)} flagged raw but "
+                   "already harmonised.\n")
+        click.echo(_table(("FIELD", "DAYS", "WHICH"), rows, "<><"))
+        if dry_run or not redo:
+            return
+        for field in fields:
+            for day in sorted(redo.get(field.field_id, [])):
+                pipeline.fetch_fields(conn, [field], day, day, settings, force=True, workers=1)
+        click.echo(f"\nRead {sum(len(v) for v in redo.values())} day(s) again. Re-run "
+                   "baseline, score and water to use them.")
+
+
+@cli.command("cropmap")
+@click.option("--year", type=int, default=2025, show_default=True, help="Crop map year.")
+@click.option("--bbox", default="-98.45,26.05,-97.45,26.55", show_default=True,
+              help="west,south,east,north in degrees; the default is the Valley's farmland.")
+@click.option("--crops", default="sorghum,cotton,corn,citrus", show_default=True,
+              help=f"Comma-separated, from: {', '.join(cropmap.CROP_CODES)}")
+@click.option("--per-crop", type=int, default=1, show_default=True)
+@click.option("--prefix", default="PUBLIC-rgv", show_default=True, help="Start of each field id.")
+@click.option("--out", "out_path", type=click.Path(dir_okay=False, path_type=Path), required=True,
+              help="The fields.geojson to write.")
+@click.option("--banner", default=None, help="Band above the map, e.g. to mark public data.")
+@click.option("--history", "history_span", default=None,
+              help="Earlier years in which an annual crop's field must have been one crop, "
+                   "e.g. 2021-2024; 'none' to skip  [default: the four years before --year]")
+@click.pass_obj
+def cropmap_cmd(settings: Settings, year: int, bbox: str, crops: str, per_crop: int, prefix: str,
+                out_path: Path, banner: str | None, history_span: str | None) -> None:
+    """Pick real fields of each crop from USDA's public crop map (Cropland Data Layer).
+
+    A block of one crop can be two fields with a farm road between them, which a
+    30 m map cannot see. For annual crops the maps of earlier years settle it: a
+    field is kept only if one crop covered it in each of those years too.
+    """
+    try:
+        box_ = tuple(float(v) for v in bbox.split(","))
+        assert len(box_) == 4 and box_[0] < box_[2] and box_[1] < box_[3]
+    except (ValueError, AssertionError):
+        raise click.ClickException(f"--bbox {bbox!r} must be west,south,east,north in degrees")
+    if history_span is None:
+        history_years: tuple[int, ...] = tuple(range(year - 4, year))
+    elif history_span.strip().lower() == "none":
+        history_years = ()
+    else:
+        try:
+            first, last = (int(v) for v in history_span.split("-"))
+            assert first <= last < year
+        except (ValueError, AssertionError):
+            raise click.ClickException(f"--history {history_span!r} must be like 2021-2024, "
+                                       f"before {year}, or 'none'")
+        history_years = tuple(range(first, last + 1))
+    folder = settings.root / "cache" / "cdl"
+    try:
+        if not (folder / f"cdl_{year}_classes.json").exists():
+            stac.assert_online(settings, "read the USDA crop map")
+        map_path = cropmap.fetch(box_, year, folder)
+    except (stac.OfflineViolation, cropmap.CropMapError) as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    chosen, rows, skipped = [], [], []
+
+    def one_field(candidate: cropmap.Candidate) -> bool:
+        """Whether the candidate was one crop in every earlier year (annual crops only)."""
+        if candidate.crop in cropmap.PERENNIAL or not history_years:
+            return True
+        shares = cropmap.history(candidate, history_years, folder)
+        mixed = {y: s for y, s in sorted(shares.items()) if s < cropmap.MIN_HISTORY_PURITY}
+        if mixed:
+            skipped.append(f"{candidate.crop} near {candidate.town} "
+                           f"({candidate.geometry.centroid.y:.4f}, "
+                           f"{candidate.geometry.centroid.x:.4f}): one crop over only "
+                           + ", ".join(f"{s:.0%} in {y}" for y, s in mixed.items()))
+        return not mixed
+
+    for crop in [c.strip() for c in crops.split(",") if c.strip()]:
+        try:
+            found = cropmap.trace(map_path, crop)
+            picked = cropmap.pick(found, per_crop, accept=one_field)
+        except (cropmap.CropMapError, stac.OfflineViolation) as exc:
+            raise click.ClickException(str(exc)) from exc
+        if not picked:
+            why = (f" that was one crop in each of {history_years[0]}-{history_years[-1]} too"
+                   if found and history_years and crop not in cropmap.PERENNIAL else "")
+            click.secho(f"WARNING: no {crop} field of 15-250 acres on the {year} crop map in "
+                        f"this box{why}.", fg="yellow")
+        chosen += picked
+        rows += [(crop, str(len(found)), c.town, f"{c.acres:.0f}", f"{c.purity:.0%}",
+                  f"{c.geometry.centroid.y:.4f}, {c.geometry.centroid.x:.4f}") for c in picked]
+    if not chosen:
+        raise click.ClickException("no field found for any crop; widen --bbox or change --crops")
+    collection = cropmap.features(chosen, year=year, prefix=prefix, history_years=history_years)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(collection, indent=2) + "\n", encoding="utf-8")
+    picture = charts.plot_cropmap(map_path, cropmap.class_table(map_path), collection,
+                                  settings.out_dir / f"cropmap_{year}.png", year=year,
+                                  banner=banner)
+    click.echo(_table(("CROP", "FIELDS", "NEAR", "ACRES", "PURE", "CENTER"), rows, "<><>><"))
+    if skipped:
+        click.echo(f"\nPassed over {len(skipped)} block(s) that earlier maps show as two fields, "
+                   "or one farmed in parts:")
+        for line in skipped[:8]:
+            click.echo(f"  {line}")
+        if len(skipped) > 8:
+            click.echo(f"  ... and {len(skipped) - 8} more")
+    click.echo(f"\n{len(chosen)} field(s) written to {out_path}\nMap: {picture}")
+    click.echo("Outlines are traced inside each field's edge on a 30 m map, not surveyed.")
 
 
 if __name__ == "__main__":  # pragma: no cover  (last, once every command is registered)

@@ -7,6 +7,7 @@ history; the line over it is this season.
 from __future__ import annotations
 
 import logging
+import math
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -389,7 +390,7 @@ def plot_water(
     verdict, color = water_verdict(status)
     axes.annotate(verdict, xy=(0, 1), xycoords="axes fraction", xytext=(0, 7),
                   textcoords="offset points", fontsize=FONT_SIZES["annotation"],
-                  color=color, fontweight="medium")
+                  color=color, fontweight="bold")
     if banner:
         axes.annotate(
             banner, xy=(0, 1), xycoords="axes fraction", xytext=(0, 84),
@@ -403,3 +404,73 @@ def plot_water(
     plt.close(figure)
     log.info("wrote %s", path)
     return path
+
+
+# --------------------------------------------------------------------------- #
+# The crop map
+# --------------------------------------------------------------------------- #
+
+#: Crop map classes that are not crops (towns, water, wild land, pasture), left
+#: pale so the crops stand out.
+_NOT_FARMLAND = set(range(81, 200))
+
+
+def plot_cropmap(map_path: Path, classes: dict[int, dict], fields: dict, out_path: Path, *,
+                 year: int, banner: str | None = None, top: int = 8) -> Path:
+    """USDA's crop map in its own colours, with the chosen fields marked on it."""
+    import rasterio
+    from pyproj import Transformer
+
+    with rasterio.open(map_path) as dataset:
+        values, bounds, crs = dataset.read(1), dataset.bounds, dataset.crs
+    palette = np.ones((256, 3))
+    for value, row in classes.items():
+        colour = np.array([row["Red"], row["Green"], row["Blue"]]) / 255.0
+        # Towns, water and wild land fade to grey; the farmland keeps USDA's colours.
+        palette[value] = 0.35 * colour + 0.65 if value in _NOT_FARMLAND else colour
+    palette[0] = 1.0
+
+    figure, axes = plt.subplots(figsize=(12.5, 7.6))
+    axes.imshow(palette[values], extent=(bounds.left, bounds.right, bounds.bottom, bounds.top),
+                interpolation="nearest")
+    to_map = Transformer.from_crs(4326, crs, always_xy=True)
+    labelled: list[tuple[float, float]] = []
+    for feature in fields["features"]:
+        ring = feature["geometry"]["coordinates"][0]
+        xs, ys = zip(*[to_map.transform(lon, lat) for lon, lat in ring])
+        cx, cy = float(np.mean(xs)), float(np.mean(ys))
+        axes.plot(cx, cy, "o", markersize=15, markerfacecolor="none", markeredgecolor="black",
+                  markeredgewidth=2.2)
+        axes.plot(xs, ys, color="black", linewidth=1.2)
+        # Neighbouring fields (the map is in metres) stack their labels instead of overlapping.
+        below = sum(1 for x, y in labelled if math.hypot(cx - x, cy - y) < 4_000)
+        labelled.append((cx, cy))
+        axes.annotate(feature["properties"]["name"], (cx, cy), xytext=(12, 10 - 24 * below),
+                      textcoords="offset points", fontsize=FONT_SIZES["legend"], fontweight="bold",
+                      bbox={"boxstyle": "round,pad=0.25", "facecolor": "white", "alpha": 0.85,
+                            "edgecolor": "none"})
+
+    present, counts = np.unique(values, return_counts=True)
+    farm = [(n, v) for v, n in zip(present, counts) if v and v not in _NOT_FARMLAND]
+    handles = [plt.Rectangle((0, 0), 1, 1, color=palette[v]) for _, v in sorted(farm, reverse=True)[:top]]
+    labels = [classes[v]["Class_Names"] for _, v in sorted(farm, reverse=True)[:top]]
+    axes.legend(handles, labels, loc="lower left", fontsize=FONT_SIZES["legend"] - 1,
+                framealpha=0.9, title="Largest crops", title_fontsize=FONT_SIZES["legend"])
+    axes.set_axis_off()
+    axes.set_title(f"What grew where in {year}, and the demo's fields", loc="left",
+                   fontsize=FONT_SIZES["title"], pad=34)
+    axes.annotate(f"USDA NASS Cropland Data Layer {year} (public domain), 30 m. Each circle is "
+                  "a real field of that crop, not ours.", xy=(0, 1), xycoords="axes fraction",
+                  xytext=(0, 8), textcoords="offset points", fontsize=FONT_SIZES["subtitle"],
+                  color="#6f6e69")
+    if banner:
+        axes.annotate(banner, xy=(0, 1), xycoords="axes fraction", xytext=(0, 62),
+                      textcoords="offset points", fontsize=FONT_SIZES["legend"], color="white",
+                      fontweight="bold",
+                      bbox={"boxstyle": "square,pad=0.45", "facecolor": BANNER_COLOR,
+                            "edgecolor": "none"})
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    figure.savefig(out_path, bbox_inches="tight", facecolor="white", dpi=DPI)
+    plt.close(figure)
+    log.info("wrote %s", out_path)
+    return out_path

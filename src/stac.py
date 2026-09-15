@@ -453,14 +453,19 @@ def load_clip(field: Field, scenes: Sequence[SceneRef], settings: Settings) -> C
     day = dataset.isel(time=0)
 
     scl = np.asarray(day[BAND_ASSETS["SCL"]].values).astype(np.uint8)
-    bands = {
-        band: _to_reflectance(np.asarray(day[asset].values), *_reflectance_transform(scenes, asset))
-        for band, asset in BAND_ASSETS.items()
-        if band != "SCL"
-    }
+    bands = _read_bands(day, scenes)
 
     geobox = day.odc.geobox
     poly_mask = polygon_mask(field, geobox.transform, scl.shape)
+    corrected = _without_double_offset(day, scenes, bands, poly_mask)
+    if corrected is not None:
+        log.warning(
+            "%s %s: %s say the -0.1 offset is still to apply (earthsearch:"
+            "boa_offset_applied false), but applying it drove the field's green or red "
+            "negative; the files already carry it, so they were read without it",
+            field.field_id, solar_date, ", ".join(s.scene_id for s in scenes),
+        )
+        bands = corrected
     warn_if_implausible(bands, poly_mask, field.field_id, solar_date)
     return Clip(
         field_id=field.field_id,
@@ -476,6 +481,48 @@ def load_clip(field: Field, scenes: Sequence[SceneRef], settings: Settings) -> C
 
 #: Above this share of negative pixels, the scaling is wrong rather than the sky.
 MAX_NEGATIVE_FRACTION = 0.25
+
+
+def _read_bands(day, scenes: Sequence[SceneRef], *,
+                offset: float | None = None) -> dict[str, np.ndarray]:
+    """Every reflectance band of one solar day; ``offset`` overrides the declared one."""
+    bands = {}
+    for band, asset in BAND_ASSETS.items():
+        if band == "SCL":
+            continue
+        scale, declared, nodata = _reflectance_transform(scenes, asset)
+        bands[band] = _to_reflectance(np.asarray(day[asset].values), scale,
+                                      declared if offset is None else offset, nodata)
+    return bands
+
+
+def negative_share(values: np.ndarray, poly_mask: np.ndarray) -> float:
+    """Share of the field's valid pixels below zero reflectance."""
+    inside = values[poly_mask]
+    finite = inside[np.isfinite(inside)]
+    return float(np.count_nonzero(finite < 0.0)) / finite.size if finite.size else 0.0
+
+
+def _without_double_offset(day, scenes: Sequence[SceneRef], bands: dict[str, np.ndarray],
+                           poly_mask: np.ndarray) -> dict[str, np.ndarray] | None:
+    """The bands read without the offset, when the item's flag has it wrong; else None.
+
+    Some Earth Search items of processing baseline 05.11 (tile 14RPQ, late February
+    to early March 2025 among them) report ``earthsearch:boa_offset_applied: false``
+    although their files already carry the offset, like their neighbours flagged
+    true. Applying it again sends green and red below zero over most of a field and
+    pins NDVI at 1. Green or red going mostly negative is the tell; the bands are
+    kept without the offset only if that clears it.
+    """
+    if all(harmonised(scene) for scene in scenes):
+        return None
+    visible = ("B03", "B04")
+    if max(negative_share(bands[b], poly_mask) for b in visible) <= MAX_NEGATIVE_FRACTION:
+        return None
+    plain = _read_bands(day, scenes, offset=0.0)
+    if max(negative_share(plain[b], poly_mask) for b in visible) > MAX_NEGATIVE_FRACTION:
+        return None
+    return plain
 
 
 def warn_if_implausible(
@@ -524,6 +571,65 @@ def polygon_mask(
     return mask
 
 
+#: A file still carrying ESA's +1000 has no land or water pixel below this DN;
+#: an already harmonised one has plenty (dark water and canopy read ~0-500).
+HARMONISED_BELOW_DN = 1000
+_harmonised_cache: dict[str, bool] = {}
+
+
+def _dark_red_dn(scene: SceneRef) -> float | None:
+    """The 2nd percentile of the red band's valid DN over the whole tile, from its
+    overview: a few kilobytes, read once per scene."""
+    asset = scene.item.assets.get("red") if scene.item is not None else None
+    if asset is None or not asset.href.startswith("http"):
+        return None
+    import rasterio
+    from rasterio.enums import Resampling
+
+    try:
+        with rasterio.open(asset.href) as dataset:
+            sample = dataset.read(1, out_shape=(256, 256), resampling=Resampling.nearest)
+    except Exception as exc:  # noqa: BLE001 - no overview read means trusting the flag
+        log.debug("%s: could not sample the red overview (%s)", scene.scene_id, exc)
+        return None
+    valid = sample[sample > 0]
+    return float(np.percentile(valid, 2)) if valid.size else None
+
+
+def _declares_offset(scene: SceneRef) -> bool:
+    """Whether the item's red band declares a non-zero reflectance offset."""
+    asset = scene.item.assets.get("red") if scene.item is not None else None
+    raster = (asset.extra_fields.get("raster:bands") or asset.extra_fields.get("bands")
+              if asset is not None else None)
+    if isinstance(raster, list) and raster and isinstance(raster[0], dict):
+        return abs(float(raster[0].get("offset", DEFAULT_OFFSET))) > 1e-9
+    return True
+
+
+def harmonised(scene: SceneRef) -> bool:
+    """Whether the scene's files already carry the -0.1 offset.
+
+    ``earthsearch:boa_offset_applied`` says so, and is right when true. When it is
+    false the pixels are checked: some baseline 05.11 items (2022, late 2024 and
+    early 2025 on tile 14RPQ at least) are flagged false yet already harmonised,
+    and subtracting the offset again sends green and red below zero.
+    """
+    if scene.boa_offset_applied:
+        return True
+    if not _declares_offset(scene):
+        return False            # before baseline 04.00 there is no offset to apply at all
+    if scene.scene_id not in _harmonised_cache:
+        dark = _dark_red_dn(scene)
+        found = dark is not None and dark < HARMONISED_BELOW_DN
+        if found:
+            log.warning("%s is flagged earthsearch:boa_offset_applied=false, but its darkest "
+                        "red pixels read DN %.0f, below the 1000 a raw file cannot go under: "
+                        "it already carries the offset, which is not applied again",
+                        scene.scene_id, dark)
+        _harmonised_cache[scene.scene_id] = found
+    return _harmonised_cache[scene.scene_id]
+
+
 def _reflectance_transform(
     scenes: Sequence[SceneRef], asset_key: str
 ) -> tuple[float, float, float]:
@@ -545,7 +651,7 @@ def _reflectance_transform(
         if isinstance(raster, list) and raster and isinstance(raster[0], dict):
             entry = raster[0]
             offset = float(entry.get("offset", DEFAULT_OFFSET))
-            if scene.boa_offset_applied:
+            if harmonised(scene):
                 offset = 0.0
             return (
                 float(entry.get("scale", DEFAULT_SCALE)),
@@ -553,7 +659,7 @@ def _reflectance_transform(
                 float(entry.get("nodata", DEFAULT_NODATA)),
             )
     log.debug("no raster:bands on asset %r; using L2A defaults", asset_key)
-    default_offset = 0.0 if all(s.boa_offset_applied for s in scenes) else DEFAULT_OFFSET
+    default_offset = 0.0 if all(harmonised(s) for s in scenes) else DEFAULT_OFFSET
     return DEFAULT_SCALE, default_offset, DEFAULT_NODATA
 
 

@@ -422,3 +422,102 @@ def test_assert_online_raises_only_when_offline() -> None:
     offline = Settings.from_root(Path("."), offline=True)
     with pytest.raises(stac.OfflineViolation, match="--offline is set"):
         stac.assert_online(offline, "do a thing")
+
+
+class _Band:
+    def __init__(self, values: np.ndarray):
+        self.values = values
+
+
+def _day(green: int, red: int, nir: int = 3500, swir: int = 2000) -> dict:
+    """One solar day's raw bands, as odc-stac hands them back, uniform over the field."""
+    shape = (6, 6)
+    return {BAND_ASSETS[b]: _Band(np.full(shape, dn, dtype=np.uint16))
+            for b, dn in (("B03", green), ("B04", red), ("B08", nir), ("B11", swir))}
+
+
+FIELD_MASK = np.ones((6, 6), dtype=bool)
+FOOTPRINT = box(540000, 2850000, 660000, 2960000)
+
+
+def test_a_mislabelled_item_is_read_without_the_offset_it_already_carries() -> None:
+    """Flag false, yet the bytes already carry the offset (2025 baseline 05.11 items).
+
+    Green 0.06 and red 0.04 are a leafy crop; subtracting the offset again makes
+    them -0.04 and -0.06, and NDVI pins at 1.
+    """
+    scene = _scene("S2C_14RPQ_20250224_0_L2A", _to_wgs84(FOOTPRINT), boa_applied=False)
+    day = _day(green=600, red=400)
+    bands = stac._read_bands(day, [scene])
+    assert stac.negative_share(bands["B04"], FIELD_MASK) == 1.0
+    fixed = stac._without_double_offset(day, [scene], bands, FIELD_MASK)
+    assert fixed is not None
+    assert fixed["B03"][0, 0] == pytest.approx(0.06) and fixed["B04"][0, 0] == pytest.approx(0.04)
+
+
+def test_a_correctly_labelled_raw_item_keeps_its_offset() -> None:
+    scene = _scene("raw", _to_wgs84(FOOTPRINT), boa_applied=False)
+    day = _day(green=1600, red=1400)            # raw bytes, offset still to subtract
+    bands = stac._read_bands(day, [scene])
+    assert bands["B04"][0, 0] == pytest.approx(0.04)
+    assert stac._without_double_offset(day, [scene], bands, FIELD_MASK) is None
+
+
+def test_items_flagged_as_harmonised_are_never_second_guessed() -> None:
+    scene = _scene("cog", _to_wgs84(FOOTPRINT), boa_applied=True)
+    day = _day(green=600, red=400)
+    assert stac._without_double_offset(day, [scene], stac._read_bands(day, [scene]),
+                                       FIELD_MASK) is None
+
+
+def test_bands_that_stay_negative_either_way_are_left_for_the_warning() -> None:
+    """Dropping the offset must clear the negatives, or it is not the explanation."""
+    scene = _scene("odd", _to_wgs84(FOOTPRINT), boa_applied=False)
+    day = _day(green=600, red=400)
+    bands = stac._read_bands(day, [scene])
+    bands = {k: v - 0.5 for k, v in bands.items()}          # something else is wrong
+    plain_read = stac._read_bands
+
+    def still_negative(d, s, *, offset=None):
+        return {k: v - 0.5 for k, v in plain_read(d, s, offset=offset).items()}
+
+    stac._read_bands = still_negative
+    try:
+        assert stac._without_double_offset(day, [scene], bands, FIELD_MASK) is None
+    finally:
+        stac._read_bands = plain_read
+
+
+def test_an_item_flagged_raw_whose_pixels_are_harmonised_gets_no_offset(monkeypatch) -> None:
+    """Dark water and canopy below DN 1000 cannot exist in a file still carrying +1000."""
+    monkeypatch.setattr(stac, "_dark_red_dn", lambda scene: 387.0)
+    scene = _scene("S2C_14RPQ_20250224_0_L2A", _to_wgs84(FOOTPRINT), boa_applied=False)
+    assert stac.harmonised(scene)
+    assert stac._reflectance_transform([scene], "red")[1] == 0.0
+
+
+def test_an_item_flagged_raw_whose_pixels_are_raw_keeps_the_offset(monkeypatch) -> None:
+    monkeypatch.setattr(stac, "_dark_red_dn", lambda scene: 1075.0)
+    scene = _scene("raw", _to_wgs84(FOOTPRINT), boa_applied=False)
+    assert not stac.harmonised(scene)
+    assert stac._reflectance_transform([scene], "red")[1] == pytest.approx(-0.1)
+
+
+def test_each_scene_is_sampled_once(monkeypatch) -> None:
+    calls = []
+    monkeypatch.setattr(stac, "_dark_red_dn", lambda scene: calls.append(scene.scene_id) or 400.0)
+    scene = _scene("once", _to_wgs84(FOOTPRINT), boa_applied=False)
+    for _ in range(3):
+        stac.harmonised(scene)
+    assert calls == ["once"]
+
+
+def test_items_from_before_the_offset_era_are_not_checked(monkeypatch) -> None:
+    """Baseline < 04.00 declares no offset; dark pixels there are just dark pixels."""
+    calls = []
+    monkeypatch.setattr(stac, "_dark_red_dn", lambda scene: calls.append(1) or 5.0)
+    scene = _scene("old", _to_wgs84(FOOTPRINT), boa_applied=False)
+    for asset in scene.item.assets.values():
+        asset.extra_fields["raster:bands"] = [{"nodata": 0, "scale": 0.0001, "offset": 0}]
+    assert not stac.harmonised(scene) and calls == []
+    assert stac._reflectance_transform([scene], "red")[1] == 0.0
