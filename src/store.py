@@ -160,7 +160,14 @@ def session(db_path: Path) -> Iterator[sqlite3.Connection]:
 
 
 def now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return utc_iso()
+
+
+def utc_iso(now: datetime | None = None) -> str:
+    """``now`` in UTC as stored, or the real time. Links pass the app's clock, so a
+    demo pinned to a past day keeps the links in its texts working."""
+    return (now or datetime.now(timezone.utc)).astimezone(timezone.utc).isoformat(
+        timespec="seconds")
 
 
 def normalize_phone(raw: str) -> str:
@@ -463,10 +470,10 @@ def queued(conn: sqlite3.Connection, now_utc: str) -> list[sqlite3.Row]:
 
 
 def new_link(conn: sqlite3.Connection, kind: str, field_id: str, *, days: int,
-             meta: dict | None = None) -> str:
+             meta: dict | None = None, now: datetime | None = None) -> str:
     """An unguessable token for one field's map or upload page."""
     token = secrets.token_urlsafe(12)
-    created = datetime.now(timezone.utc)
+    created = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
     conn.execute(
         "INSERT INTO links(token, kind, field_id, meta, created_at, expires_at) "
         "VALUES (?,?,?,?,?,?)",
@@ -477,11 +484,12 @@ def new_link(conn: sqlite3.Connection, kind: str, field_id: str, *, days: int,
     return token
 
 
-def get_link(conn: sqlite3.Connection, token: str, kind: str) -> sqlite3.Row | None:
-    """The link if it exists, is of this kind and has not expired."""
+def get_link(conn: sqlite3.Connection, token: str, kind: str, *,
+             now: datetime | None = None) -> sqlite3.Row | None:
+    """The link if it exists, is of this kind and has not expired by ``now``."""
     row = conn.execute("SELECT * FROM links WHERE token = ? AND kind = ?",
                        (token, kind)).fetchone()
-    if row is None or row["expires_at"] < now_iso():
+    if row is None or row["expires_at"] < utc_iso(now):
         return None
     return row
 

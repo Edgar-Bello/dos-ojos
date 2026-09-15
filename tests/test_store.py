@@ -56,6 +56,18 @@ def test_links_expire(conn) -> None:
     assert store.get_link(conn, token, "map") is None
 
 
+def test_a_pinned_clock_keeps_its_links(conn) -> None:
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    store.add_farmer(conn, "+19565550123")
+    store.add_field(conn, "+19565550123", "A")
+    pinned = datetime(2025, 5, 20, 12, tzinfo=ZoneInfo("America/Chicago"))
+    token = store.new_link(conn, "map", "F001", days=14, now=pinned)
+    assert store.get_link(conn, token, "map", now=pinned) is not None
+    assert store.get_link(conn, token, "map") is None        # long gone on the real clock
+
+
 def test_farmers_round_trip(conn) -> None:
     farmer = store.add_farmer(conn, "+19565550123", channel="sim")
     farmer.name, farmer.lang, farmer.state = "Juan", "es", "idle"

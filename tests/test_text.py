@@ -36,9 +36,9 @@ SAMPLE = {"link": "https://dosojos.example.com/f/AbCdEfGhIjKlMnOp", "field": "Ca
           "said": "40", "raw": "10 af", "hours": "6", "n": "412", "size": "3.1 GB",
           "lat": "26.14840", "lon": "-97.99400", "what": "riego Campo Norte mar 18 ago",
           "options": "1 Campo Norte, 2 La Loma, 3 Todos", "a": "mié 4 mar", "b": "vie 3 abr",
-          "stage": "embuche y floración", "where": "el lado oeste", "yd": "147",
+          "stage": "embuche y floración", "where": "en el lado oeste", "yd": "147",
           "contact": "Edgar 956-555-0100", "amount": ", 4 pulgadas",
-          "about": "unos 12 días"}
+          "about": "unos 12 días", "year": "2019"}
 
 
 @pytest.mark.parametrize("key", sorted(text.T))

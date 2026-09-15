@@ -102,17 +102,18 @@ STAGES: dict[str, tuple[str, str]] = {
     "citrus": ("floración y amarre", "bloom and fruit set"),
 }
 
-#: Where the drone's terrain step places a spot, in words.
+#: Where the drone's terrain step places a spot, in words, with the word before it
+#: ("on the west side" but "in the middle").
 PLACES: dict[str, tuple[str, str]] = {
-    "north-east corner": ("la esquina noreste", "the north-east corner"),
-    "north-west corner": ("la esquina noroeste", "the north-west corner"),
-    "south-east corner": ("la esquina sureste", "the south-east corner"),
-    "south-west corner": ("la esquina suroeste", "the south-west corner"),
-    "north side": ("el lado norte", "the north side"),
-    "south side": ("el lado sur", "the south side"),
-    "east side": ("el lado este", "the east side"),
-    "west side": ("el lado oeste", "the west side"),
-    "middle": ("el centro", "the middle"),
+    "north-east corner": ("en la esquina noreste", "in the north-east corner"),
+    "north-west corner": ("en la esquina noroeste", "in the north-west corner"),
+    "south-east corner": ("en la esquina sureste", "in the south-east corner"),
+    "south-west corner": ("en la esquina suroeste", "in the south-west corner"),
+    "north side": ("en el lado norte", "on the north side"),
+    "south side": ("en el lado sur", "on the south side"),
+    "east side": ("en el lado este", "on the east side"),
+    "west side": ("en el lado oeste", "on the west side"),
+    "middle": ("en el centro", "in the middle"),
 }
 
 MISSING: dict[str, tuple[str, str]] = {
@@ -413,18 +414,28 @@ T: dict[str, tuple[str, str]] = {
     "status_stage": (" Está en {stage}: no lo deje secar.", " It's at {stage}: don't let it dry out."),
     "status_stage_soon": (" Pronto entra en {stage}: no lo deje secar.",
                           " It's nearly at {stage}: don't let it dry out."),
+    "status_stage_rainfed": (" Está en {stage}, cuando más le duele la sequía.",
+                             " It's at {stage}, when drought hurts most."),
+    "status_stage_soon_rainfed": (" Pronto entra en {stage}, cuando más le duele la sequía.",
+                                  " It's nearly at {stage}, when drought hurts most."),
     "status_rough": (" (Cálculo aproximado.)", " (Rough estimate.)"),
     "after_irrigation": ("{field} ahora tiene agua para {about}.",
                          "{field} now has water for {about}."),
     # --- the drone's ground report --------------------------------------------
     "ground_label": ("Terreno: ", "Ground: "),
-    "ground_high_spot": ("Hay una parte alta en {where} donde el agua no llega; "
+    "ground_lidar": (" (Suelo medido con láser del gobierno en {year}.)",
+                     " (Ground measured by government lidar in {year}.)"),
+    "ground_high_spot": ("Hay una parte alta {where} donde el agua no llega; "
                          "rebájela al nivelar, o dele más tiempo de riego mientras.",
-                         "A high spot on {where} that the water doesn't reach; cut it "
+                         "A high spot {where} that the water doesn't reach; cut it "
                          "down when leveling, or give it a longer set until then."),
-    "ground_low_spot": ("Hay una parte baja en {where} donde se encharca; rellénela "
+    "ground_low_spots": ("Hay partes bajas {where} donde se encharca; rellénelas al "
+                         "nivelar o abra un drenaje.",
+                         "Low spots {where} where water stands; fill them when leveling, "
+                         "or open a drain."),
+    "ground_low_spot": ("Hay una parte baja {where} donde se encharca; rellénela "
                         "al nivelar o abra un drenaje.",
-                        "A low spot on {where} where water stands; fill it when "
+                        "A low spot {where} where water stands; fill it when "
                         "leveling, or open a drain."),
     "ground_tail": ("El agua no llega al final de los surcos. Haga tiradas más cortas "
                     "(en 2 partes), más agua al inicio y luego menos, o válvulas de pulsos.",

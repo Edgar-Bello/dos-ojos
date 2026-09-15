@@ -1,0 +1,21 @@
+# EXAMPLE: a made-up grower on a pretend 555 number (956-555-0187), texting in English.
+# Her grove is a real citrus grove near Monte Alto from public USDA data
+# (demo_fields.geojson), flood-irrigated from the north; the three waterings are invented.
+# Used by setup_sms_demo.cmd.
+hello
+2
+Mary Example
+yes
+Monte Alto Grove
+35
+26.38276, -97.98556
+citrus
+flood
+north
+5/1 4
+yes
+Apr 9 4
+yes
+Mar 12 4
+yes
+no

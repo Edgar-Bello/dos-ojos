@@ -323,6 +323,9 @@ def test_the_ground_report_follows_when_a_watering_is_near(phone: Phone, conn, s
     water.status = FakeStatus(days_left=20, days_range=[16, 25], water_by="2026-10-02")
     assert len(phone("AGUA")) == 2              # nothing to change before a far-off watering
 
+    water.status = FakeStatus(method="none")
+    assert len(phone("AGUA")) == 2              # rainfed: no watering to change
+
 
 def test_status_when_a_map_is_missing(phone: Phone, conn) -> None:
     onboard(phone)

@@ -917,8 +917,9 @@ class Turn:
                                                map_link=self._map_link))
             s = item.status
             # How to water it matters when a watering is coming: then, and only then,
-            # the drone's ground report follows in a text of its own.
-            if s is not None and s.days_left is not None and s.days_left <= 7:
+            # the drone's ground report follows in a text of its own. Not for rainfed.
+            if (s is not None and s.method != "none" and s.days_left is not None
+                    and s.days_left <= 7):
                 report = status_mod.latest_terrain(self.bot.settings, item.field.id)
                 lines = status_mod.ground_lines(report, self.lang, intake=item.intake)
                 if lines:
@@ -1015,10 +1016,10 @@ class Turn:
     # ---- links ----------------------------------------------------------------
 
     def _map_link(self, record: FieldRow) -> str:
-        return self.bot.settings.link(f"f/{map_token(self.conn, record.id)}")
+        return self.bot.settings.link(f"f/{map_token(self.conn, record.id, self.bot.now)}")
 
     def _upload_link(self, record: FieldRow, flown_on: date, bare: bool | None) -> None:
-        token = store.new_link(self.conn, "upload", record.id, days=LINK_DAYS)
+        token = store.new_link(self.conn, "upload", record.id, days=LINK_DAYS, now=self.bot.now)
         flight_id = f"{record.id}-{flown_on:%Y%m%d}"
         taken = {row["flight_id"] for row in store.uploads(self.conn)}
         suffix = 2
@@ -1083,9 +1084,10 @@ class Turn:
         return None
 
 
-def map_token(conn: sqlite3.Connection, field_id: str) -> str:
+def map_token(conn: sqlite3.Connection, field_id: str, now: datetime | None = None) -> str:
     """The field's map link token: the open one if there is one, else a new one."""
     row = conn.execute(
         "SELECT token FROM links WHERE kind = 'map' AND field_id = ? AND expires_at > ? "
-        "ORDER BY created_at DESC LIMIT 1", (field_id, store.now_iso())).fetchone()
-    return row["token"] if row else store.new_link(conn, "map", field_id, days=LINK_DAYS)
+        "ORDER BY created_at DESC LIMIT 1", (field_id, store.utc_iso(now))).fetchone()
+    return row["token"] if row else store.new_link(conn, "map", field_id, days=LINK_DAYS,
+                                                    now=now)

@@ -43,6 +43,14 @@ def test_rainfed_counts_days_until_rain() -> None:
     assert body.endswith("si no llueve.") and "pulgadas" not in body
 
 
+def test_a_rainfed_crop_at_its_thirstiest_is_not_told_to_water() -> None:
+    s = FakeStatus(method="none", days_left=0, days_range=None,
+                   sensitive="grain sorghum reaches boot to flowering now (day 69 after planting)")
+    body = status.message(FieldWater(record(irrigation="none"), s), "en", TODAY)
+    assert body == ("Campo Norte (sorghum): it needs rain now; the crop is under stress. "
+                    "It's at boot to flowering, when drought hurts most.")
+
+
 def test_stage_soon_and_rough() -> None:
     s = FakeStatus(sensitive="grain sorghum reaches boot to flowering in about 6 days (day 44)",
                    confidence="low")
@@ -110,6 +118,39 @@ def test_ground_lines_when_the_ground_is_not_the_cause() -> None:
         "disease, nutrients or salt."]
 
 
+def test_a_low_spot_follows_the_leveling_advice() -> None:
+    report = {"cut_yd3_per_acre": 119, "advice": [
+        {"topic": "leveling", "priority": 1, "finding": "Uneven: only 38% ...", "advice": "..."},
+        {"topic": "low spot", "priority": 2, "advice": "...",
+         "finding": "Low spot L1 in the middle: 33,656 m2 down to 14 cm below the plane."},
+        {"topic": "high spot", "priority": 3, "advice": "...",
+         "finding": "High spot H1 in the east side: 22,092 m2 standing up to 13 cm"},
+    ]}
+    assert status.ground_lines(report, "en") == [
+        "Uneven; laser leveling would even out the water (about 119 cubic yards per acre).",
+        "A low spot in the middle where water stands; fill it when leveling, or open a drain.",
+    ]
+
+
+def test_two_low_spots_are_one_sentence() -> None:
+    report = {"advice": [
+        {"topic": "low spot", "priority": 2, "advice": "...",
+         "finding": "Low spot L1 in the south-east corner: 9,860 m2 down to 13 cm below the plane."},
+        {"topic": "low spot", "priority": 2, "advice": "...",
+         "finding": "Low spot L2 in the south-west corner: 2,312 m2 down to 8 cm below the plane."},
+    ]}
+    assert status.ground_lines(report, "es") == [
+        "Hay partes bajas en la esquina sureste y en la esquina suroeste donde se encharca; "
+        "rellénelas al nivelar o abra un drenaje."]
+
+
+def test_lidar_ground_says_when_it_was_measured() -> None:
+    report = {**REPORT, "ground_source": "lidar", "flown_on": "2019-01-01"}
+    lines = status.ground_lines(report, "en")
+    assert len(lines) == 2
+    assert lines[-1].endswith(" (Ground measured by government lidar in 2019.)")
+
+
 def test_the_latest_flight_of_the_field(settings) -> None:
     drone = settings.drone_workspace
     (drone / "flights.json").write_text(json.dumps({"flights": {
@@ -122,6 +163,7 @@ def test_the_latest_flight_of_the_field(settings) -> None:
         (drone / "out" / flight / "terrain.json").write_text(
             json.dumps({"cut_yd3_per_acre": cut, "advice": []}), encoding="utf-8")
     assert status.latest_terrain(settings, "F001")["cut_yd3_per_acre"] == 2.0
+    assert status.latest_terrain(settings, "F001")["flown_on"] == "2026-09-10"
     assert status.latest_terrain(settings, "F002") is None
 
 

@@ -1,0 +1,39 @@
+# EXAMPLE: a made-up farmer on a pretend 555 number (956-555-0123), texting in Spanish.
+# His two fields are real Rio Grande Valley fields side by side near Lyford, from public
+# USDA data (demo_fields.geojson): cotton planted Mar 14 and corn planted Feb 21, both
+# furrow-watered from the west, the high side on the government lidar. The dates and
+# inches are invented to match what the satellite saw; the corn was watered "yesterday".
+# Used by setup_sms_demo.cmd, which pins the demo to Tue 20 May 2025.
+hola
+1
+Juan Ejemplo
+si
+Algodon Lyford
+45
+26.35487, -97.77464
+algodon
+14 marzo
+si
+surcos
+oeste
+5/8 4
+si
+4/22 4
+si
+no
+nuevo
+Maiz Lyford
+50
+26.35364, -97.77858
+maiz
+2/21
+si
+surcos
+oeste
+ayer 5
+si
+4/18 5
+si
+3/24 5
+si
+no

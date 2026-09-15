@@ -7,7 +7,8 @@ otherwise, laid out so the two halves can run on it unchanged::
     farm_data/
       sms/sms.sqlite      conversations, fields, events: the record of what was said
       sms/media/          photos sent by text (water tickets, problems)
-      sms/sms.env         Twilio keys, written by you, never by this program
+      sms/sms.env         Twilio keys, written by you, never by this program;
+                          a demo folder also pins its day here (DOSOJOS_AS_OF)
       dosojos_sat/        satellite workspace: fields.geojson, field_log.csv, cache/, out/
       dosojos_drone/      drone workspace: flights.json, data/raw/<flight>/ uploads
 
@@ -21,7 +22,7 @@ import logging
 import os
 import sys
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Mapping
 from zoneinfo import ZoneInfo
@@ -58,6 +59,8 @@ class Settings:
     timezone: str = TIMEZONE
     #: A band on every page, e.g. to mark a demo's made-up farmers.
     banner: str | None = None
+    #: A demo folder's pinned day, so every command on it answers as of that day.
+    as_of: date | None = None
 
     @property
     def sms_dir(self) -> Path:
@@ -128,12 +131,19 @@ class Settings:
                 f"Twilio is half set up: {', '.join(missing)} missing. Put all of them in "
                 f"{root / 'sms' / ENV_FILE}, or none to keep texts in the simulator."
             )
+        pinned = get("DOSOJOS_AS_OF")
+        try:
+            as_of = date.fromisoformat(pinned) if pinned else None
+        except ValueError as exc:
+            raise ConfigError(f"DOSOJOS_AS_OF={pinned!r} is not a date; write it like "
+                              "2025-05-20") from exc
         return cls(
             data_dir=root,
             public_url=get("DOSOJOS_PUBLIC_URL") or f"http://localhost:{port}",
             team_contact=get("DOSOJOS_TEAM_CONTACT"),
             twilio_sid=sid, twilio_token=token, twilio_from=sender, twilio_service=service,
             timezone=get("DOSOJOS_TIMEZONE") or TIMEZONE, banner=get("DOSOJOS_BANNER"),
+            as_of=as_of,
         )
 
 

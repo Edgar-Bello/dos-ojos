@@ -1,0 +1,239 @@
+{
+ "type": "FeatureCollection",
+ "name": "Dos Ojos SMS demo fields",
+ "note": "Real Rio Grande Valley fields traced from the USDA NASS Cropland Data Layer 2025 (public domain). The farmers who text about them in the demo are made up.",
+ "features": [
+  {
+   "type": "Feature",
+   "properties": {
+    "id": "PUBLIC-rgv-sorghum-1",
+    "name": "Grain sorghum near Elsa",
+    "crop": "grain sorghum",
+    "source": "USDA NASS Cropland Data Layer 2025: 100% of the outline mapped as grain sorghum, and one crop across it in each of 2021-2024; traced inside the field's edge, not a survey"
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -98.01668505734776,
+       26.283474064300492
+      ],
+      [
+       -98.01659672941952,
+       26.284674374832857
+      ],
+      [
+       -98.01600917748712,
+       26.285102353561623
+      ],
+      [
+       -98.01046372192627,
+       26.285345493840083
+      ],
+      [
+       -98.0099774826617,
+       26.285134063254144
+      ],
+      [
+       -98.00976135054458,
+       26.284762745544462
+      ],
+      [
+       -98.00979186428141,
+       26.28341911155837
+      ],
+      [
+       -98.01040648361791,
+       26.282924606023553
+      ],
+      [
+       -98.01595592259605,
+       26.28268172825467
+      ],
+      [
+       -98.01650647366004,
+       26.282962505342972
+      ],
+      [
+       -98.01668505734776,
+       26.283474064300492
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "id": "PUBLIC-rgv-cotton-1",
+    "name": "Cotton near Lyford",
+    "crop": "cotton",
+    "source": "USDA NASS Cropland Data Layer 2025: 100% of the outline mapped as cotton, and one crop across it in each of 2021-2024; traced inside the field's edge, not a survey"
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -97.7757863667825,
+       26.351339899785795
+      ],
+      [
+       -97.77586852965742,
+       26.353075635166554
+      ],
+      [
+       -97.77615630597475,
+       26.353748829452055
+      ],
+      [
+       -97.77606919939481,
+       26.356226308027257
+      ],
+      [
+       -97.77548043097725,
+       26.35665325630938
+      ],
+      [
+       -97.77361473323576,
+       26.356596193766617
+      ],
+      [
+       -97.77313002753397,
+       26.35599556335707
+      ],
+      [
+       -97.77323586063939,
+       26.351382155713544
+      ],
+      [
+       -97.7738246095286,
+       26.350955214578647
+      ],
+      [
+       -97.77531580695296,
+       26.350985192380783
+      ],
+      [
+       -97.7757863667825,
+       26.351339899785795
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "id": "PUBLIC-rgv-corn-1",
+    "name": "Corn near Lyford",
+    "crop": "corn",
+    "source": "USDA NASS Cropland Data Layer 2025: 100% of the outline mapped as corn, and one crop across it in each of 2021-2024; traced inside the field's edge, not a survey"
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -97.78007463230814,
+       26.351328874095888
+      ],
+      [
+       -97.77995539698189,
+       26.356381004794002
+      ],
+      [
+       -97.77890891971148,
+       26.356769173530566
+      ],
+      [
+       -97.77738491209396,
+       26.35656168181829
+      ],
+      [
+       -97.7770349601355,
+       26.355958163049017
+      ],
+      [
+       -97.77723422865841,
+       26.351132537653886
+      ],
+      [
+       -97.77797466270258,
+       26.350733104622776
+      ],
+      [
+       -97.77973860450237,
+       26.350866384841165
+      ],
+      [
+       -97.78007463230814,
+       26.351328874095888
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "id": "PUBLIC-rgv-citrus-1",
+    "name": "Citrus near Monte Alto",
+    "crop": "citrus",
+    "source": "USDA NASS Cropland Data Layer 2025: 100% of the outline mapped as citrus; traced inside the field's edge, not a survey"
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -97.98701967981835,
+       26.381828502706508
+      ],
+      [
+       -97.98619880737854,
+       26.385395925459605
+      ],
+      [
+       -97.98507635110536,
+       26.386208451164805
+      ],
+      [
+       -97.9839996920528,
+       26.38608951432481
+      ],
+      [
+       -97.98366157901975,
+       26.385690193802784
+      ],
+      [
+       -97.98363379230754,
+       26.38509554774046
+      ],
+      [
+       -97.98423794259344,
+       26.383687278085954
+      ],
+      [
+       -97.9843971314752,
+       26.381599352238272
+      ],
+      [
+       -97.98626336939071,
+       26.380763208428917
+      ],
+      [
+       -97.98697579368215,
+       26.381104980852108
+      ],
+      [
+       -97.98701967981835,
+       26.381828502706508
+      ]
+     ]
+    ]
+   }
+  }
+ ]
+}

@@ -80,8 +80,10 @@ From any folder in PowerShell, `C:\Users\edgar\Projects\Dos_Ojos\dosojos_sms\sms
 | `remind [--send]` | Water alerts, "have you watered?" check-ins, reminders of missing facts |
 
 `daily` and `remind` only list what they would send unless given `--send`.
+`outline F001 fields.geojson --id <id>` takes one field out of a file of several.
 Global options: `--data <folder>` (default `Dos_Ojos\farm_data`), `--as-of
-YYYY-MM-DD` to answer as of a pinned day.
+YYYY-MM-DD` to answer as of a pinned day. A demo folder can pin its own day with
+`DOSOJOS_AS_OF=YYYY-MM-DD` in its `sms\sms.env`, so every command on it agrees.
 
 ## Where things go
 
@@ -124,13 +126,54 @@ C:\Users\edgar\Projects\Dos_Ojos\dosojos_sms\examples\setup_sms_demo.cmd
 C:\Users\edgar\Projects\Dos_Ojos\dosojos_sms\examples\run_sms_demo.cmd
 ```
 
-The first runs once (about 3 minutes, needs the internet). A made-up farmer,
-Juan Ejemplo on a pretend 555 number, registers the placeholder field "Mercedes
-North 40" by text, and the daily run fetches its imagery, weather and soil. The
-second opens the simulator: text AGUA as Juan for real numbers, or press
-"+ nuevo" to sign up another pretend farmer live, map page included. Everything
-lives in `examples\demo_data` with an EXAMPLE band on every page, apart from
-real farmers.
+**Real fields, made-up farmers.** The four fields are real Rio Grande Valley
+fields, picked from the USDA's public 2025 crop map (`examples\demo_fields.geojson`;
+see `public_demo\rgv-crops-2025\SOURCE.md`):
+
+- cotton and corn side by side near Lyford;
+- grain sorghum near Elsa;
+- citrus near Monte Alto.
+
+Three MADE-UP farmers on pretend 555 numbers register them by text. Their
+planting and watering dates are invented to match what the satellite saw.
+
+| Farmer | Texts in | Field | Watered by |
+|---|---|---|---|
+| Juan Ejemplo, 956-555-0123 | Spanish | F001 Algodon Lyford (cotton, planted 14 Mar) | furrows, from the west |
+| | | F002 Maiz Lyford (corn, planted 21 Feb, watered "ayer") | furrows, from the west |
+| Maria Ejemplo, 956-555-0142 | Spanish | F003 Sorgo Elsa (grain sorghum, planted 12 Mar) | rainfed (temporal) |
+| Mary Example, 956-555-0187 | English | F004 Monte Alto Grove (citrus) | flooding, from the north |
+
+The demo is pinned to Tuesday 20 May 2025, so its answers never drift. The pin
+is `DOSOJOS_AS_OF` in `examples\demo_data\sms\sms.env`, and the map links in the
+texts keep working under it.
+
+**Set-up.** The first script runs once. It needs the internet and takes about 30
+minutes, mostly satellite images:
+
+1. It replays the three conversations (`demo_juan.txt`, `demo_maria.txt`, `demo_mary.txt`).
+2. It draws the four outlines, which texts each farmer the acres and a link to
+   see the field on the map.
+3. It runs `daily --send`: satellite, gridMET weather, SSURGO soil, the checkbook,
+   and the alerts. The alerts stay in the simulator.
+4. It fetches the government lidar ground under the two furrow fields.
+
+**What each field answers to AGUA** (Juan and Mary also get an alert at set-up):
+
+- **Cotton:** 1 day of water left (0 to 2), at first bloom. The ground line names
+  the two low corners where water stands, from the 2019 lidar.
+- **Corn:** about 5 days (3 to 7), since it was watered yesterday, plus its one
+  low corner.
+- **Citrus:** water now, about 4.7 inches by flooding, at bloom and fruit set.
+  Answer "WATERED today 5", then "yes", and it comes back with about 16 days.
+- **Sorghum:** it needs rain now, at boot to flowering "when drought hurts most".
+  It is rainfed, so the bot talks about rain, not watering.
+
+**The simulator.** The second script opens it. Switch between the three phones,
+text AGUA, report a watering (REGUE hoy 5 / WATERED today 4) and see the days
+reset, or press "+ nuevo" to sign up another pretend farmer live, map page
+included. Everything lives in `examples\demo_data`, with an EXAMPLE band on every
+page, apart from real farmers.
 
 ## Going live with Twilio
 
@@ -197,7 +240,7 @@ src/
   pages/        map.html, upload.html, sim.html
   cli.py        click commands
 examples/       the demo: a made-up farmer, the placeholder outline, launchers
-tests/          469 tests, no network required
+tests/          485 tests, no network required
 ```
 
 ## Tests

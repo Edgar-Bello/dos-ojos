@@ -43,7 +43,8 @@ class Context:
 @click.option("--data", "data_dir", type=click.Path(file_okay=False, path_type=Path),
               default=None, help="Farm data folder  [default: Dos_Ojos/farm_data]")
 @click.option("--as-of", "as_of", type=click.DateTime(formats=["%Y-%m-%d"]), default=None,
-              help="Answer as if it were this day, for demos that must not drift.")
+              help="Answer as if it were this day, for demos that must not drift  "
+                   "[default: DOSOJOS_AS_OF in the folder's sms.env, else today]")
 @click.option("-v", "--verbose", count=True, help="Show debug logging.")
 @click.pass_context
 def cli(ctx: click.Context, data_dir: Path | None, as_of: datetime | None, verbose: int) -> None:
@@ -54,7 +55,7 @@ def cli(ctx: click.Context, data_dir: Path | None, as_of: datetime | None, verbo
     except ConfigError as exc:
         raise click.ClickException(str(exc)) from exc
     settings.ensure_dirs()
-    ctx.obj = Context(settings, as_of.date() if as_of else None)
+    ctx.obj = Context(settings, as_of.date() if as_of else settings.as_of)
 
 
 def _table(headers: tuple[str, ...], rows: list[tuple[str, ...]]) -> str:
@@ -115,7 +116,7 @@ def serve_cmd(ctx: Context, port: int, host: str, sim: bool, no_verify: bool,
     else:
         click.echo("  Twilio     not set up: texts stay on this computer (simulator, 'chat')")
     if ctx.as_of:
-        click.secho(f"  pinned to {ctx.as_of} (--as-of)", fg="yellow")
+        click.secho(f"  pinned to {ctx.as_of} (--as-of or DOSOJOS_AS_OF)", fg="yellow")
     if open_browser:
         # The socket is already listening, so the page's first request waits for us
         # instead of failing as it would if the browser raced the start-up.
@@ -334,13 +335,17 @@ def link_cmd(ctx: Context, field_id: str) -> None:
         record = store.get_field(conn, field_id)
         if record is None:
             raise click.ClickException(f"no field {field_id}")
-        token = store.new_link(conn, "map", field_id, days=LINK_DAYS, meta={"by": "team"})
+        token = store.new_link(conn, "map", field_id, days=LINK_DAYS, meta={"by": "team"},
+                               now=ctx.now())
     click.echo(ctx.settings.link(f"f/{token}"))
     click.echo("Open it while 'serve' runs; the farmer gets a text with the acres once it is saved.")
 
 
-def read_outline(path: Path) -> dict:
-    """A polygon from a GeoJSON file or a Google Earth KML file."""
+def read_outline(path: Path, feature_id: str | None = None) -> dict:
+    """A polygon from a GeoJSON file or a Google Earth KML file.
+
+    ``feature_id`` picks one feature out of a collection by its ``id`` property.
+    """
     raw = path.read_text(encoding="utf-8-sig")
     if path.suffix.lower() == ".kml":
         tree = ElementTree.fromstring(raw)
@@ -353,7 +358,12 @@ def read_outline(path: Path) -> dict:
         return {"type": "Polygon", "coordinates": [ring]}
     payload = json.loads(raw)
     if payload.get("type") == "FeatureCollection":
-        payload = (payload.get("features") or [{}])[0]
+        features = payload.get("features") or [{}]
+        if feature_id is not None:
+            features = [f for f in features if str((f.get("properties") or {}).get("id")) == feature_id]
+            if not features:
+                raise click.ClickException(f"{path}: no feature with id {feature_id!r}")
+        payload = features[0]
     if payload.get("type") == "Feature":
         payload = payload.get("geometry") or {}
     if payload.get("type") not in ("Polygon", "MultiPolygon"):
@@ -364,11 +374,14 @@ def read_outline(path: Path) -> dict:
 @cli.command("outline")
 @click.argument("field_id")
 @click.argument("path", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option("--id", "feature_id", default=None,
+              help="Which feature of a collection, by its id property  [default: the first]")
 @click.option("--quiet", is_flag=True, help="Do not text the farmer.")
 @click.pass_obj
-def outline_cmd(ctx: Context, field_id: str, path: Path, quiet: bool) -> None:
+def outline_cmd(ctx: Context, field_id: str, path: Path, feature_id: str | None,
+                quiet: bool) -> None:
     """Set a field's outline from a GeoJSON or KML file (e.g. drawn in Google Earth)."""
-    geometry = shape(read_outline(path))
+    geometry = shape(read_outline(path, feature_id))
     if not geometry.is_valid:
         raise click.ClickException(f"{path}: the outline crosses itself; redraw it")
     acres = compute_acres(geometry, utm_epsg_for(geometry))
@@ -385,7 +398,7 @@ def outline_cmd(ctx: Context, field_id: str, path: Path, quiet: bool) -> None:
         if not quiet:
             body = text.say("map_by_team", farmer.language, field=record.name,
                             acres=f"{acres:.1f}",
-                            link=ctx.settings.link(f"f/{map_token(conn, record.id)}"))
+                            link=ctx.settings.link(f"f/{map_token(conn, record.id, ctx.now())}"))
             click.echo(f"text to {farmer.phone}: "
                        f"{outbox.deliver(conn, ctx.settings, farmer, body, now=ctx.now())}")
 
@@ -438,7 +451,11 @@ def daily_cmd(ctx: Context, send: bool, skip_fetch: bool, years: int) -> None:
         return
     today = ctx.as_of or ctx.settings.now().date()
     _sat(ctx, "init-fields", str(result.fields_path))
-    if not skip_fetch:
+    if not skip_fetch and ctx.as_of:
+        # A pinned demo needs its own season, not every image up to the real today.
+        _sat(ctx, "fetch", "--start", (today - timedelta(days=400)).isoformat(),
+             "--end", today.isoformat())
+    elif not skip_fetch:
         _sat(ctx, "fetch", "--years", str(years))
     _sat(ctx, "weather", "--start", (today - timedelta(days=400)).isoformat(),
          "--end", today.isoformat())
@@ -514,7 +531,7 @@ def plan_reminders(conn, settings: Settings, bot: Bot, today: date) -> list[Plan
             if question == "map" and record.lat is not None:
                 options.append(Planned(farmer, record.id, "missing", f"map:{today}", text.say(
                     "remind_map", lang, field=record.name,
-                    link=settings.link(f"f/{map_token(conn, record.id)}"))))
+                    link=settings.link(f"f/{map_token(conn, record.id, bot.now)}"))))
             elif question and question != "map":
                 options.append(Planned(farmer, record.id, "missing", f"{question}:{today}",
                                        text.say("remind_missing", lang, field=record.name),

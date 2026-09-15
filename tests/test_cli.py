@@ -15,6 +15,7 @@ from conftest import SQUARE, FakeStatus, FakeWater
 from dosojos_sms import status as status_mod
 from dosojos_sms import store
 from dosojos_sms.cli import cli
+from dosojos_sms.config import ConfigError, Settings
 
 SCRIPT = """# a farmer, start to finish
 hola
@@ -82,6 +83,39 @@ def test_replay_fields_and_farmers(farm: Path) -> None:
 
 def test_todo_names_the_map_to_draw(farm: Path) -> None:
     assert "MAP     F001 Campo Norte" in run(farm, "todo").output
+
+
+def test_outline_picks_a_feature_by_id(farm: Path, tmp_path: Path) -> None:
+    small = [[-97.9990, 26.1470], [-97.9990, 26.1488], [-97.9969, 26.1488], [-97.9969, 26.1470]]
+    path = tmp_path / "fields.geojson"
+    path.write_text(json.dumps({"type": "FeatureCollection", "features": [
+        {"type": "Feature", "properties": {"id": "other"},
+         "geometry": {"type": "Polygon", "coordinates": [small + [small[0]]]}},
+        {"type": "Feature", "properties": {"id": "this-one"},
+         "geometry": {"type": "Polygon", "coordinates": [SQUARE + [SQUARE[0]]]}},
+    ]}), encoding="utf-8")
+    result = run(farm, "outline", "F001", str(path), "--id", "this-one", "--quiet")
+    assert result.exit_code == 0, result.output
+    assert "F001 Campo Norte: 41.5 acres" in result.output
+    missing = run(farm, "outline", "F001", str(path), "--id", "nope")
+    assert missing.exit_code != 0 and "no feature with id 'nope'" in missing.output
+
+
+def test_a_demo_folder_pins_its_own_day(tmp_path: Path) -> None:
+    script = tmp_path / "farmer.txt"
+    script.write_text(SCRIPT.split("7/20")[0] + "7/20\n", encoding="utf-8")
+    data = tmp_path / "demo"
+    (data / "sms").mkdir(parents=True)
+    (data / "sms" / "sms.env").write_text("DOSOJOS_AS_OF=2025-05-20\n", encoding="utf-8")
+    result = CliRunner().invoke(cli, ["--data", str(data), "replay", str(script)],
+                                catch_exceptions=False)
+    assert result.exit_code == 0, result.output
+    assert "20 jul 2024" in result.output       # last July, seen from May 2025
+
+
+def test_a_pinned_day_must_be_a_date(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError, match="2025-05-20"):
+        Settings.load(tmp_path, env={"DOSOJOS_AS_OF": "May 20"})
 
 
 def test_outline_from_a_google_earth_kml(farm: Path, tmp_path: Path) -> None:

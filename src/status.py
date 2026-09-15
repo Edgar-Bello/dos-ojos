@@ -146,7 +146,8 @@ def message(item: FieldWater, lang: str, today: date, *,
     if s.sensitive and s.crop_model in text.STAGES:
         stage = text.pick(text.STAGES[s.crop_model], lang)
         key = "status_stage_soon" if "in about" in s.sensitive else "status_stage"
-        body += say(key, lang, stage=stage)
+        # "Don't let it dry out" is no advice to someone who cannot water.
+        body += say(key + ("_rainfed" if rainfed else ""), lang, stage=stage)
     if s.confidence == "low":
         body += say("status_rough", lang)
     return body
@@ -174,31 +175,49 @@ def latest_terrain(settings: Settings, field_id: str) -> dict | None:
             found.append((entry.get("flown_on") or "", report))
     if not found:
         return None
-    return json.loads(max(found)[1].read_text(encoding="utf-8"))
+    flown_on, path = max(found)
+    report = json.loads(path.read_text(encoding="utf-8"))
+    report["flown_on"] = flown_on or None
+    return report
 
 
 def ground_lines(report: dict | None, lang: str, *, intake: str | None = None,
                  limit: int = 2) -> list[str]:
-    """The ground report's must-do items, in a line each."""
+    """The ground report's must-do items, in a line each, then where water stands."""
     if not report:
         return []
+    advice = report.get("advice") or []
+    # Where water stands matters at the very watering this text is about; every such
+    # spot goes in one sentence, in the place of the first.
+    lows = [_place(i, lang) for i in advice if i.get("topic") == "low spot"
+            and i.get("priority") in (1, 2)]
     lines: list[str] = []
-    for item in report.get("advice") or []:
-        line = _ground_line(item, report, lang, intake)
+    for item in advice:
+        if item.get("topic") == "low spot":
+            line = say("ground_low_spot" if len(lows) == 1 else "ground_low_spots", lang,
+                       where=text.listing(lows, lang)) if lows else None
+        else:
+            line = _ground_line(item, report, lang, intake)
         if line and line not in lines:
             lines.append(line)
-    return lines[:limit]
+    lines = lines[:limit]
+    if lines and report.get("ground_source") == "lidar" and report.get("flown_on"):
+        # Airborne lidar is years old; say when the ground was measured.
+        lines[-1] += say("ground_lidar", lang, year=str(report["flown_on"])[:4])
+    return lines
+
+
+def _place(item: dict, lang: str) -> str:
+    """Where the terrain step put a spot, with the word before it."""
+    where_match = re.search(r"in the (.+?):", item.get("finding", ""))
+    place = where_match.group(1) if where_match else "middle"
+    return text.pick(text.PLACES.get(place, (f"en {place}", f"in the {place}")), lang)
 
 
 def _ground_line(item: dict, report: dict, lang: str, intake: str | None) -> str | None:
     topic, finding, priority = item.get("topic"), item.get("finding", ""), item.get("priority")
-    where_match = re.search(r"in the (.+?):", finding)
-    where = text.pick(text.PLACES.get(where_match.group(1), (where_match.group(1),) * 2), lang) \
-        if where_match else text.pick(text.PLACES["middle"], lang)
     if topic == "high spot" and priority == 1:
-        return say("ground_high_spot", lang, where=where)
-    if topic == "low spot" and priority == 1:
-        return say("ground_low_spot", lang, where=where)
+        return say("ground_high_spot", lang, where=_place(item, lang))
     if topic in ("row ends", "far end", "near end") and priority == 1:
         if "first third" in finding:
             return say("ground_head", lang)

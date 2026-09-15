@@ -198,7 +198,7 @@ class App:
     # ---- the map page ------------------------------------------------------------------
 
     def _link(self, conn, token: str, kind: str):
-        link = store.get_link(conn, token, kind)
+        link = store.get_link(conn, token, kind, now=self.now)
         if link is None:
             raise HttpError(404, "gone")
         record = store.get_field(conn, link["field_id"])
@@ -250,7 +250,7 @@ class App:
             if team:
                 body = text.say("map_by_team", lang, field=record.name,
                                 acres=f"{acres:.1f}",
-                                link=self.settings.link(f"f/{map_token(conn, record.id)}"))
+                                link=self.settings.link(f"f/{map_token(conn, record.id, self.now)}"))
             else:
                 said = (text.say("map_said", lang, said=f"{record.acres_said:g}")
                         if record.acres_said else "")
