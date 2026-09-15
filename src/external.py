@@ -345,8 +345,12 @@ def import_products(
     crop_to_ortho: bool = True, overwrite: bool = False,
     ground_percentile: float = DEFAULT_GROUND_PERCENTILE,
     ground_cell_m: float = DEFAULT_GROUND_CELL_M,
+    source: str | None = None, lidar: bool = False,
 ) -> list[Imported]:
     """Bring an orthophoto and elevation surfaces into ``project_dir``.
+
+    ``source`` records where the products came from, and ``lidar`` that the
+    ground was measured by laser even though it arrives as a raster.
 
     Raises:
         ProductImportError: if nothing usable was given, a product already
@@ -405,6 +409,7 @@ def import_products(
     (project_dir / PROVENANCE_NAME).write_text(json.dumps({
         "imported_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "note": "These products were made outside this pipeline and imported, not built by ODM.",
+        "source": source, "lidar": lidar,
         "products": [asdict(item) for item in done],
     }, indent=2), encoding="utf-8")
     log.info("imported %d product(s) into %s", len(done), project_dir)

@@ -396,9 +396,22 @@ def save_terrain_map(
     """
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    figure, (axes, bars) = plt.subplots(
-        1, 2, figsize=(14, 9.2), dpi=150, gridspec_kw={"width_ratios": [2.3, 1], "wspace": 0.28},
-    )
+    has_flags = flags is not None and not flags.empty
+    minx, miny, maxx, maxy = extent.bounds
+    if has_flags:
+        height = 9.2
+        figure, (axes, bars) = plt.subplots(
+            1, 2, figsize=(14, height), dpi=150,
+            gridspec_kw={"width_ratios": [2.3, 1], "wspace": 0.28},
+        )
+    else:
+        # Ground alone (lidar, a bare-soil flight): one panel, as tall as the field is,
+        # counting the margins drawn round it below, the header and the colour bar.
+        pad = 0.03 * max(maxx - minx, maxy - miny)
+        aspect = (maxy - miny + 4.5 * pad) / max(maxx - minx + 2 * pad, 1e-9)
+        height = min(12.0, max(5.5, 11 * 0.775 * aspect + 1.84 + 1.35))
+        figure, axes = plt.subplots(figsize=(11, height), dpi=150)
+        bars = None
     figure.patch.set_facecolor(SURFACE)
 
     relief = ground.relief_cm
@@ -427,7 +440,6 @@ def save_terrain_map(
             points = problems.geometry.centroid
             axes.scatter(points.x, points.y, s=5, color=INK, alpha=0.75, linewidths=0, zorder=4)
 
-    minx, miny, maxx, maxy = extent.bounds
     if report.flow:
         _, tail = report.flow.split(" to ")
         vectors = {"N": (0, 1), "NE": (0.707, 0.707), "E": (1, 0), "SE": (0.707, -0.707),
@@ -465,15 +477,17 @@ def save_terrain_map(
     bar = figure.colorbar(image, ax=axes, orientation="horizontal", fraction=0.04, pad=0.03)
     bar.set_label("ground above (+) or below (-) a smooth plane, cm", fontsize=11,
                   color=INK_SECONDARY)
-    axes.legend(handles=[
-        Line2D([], [], marker="o", color="none", markerfacecolor=INK, markersize=5,
-               label=f"flagged row pieces ({n_flagged})"),
-        Line2D([], [], color=HIGH_SPOT_COLOR, linestyle="--", label="high spot"),
-        Line2D([], [], color=LOW_SPOT_COLOR, linestyle="--", label="low spot"),
-    ], loc="upper left", bbox_to_anchor=(0.0, -0.13), ncol=3, frameon=False, fontsize=11,
-        labelcolor=INK_SECONDARY)
+    handles = [Line2D([], [], color=HIGH_SPOT_COLOR, linestyle="--", label="high spot"),
+               Line2D([], [], color=LOW_SPOT_COLOR, linestyle="--", label="low spot")]
+    if has_flags:
+        handles.insert(0, Line2D([], [], marker="o", color="none", markerfacecolor=INK,
+                                 markersize=5, label=f"flagged row pieces ({n_flagged})"))
+    # In the margin below the field, right of the scale bar, clear of the colour bar.
+    axes.legend(handles=handles, loc="lower right", ncol=len(handles), frameon=False,
+                fontsize=10.5, labelcolor=INK_SECONDARY)
 
-    _terrain_bars(bars, report)
+    if bars is not None:
+        _terrain_bars(bars, report)
 
     if report.along_pct is not None and report.row_bearing_deg is not None:
         along = f"falls {report.along_pct:.2f}% along the rows" + (
@@ -482,20 +496,26 @@ def save_terrain_map(
         along = f"falls {report.along_pct:.2f}% from {report.flow}"
     else:
         along = f"slope {report.slope_pct:.2f}% toward the {report.downhill}"
-    # The header spans both panels, so it sits on the figure rather than on either axes.
-    figure.subplots_adjust(top=0.80)
-    lines = [(title, 19, INK, 0.935),
+    # The header spans both panels, so it sits on the figure rather than on either axes;
+    # it is placed in inches from the top so a short figure keeps it tight to the map.
+    def down(inches: float) -> float:
+        return 1.0 - inches / height
+
+    figure.subplots_adjust(top=down(1.84))
+    width = 125 if has_flags else 100
+    lines = [(title, 19, INK, down(0.6)),
              (f"Ground {along}  -  {report.within_tolerance:.0%} within 3 cm of a smooth "
-              f"plane  -  from {report.ground_source}", 12, INK_SECONDARY, 0.9)]
+              f"plane  -  from {report.ground_source}", 12, INK_SECONDARY, down(0.92))]
     top = report.advice[0] if report.advice else None
     if top is not None:
-        wrapped = textwrap.fill(f"{top.finding} {top.advice}", 125, max_lines=2,
+        wrapped = textwrap.fill(f"{top.finding} {top.advice}", width, max_lines=2,
                                 placeholder=" ...")
-        lines.append((wrapped, 11.5, "#b3261e" if top.priority == 1 else INK_SECONDARY, 0.872))
+        lines.append((wrapped, 11.5, "#b3261e" if top.priority == 1 else INK_SECONDARY,
+                      down(1.18)))
     for text, size, color, y in lines:
         figure.text(0.125, y, text, fontsize=size, color=color, va="top", ha="left")
     if banner:
-        figure.text(0.125, 0.99, banner, fontsize=12, color="white", fontweight="bold",
+        figure.text(0.125, down(0.09), banner, fontsize=12, color="white", fontweight="bold",
                     va="top", ha="left",
                     bbox={"boxstyle": "square,pad=0.45", "facecolor": BANNER, "edgecolor": "none"})
 

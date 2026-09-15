@@ -9,6 +9,9 @@ from pathlib import Path
 
 import pytest
 
+from click.testing import CliRunner
+
+from dosojos_drone import odm_runner
 from dosojos_drone.cli import cli
 
 UTF8 = {"encoding": "utf-8", "errors": "replace",
@@ -33,3 +36,15 @@ def test_python_dash_m_ignores_a_folder_named_like_the_package(tmp_path: Path) -
                             cwd=tmp_path, capture_output=True, check=False, **UTF8)
     assert result.returncode == 0, result.stderr
     assert "detect" in result.stdout
+
+
+@pytest.mark.parametrize("status, code", [
+    (odm_runner.DockerStatus(available=False, problems=["the Docker daemon is not responding"]), 1),
+    (odm_runner.DockerStatus(available=True, version="27.0", has_image=False), 1),
+    (odm_runner.DockerStatus(available=True, version="27.0", has_image=True), 0),
+])
+def test_doctor_fails_a_script_until_odm_can_run(monkeypatch, status, code: int) -> None:
+    monkeypatch.setattr(odm_runner, "check_docker", lambda: status)
+    result = CliRunner().invoke(cli, ["doctor"])
+    assert result.exit_code == code, result.output
+    assert ("Ready to run ODM." in result.output) == (code == 0)

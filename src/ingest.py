@@ -228,7 +228,8 @@ def read_shot(path: Path) -> Shot:
 
     gps = _gps_block(exif)
     camera = merged.get(_EXIF_TAGS.get("Model", -1))
-    camera = str(camera).strip() if camera else None
+    # DJI pads the model to a fixed width with NUL bytes ('FC6310\x00\x00...').
+    camera = str(camera).replace("\x00", "").strip() or None if camera else None
 
     return Shot(
         path=path,

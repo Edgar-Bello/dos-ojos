@@ -299,3 +299,14 @@ def test_the_join_carries_water_and_irrigation_advice() -> None:
     assert b["irrigation"]["linked"] == [terrain.TAIL]
     assert [a["topic"] for a in b["irrigation"]["advice"]] == ["row ends"]
     assert joined["water_as_of"] == "2026-09-12"
+
+
+def test_a_ground_without_flags_gets_a_single_panel_map(tmp_path: Path) -> None:
+    """Lidar or a bare-soil flight: no flags, so no empty bar panel beside the map."""
+    ground = _ground(bump_cm=10)
+    report = _analyse(ground, None)
+    path = report_mod.save_terrain_map(ground, report, None, EXTENT, tmp_path / "t.png",
+                                       title="f - ground and water", banner="TEST")
+    from PIL import Image
+    width, height = Image.open(path).size
+    assert path.stat().st_size > 10_000 and width < 1900      # one panel, not two

@@ -595,8 +595,8 @@ def analyse(
             spot.problem_share = round(float(problem[inside].mean()), 4) if inside.any() else None
             spot.linked = link(problem, inside, spot.label).linked if inside.any() else False
     else:
-        notes.append("no drone flags to compare with the ground; run 'flag' first to "
-                     "check whether the stress follows it")
+        notes.append("no crop flags to compare with the ground; a drone flight of the crop, "
+                     "run through 'flag', shows whether the stress follows it")
 
     if flow is None and axis is not None:
         notes.append("the rows are practically level and the water's entry side is not "
@@ -820,11 +820,11 @@ def ground_source(project_dir: Path) -> str:
     if not provenance.exists():
         return "photogrammetry"
     try:
-        products = json.loads(provenance.read_text(encoding="utf-8")).get("products", [])
+        record = json.loads(provenance.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         return "imported"
-    dtm = next((p for p in products if p.get("name") == "dtm"), {})
-    return "lidar" if "points" in str(dtm.get("how", "")) else "imported"
+    dtm = next((p for p in record.get("products", []) if p.get("name") == "dtm"), {})
+    return "lidar" if record.get("lidar") or "points" in str(dtm.get("how", "")) else "imported"
 
 
 def write_relief(ground: Ground, path: Path) -> Path:

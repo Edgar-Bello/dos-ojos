@@ -6,7 +6,7 @@ import json
 import logging
 import sys
 import textwrap
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Sequence
 
@@ -246,6 +246,11 @@ def _load_field(settings: Settings, field_id: str | None):
     return match.geometry.iloc[0]
 
 
+def _median_or_none(values) -> float | None:
+    found = sorted(v for v in values if v is not None)
+    return found[len(found) // 2] if found else None
+
+
 def _format_survey(survey: FlightSurvey, field_id: str | None) -> str:
     """Render the survey as an aligned key/value block."""
     def fmt(value, spec: str = "", suffix: str = "") -> str:
@@ -259,7 +264,9 @@ def _format_survey(survey: FlightSurvey, field_id: str | None) -> str:
         ("resolution", f"{survey.shots[0].width_px} x {survey.shots[0].height_px} px"),
         ("focal length", fmt(survey.shots[0].focal_mm, ".1f", " mm")),
         ("sensor width", fmt(survey.shots[0].sensor_width_mm, ".2f", " mm")),
-        ("altitude", fmt(survey.alt_mean_m, ".0f", " m")),
+        ("flying height", fmt(_median_or_none(s.relative_alt_m for s in survey.shots),
+                              ".0f", " m above takeoff")),
+        ("GPS altitude", fmt(survey.alt_mean_m, ".0f", " m")),
         ("altitude spread", fmt(survey.alt_variation, ".1%")),
         ("GSD", fmt(survey.gsd_cm, ".2f", " cm/px")),
         ("footprint", f"{survey.footprint_m[0]:.0f} x {survey.footprint_m[1]:.0f} m"
@@ -462,7 +469,11 @@ def _format_video_ingest(result) -> str:
 @click.option("--images", type=int, default=None,
               help="Check whether this machine can handle N images.")
 def doctor_cmd(images: int | None) -> None:
-    """Check Docker, memory and the ODM image before committing to a run."""
+    """Check Docker, memory and the ODM image before committing to a run.
+
+    Exits 1 when Docker or the image is missing, so a script stops here instead
+    of letting 'odm' pull a 3-4 GB image nobody asked for.
+    """
     status = odm_runner.check_docker()
     rows = [
         ("docker", "yes" if status.available else "NO"),
@@ -489,6 +500,8 @@ def doctor_cmd(images: int | None) -> None:
             click.secho(f"WARNING: {problem}", fg="yellow")
     else:
         click.secho("Ready to run ODM.", fg="green")
+    if not (status.available and status.has_image):
+        sys.exit(1)
 
 
 @cli.command("odm")
@@ -637,6 +650,52 @@ def import_cmd(
     click.echo(f"\n  {len(found)} product(s) in {project}, provenance in "
                f"{external.PROVENANCE_NAME}")
     click.echo(f"  Next: dosojos-drone chm {flight_id}")
+
+
+@cli.command("lidar")
+@click.argument("flight_id")
+@click.option("--field", "field_id", required=True,
+              help="Satellite field id whose outline to read the ground under.")
+@click.option("--force", is_flag=True, help="Replace a ground already imported for this flight.")
+@click.pass_obj
+def lidar_cmd(settings: Settings, flight_id: str, field_id: str, force: bool) -> None:
+    """A field's ground from public USGS 3DEP airborne LiDAR, for the terrain check; no drone."""
+    from . import external, lidar as lidar_mod
+
+    outline = _field_settings(settings, field_id).get("geometry")
+    if outline is None:
+        raise click.ClickException(
+            f"field {field_id!r} is not in {settings.fields_geojson}; the ground is read "
+            "under the field's outline, so the satellite half must know the field first."
+        )
+    folder = settings.flight_raw(flight_id) / "3dep"
+    try:
+        ground = lidar_mod.fetch_ground(outline, folder)
+    except lidar_mod.LidarError as exc:
+        raise click.ClickException(str(exc)) from exc
+    source = f"USGS 3DEP lidar {ground.project}, flown {ground.year} (public domain)"
+    try:
+        register_flight(settings.manifest_path, Flight(
+            flight_id=flight_id, field_id=field_id, flown_on=date(ground.year, 1, 1),
+            source=source, notes="Ground from airborne lidar, not a drone flight: "
+                                 f"{ground.resolution_m:g} m cells, older than the crop."),
+            overwrite=force)
+        done = external.import_products(
+            settings.flight_odm(flight_id), dsm=ground.dsm, dtm=ground.dtm, crop_to_ortho=False,
+            overwrite=force, source=source, lidar=True)
+    except (ManifestError, external.ProductImportError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    rows = [(item.name, f"{item.shape[1]} x {item.shape[0]}", f"{item.resolution_m:g} m")
+            for item in done]
+    click.echo(_table(("PRODUCT", "CELLS", "GRID"), rows, "<>>"))
+    click.echo(f"\n  {source}, {ground.tiles} tile(s); read only the field's window.")
+    covered = lidar_mod.covered_share(ground)
+    if covered > lidar_mod.COVERED_WARN:
+        click.secho(f"  WARNING: the laser hit plants or trees taller than 1 m over {covered:.0%} "
+                    "of the field; the ground under them is interpolated, so treat spots and "
+                    "leveling there with care (an orchard's beds are not seen at 2 m).",
+                    fg="yellow")
+    click.echo(f"  Next: dosojos-drone terrain {flight_id}")
 
 
 # --------------------------------------------------------------------------- #
@@ -1288,6 +1347,11 @@ def terrain_cmd(settings: Settings, flight_id: str, method: str, water_enters: s
 
     with rasterio.open(dtm_path) as dataset:
         crs, footprint = dataset.crs, box(*dataset.bounds)
+        native = max(abs(dataset.res[0]), abs(dataset.res[1]))
+    if native > cell:
+        # A finer grid than the ground was measured on would only interpolate it.
+        click.echo(f"  ground measured every {native:g} m; judging it on that grid")
+        cell = native
     extent = footprint
     if field.get("geometry") is not None:
         outline = gpd.GeoSeries([field["geometry"]], crs=4326).to_crs(crs).iloc[0]

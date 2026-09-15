@@ -20,6 +20,8 @@ be confirmed or dismissed from 60 metres.
 | 7 | Dead / missing / stressed flags | done |
 | 8 | Overlay, histogram, block summary JSON, satellite join | done |
 | — | Run on real public data (Purdue 2018 sorghum): import, blocks, known row spacing, row tracking | done |
+| — | Ground without a drone: public USGS 3DEP lidar (`lidar`) under real Valley cotton, corn and sorghum | done |
+| — | Real public citrus photos (USDA Fort Pierce grove): registered and surveyed; ODM waits on Docker | waiting |
 
 ## Setup
 
@@ -39,7 +41,9 @@ Python 3.11 or 3.12. ffmpeg ships with the project via `imageio-ffmpeg`, so the
 video path needs no system install; a system ffmpeg on PATH is preferred if
 present.
 
-**Docker is required for step 3.** Check it with `dosojos-drone doctor`. On this
+**Docker is required for step 3.** Check it with `dosojos-drone doctor`, which
+exits 1 until Docker answers and the ODM image is pulled, so a script stops there
+rather than let `odm` pull 3-4 GB unasked. On this
 machine Docker Desktop runs on the WSL2 backend with 10 GB and 10 CPUs, set in
 `%USERPROFILE%\.wslconfig`:
 
@@ -73,7 +77,9 @@ burn hours and then produce a hole-ridden orthomosaic.
 ```
   images           200  (200 with GPS)
   camera           FC6310
-  altitude         72 m        spread  2.2%
+  flying height    72 m above takeoff
+  GPS altitude     84 m
+  altitude spread  2.2%
   GSD              6.57 cm/px
   footprint        90 x 60 m
   shot spacing     12.4 m
@@ -92,7 +98,14 @@ ground beneath it, so height above ground comes from DJI's XMP `RelativeAltitude
 tag, or from `--ground-elevation <metres AMSL>` at registration. Without either,
 GSD and overlap are reported as unknown rather than guessed — an earlier version
 inferred ground level from the lowest altitude in the survey and reported a false
-"0% overlap" failure on a perfectly good flight.
+"0% overlap" failure on a perfectly good flight. `flying height` is the median
+`RelativeAltitude`; `GPS altitude` is shown too, since the two disagreeing by
+tens of metres is normal.
+
+**Camera names can carry invisible padding.** The Phantom 4 Pro writes its model
+as `FC6310` followed by NUL characters. Left in, the name matched no sensor in the
+table, and the survey reported sensor width, GSD and overlap as unknown on a good
+flight. The padding is stripped when EXIF is read.
 
 **Coverage is worth planning around.** At 60 m with standard 80/70 overlap, 200
 frames cover roughly 45% of a 40-acre field. Full coverage needs about 500 frames,
@@ -575,6 +588,49 @@ What the real data changed in the code, each measured before it was kept:
 - **Row tracking.** Segments now follow the rows where they drift or shift; see
   below.
 
+## Ground without a drone (`lidar`)
+
+Until we can fly (no drone license yet), the ground can come from the government.
+USGS 3DEP airborne lidar covers most of the Valley at 2 m (survey TX_South_B8_2018,
+flown in 2019, public domain). `lidar` finds the tiles under a field on Microsoft
+Planetary Computer and reads only the field's window, plus 20 m. It stores them
+in `data/raw/<flight>/3dep/` with `source.json`. Then it imports the bare-earth
+(DTM) and surface (DSM) grids as a flight dated 1 January of the survey year, so
+`terrain` runs unchanged:
+
+```bash
+dosojos-drone lidar F002-lidar --field F002      # outline read from the satellite fields file
+dosojos-drone terrain F002-lidar
+```
+
+- `terrain` judges lidar on its own 2 m grid rather than pretending to 50 cm.
+  With no drone crop flags to compare against, it draws a single ground panel.
+- **Old ground.** It shows the field as it was in 2019, so later land leveling
+  won't appear. The SMS answer says so: *(Ground measured by government lidar in 2019.)*
+- **Trees hide the ground.** Where the laser hit canopy (surface over 1 m above
+  the ground on more than 15% of the field), `lidar` warns. Under the citrus
+  grove it was 30%, so orchards need a drone after all.
+- **One plane per field.** The check fits a single smooth plane, so the outline
+  must be one field. The first Valley corn pick was two fields across a farm road,
+  each draining to the road ditch. The check called that an "uneven" field with
+  a low middle and asked for leveling neither field needs. The satellite half's
+  `cropmap` now passes over such blocks.
+- Used on real Valley cotton, corn and sorghum in `../public_demo/rgv-crops-2025/`;
+  its `SOURCE.md` has the results.
+
+## Real data: a USDA citrus grove (waiting on Docker)
+
+`../public_demo/usda-citrus-bingo-2021/` holds a tree crop, to go with the row
+crops above: 46 drone photos of a 206-tree mandarin rootstock trial at USDA-ARS
+Fort Pierce, Florida. The dataset is Ag Data Commons doi:10.15482/USDA.ADC/26946823,
+public domain, and comes with per-tree height, width and health measured by hand.
+
+- **Done:** the flight is registered and surveyed. There are 46 geotagged photos,
+  1.25 cm/px and 78% forward overlap, and they are worth sending to ODM.
+- **Next:** `run_demo.cmd` there runs ODM, then `chm`, `detect --method watershed`,
+  `metrics`, `flag` and `report`. It starts once Docker Desktop runs and the ODM
+  image is pulled.
+
 ## Maps made elsewhere (`import`)
 
 ```bash
@@ -710,7 +766,7 @@ unaffected by that, but reported GSD is coarser than the real camera's.
 ./.venv/Scripts/python.exe -m pytest -q
 ```
 
-282 tests, none needing Docker, a network, or real imagery.
+293 tests, none needing Docker, a network, or real imagery.
 
 ## Layout
 
@@ -729,6 +785,7 @@ src/
   terrain.py          ground grade and evenness, spots, stress links, irrigation advice
   report.py           flag overlay, histogram, terrain map, block summary, satellite join
   odm_runner.py       docker invocation, staging, verification, diagnosis
+  lidar.py            public USGS 3DEP lidar under a field, in place of a flight
   video.py            MP4 + SRT -> geotagged JPEGs
   viz.py              quicklook now, overlays and histograms later
   cli.py              click commands

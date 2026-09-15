@@ -331,3 +331,19 @@ def test_xmp_relative_altitude_is_preferred(tmp_path: Path) -> None:
     raw[2:2] = marker                                 # splice XMP after the SOI
     path.write_bytes(bytes(raw))
     assert read_relative_altitude(path) == pytest.approx(61.30)
+
+
+def test_a_camera_name_padded_with_nul_bytes_is_still_recognised(tmp_path: Path) -> None:
+    """DJI writes 'FC6310' followed by NUL bytes; the model table must still match it."""
+    import piexif
+
+    path = _write_jpeg(tmp_path, "p.JPG")
+    exif = piexif.load(str(path))
+    exif["0th"][piexif.ImageIFD.Model] = b"FC6310" + b"\0" * 26
+    for tag in (piexif.ExifIFD.FocalPlaneXResolution, piexif.ExifIFD.FocalPlaneYResolution,
+                piexif.ExifIFD.FocalPlaneResolutionUnit):
+        exif["Exif"].pop(tag, None)          # force the lookup by camera name
+    piexif.insert(piexif.dump(exif), str(path))
+    shot = read_shot(path)
+    assert shot.camera == "FC6310"
+    assert shot.sensor_width_mm == pytest.approx(SENSOR_MM)
