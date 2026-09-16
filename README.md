@@ -381,6 +381,28 @@ reported. The corner's row and column still contain other trees, so a rectangle
 in the grid's own frame keeps it in the search. The drawback is an L-shaped
 orchard, where the rectangle would include the empty notch.
 
+**The missing-tree count refuses to answer when it does not believe itself.** The
+grid's spacing comes from the distance between neighbouring crowns, so it is only
+as good as the detection, and two ordinary plantings break it. Trees grown into
+each other: the detector cuts one crown for two, the measured gaps double, and the
+lattice has twice the positions the orchard has trees. Rows much wider apart than
+the trees within them: both spacings collapse onto the smaller, and the lattice
+fills the alleys with trees nobody planted. Either way the phantom positions read
+as missing trees.
+
+The USDA citrus flight did the first: 4.32 m spacing where the trees stand 2.13 m
+apart, and **272 missing trees reported in a grove that is nearly fully planted** —
+half the flag overlay was orange rings over the alleys and the farm road. A
+grower shown that stops believing the rest of the page. Worse, a *flawless*
+7.7 × 2.1 m citrus planting with every tree standing reports two thirds of itself
+missing, purely from the second failure.
+
+So when more than half of the inferred grid comes up empty (`MAX_EMPTY_GRID_SHARE`),
+`flag` reports no missing count at all and says why, in the message and again under
+the table, because a `MISSING 0` that was never counted is its own kind of lie. The
+crown count itself is unaffected and still reported. An orchard really does lose
+trees, in ones and twos, and up to half the grid empty is still reported normally.
+
 ### Results against ground truth
 
 Orchard: all 79 healthy trees HEALTHY, all 11 stressed trees STRESSED, all 10
@@ -714,18 +736,58 @@ everywhere, or the flight had weather in it, and not to read the patches hard.
 band. It plants one 30 m warm patch and checks the step finds that one and
 nothing else. Replace it the day a real radiometric camera can be borrowed.
 
-## Real data: a USDA citrus grove (waiting on Docker)
+## Real data: a USDA citrus grove, scored against a tape measure
 
 `../public_demo/usda-citrus-bingo-2021/` holds a tree crop, to go with the row
 crops above: 46 drone photos of a 206-tree mandarin rootstock trial at USDA-ARS
 Fort Pierce, Florida. The dataset is Ag Data Commons doi:10.15482/USDA.ADC/26946823,
-public domain, and comes with per-tree height, width and health measured by hand.
+public domain, and comes with per-tree height, width and health measured by hand
+weeks before the flight. `check_answer_key.py` there scores the flight against it.
 
-- **Done:** the flight is registered and surveyed. There are 46 geotagged photos,
-  1.25 cm/px and 78% forward overlap, and they are worth sending to ODM.
-- **Next:** `run_demo.cmd` there runs ODM, then `chm`, `detect --method watershed`,
-  `metrics`, `flag` and `report`. It starts once Docker Desktop runs and the ODM
-  image is pulled.
+It ran on 2026-09-16 and the score is not flattering, which is the point of having
+an answer key at all:
+
+| | |
+|---|---|
+| measured by hand | 1.85 m mean |
+| from our canopy model | 1.11 m mean |
+| short by | **0.74 m, 40% of the real height** |
+| correlation | 0.78 |
+| trees found as separate crowns | 132 of 216, **61%** |
+
+It ranks the trees right and reads every one short. About 0.49 m of that is ODM's
+surface model not reaching the top of a citrus crown, and 0.25 m is its ground
+model creeping up under the row where there are no ground points to see. **Treat
+tree heights on a tree crop as relative, not absolute.**
+
+The 61% is trees 2.1 m apart that have grown into each other: the watershed cuts
+one crown where two trees touch. Counts from a closed tree canopy are a floor.
+
+## One page for the whole flight (`page`)
+
+```bash
+dosojos-drone page demo-001
+```
+
+Every command leaves its own picture in the out folder, which suits the team and
+nobody else. `page` writes one `page.html` holding all of them plus the numbers,
+with the pictures carried inside the file, so it survives being saved, forwarded,
+or opened on a phone with no signal.
+
+**It is built to be worth opening with the drone half alone.** A field can have no
+satellite record for honest reasons - too small for a Sentinel-2 pixel, outside
+what we have fetched, or simply new - and the page then says so in as many words
+rather than leaving a silent gap:
+
+> There is no satellite record for this field, so this page is the drone's word
+> alone. That is not a failure: [...] What it means for you is that there is no
+> *how does this compare with its own normal* here, and no water advice.
+
+Where there is a satellite half it leads with it - last clear look, green against
+the field's own normal, days of water left - and then the flight. `--no-satellite`
+forces the drone-only page; `--satellite-dir` points at another satellite project.
+The citrus demo above is the drone-only case; the Purdue sorghum demo below has
+both halves.
 
 ## Maps made elsewhere (`import`)
 

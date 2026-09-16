@@ -19,6 +19,7 @@ from . import flags as flags_mod
 from . import report as report_mod
 from . import metrics as metrics_mod
 from . import odm_runner, video, viz
+from . import page as page_mod
 from . import terrain as terrain_mod
 from . import thermal as thermal_mod
 from .config import (
@@ -1130,6 +1131,7 @@ def flag_cmd(
 
     missing_frame = None
     n_missing_positions = 0
+    no_missing_count = False
     if method == "rows":
         missing_frame = flags_mod.gap_runs(flagged, segment_m=segment)
     else:
@@ -1138,8 +1140,9 @@ def flag_cmd(
             grid = flags_mod.infer_planting_grid(centroids)
             positions = flags_mod.find_missing_positions(grid, centroids)
         except flags_mod.FlagError as exc:
-            click.secho(f"WARNING: no missing-tree search: {exc}", fg="yellow")
+            click.secho(f"WARNING: not counting missing trees: {exc}", fg="yellow")
             positions = np.empty((0, 2))
+            no_missing_count = True
         n_missing_positions = len(positions)
         missing_frame = gpd.GeoDataFrame(
             {"kind": ["missing"] * len(positions)},
@@ -1158,6 +1161,9 @@ def flag_cmd(
     )
 
     click.echo(_format_flags(summary, method, missing_frame))
+    if no_missing_count:
+        click.secho("  MISSING is 0 because it was not counted, not because none are "
+                    "missing. See the warning above.", fg="yellow")
     click.echo("")
     for name in (f"flags_{method}.geojson", f"flags_{method}_summary.csv"):
         click.echo(f"  {out_dir / name}")
@@ -1733,6 +1739,90 @@ def _water_cell(water: dict | None) -> str:
     if water["days_left"] is None:
         return "ok 6+ wk"
     return f"{water['days_left']} days"
+
+
+def _field_name(settings: Settings, field_id: str | None) -> str:
+    """The field's name from the satellite project, falling back to its id."""
+    if not field_id or not settings.fields_geojson.exists():
+        return field_id or ""
+    try:
+        import geopandas as gpd
+
+        frame = gpd.read_file(settings.fields_geojson)
+        match = frame[frame["id"].astype(str) == field_id]
+        if not match.empty and "name" in match:
+            return str(match["name"].iloc[0]) or field_id
+    except Exception:            # a missing or odd fields file must not stop the page
+        log.debug("could not read a name for %s", field_id, exc_info=True)
+    return field_id
+
+
+@cli.command("page")
+@click.argument("flight_id")
+@click.option("--satellite/--no-satellite", "use_satellite", default=True,
+              show_default=True,
+              help="Include the satellite half when this field has one.")
+@click.option("--satellite-dir", type=click.Path(file_okay=False, path_type=Path),
+              default=None,
+              help="Where the satellite's pictures are  [default: beside its flags.json]")
+@click.option("--out", "out_path", type=click.Path(dir_okay=False, path_type=Path),
+              default=None, help="Where to write  [default: out/<flight>/page.html]")
+@click.pass_obj
+def page_cmd(
+    settings: Settings,
+    flight_id: str,
+    use_satellite: bool,
+    satellite_dir: Path | None,
+    out_path: Path | None,
+) -> None:
+    """One self-contained page holding everything this flight found.
+
+    Works with the drone half alone: a field with no satellite record gets a page
+    that says so plainly and shows what the flight measured. Pictures are carried
+    inside the file, so it can be saved, forwarded, or read with no signal.
+    """
+    try:
+        flight = get_flight(settings.manifest_path, flight_id)
+    except ManifestError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    satellite_out = triage = None
+    if use_satellite:
+        satellite_out = satellite_dir or settings.satellite_flags.parent
+        triage = settings.out_dir / "triage.json"
+        if not triage.exists():
+            triage = None
+
+    try:
+        data = page_mod.gather(
+            settings.out_dir, flight_id,
+            flight={
+                "field_id": flight.field_id,
+                "flown_on": str(flight.flown_on or ""),
+                "crop": flight.crop,
+                "source": flight.source,
+            },
+            field_name=_field_name(settings, flight.field_id),
+            satellite_dir=satellite_out if satellite_out and satellite_out.is_dir() else None,
+            triage_path=triage,
+        )
+    except page_mod.PageError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    out_path = out_path or (settings.out_dir / flight_id / "page.html")
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(page_mod.render(data), encoding="utf-8")
+
+    click.echo(page_mod.headline(data))
+    if data.satellite or data.satellite_figures:
+        click.echo("  satellite    included")
+    else:
+        click.secho("  satellite    none for this field; the page says so", fg="yellow")
+    click.echo(f"  pictures     {len(data.figures) + len(data.satellite_figures)}")
+    click.echo(f"  size         {out_path.stat().st_size / 1024 ** 2:.1f} MB, "
+               f"self-contained")
+    click.echo("")
+    click.echo(f"  {out_path}")
 
 
 if __name__ == "__main__":  # pragma: no cover  (last, once every command is registered)
