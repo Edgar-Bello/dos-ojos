@@ -176,8 +176,15 @@ class Patch:
     n_units: int = 0
     #: Whether the ground model puts a high or low spot under it.
     ground: str | None = None
+    #: Share of the whole field's units the colour camera flagged, when a patch
+    #: was compared against it; kept so anyone re-wording a sign has the number.
+    field_share: float | None = None
     chance: float = 0.0
+    #: The signs behind the score, in prose...
     signs: list[str] = dc_field(default_factory=list)
+    #: ...and as keys into SIGNS, so another language can say the same thing.
+    #: The SMS half writes these out in the farmer's own words.
+    sign_keys: list[str] = dc_field(default_factory=list)
     geometry: BaseGeometry | None = dc_field(default=None, repr=False)
 
     def to_dict(self) -> dict:
@@ -375,7 +382,7 @@ def score(patch: Patch, evidence: Evidence = Evidence()) -> Patch:
 
     The number is a ranking, not a diagnosis: see this module's own docstring.
     """
-    points, signs = 0.0, []
+    points, signs, keys = 0.0, [], []
 
     def take(key: str, **values) -> None:
         nonlocal points
@@ -383,6 +390,7 @@ def score(patch: Patch, evidence: Evidence = Evidence()) -> Patch:
         points += weight
         line = finding.format(**{**patch.to_dict(), **values})
         signs.append(f"{line} - {because}" if because else line)
+        keys.append(key)
 
     if patch.above_c >= 3.0:
         take("hot")
@@ -409,12 +417,13 @@ def score(patch: Patch, evidence: Evidence = Evidence()) -> Patch:
 
     field_share = evidence.field_problem_share
     if patch.problem_share is not None and field_share is not None:
+        patch.field_share = field_share
         if patch.problem_share > max(0.10, 1.5 * field_share):
             take("crop_damaged", field_share=field_share)
         elif patch.problem_share <= field_share:
             take("crop_fine")
 
-    patch.signs = signs
+    patch.signs, patch.sign_keys = signs, keys
     patch.chance = round(_curve(points), 2)
     return patch
 
