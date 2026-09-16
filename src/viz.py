@@ -263,3 +263,71 @@ def save_units_overlay(
     plt.close(figure)
     log.info("wrote %s", out_path)
     return out_path
+
+
+def save_thermal_png(
+    celsius,
+    patches,
+    out_path: Path,
+    *,
+    transform,
+    title: str,
+    subtitle: str = "",
+    banner: str | None = None,
+) -> Path:
+    """Draw canopy temperature with the warm patches ringed and labelled.
+
+    The colour scale is cut at the 2nd and 98th percentile of the canopy. A
+    thermal mosaic almost always holds a few pixels of bare metal or open soil
+    thirty degrees off the crop, and on a full-range scale those few pixels
+    flatten every difference that matters into one shade.
+    """
+    import numpy as np
+
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    finite = celsius[np.isfinite(celsius)]
+    low, high = (np.percentile(finite, (2, 98)) if finite.size else (0.0, 1.0))
+
+    figure, axes = plt.subplots(figsize=(10.0, 8.6), dpi=DPI)
+    colormap = plt.get_cmap("inferno").copy()
+    colormap.set_bad("#d9d8d2")
+    height, width = celsius.shape
+    left, top = transform * (0, 0)
+    right, bottom = transform * (width, height)
+    image = axes.imshow(
+        np.ma.masked_invalid(celsius), cmap=colormap, vmin=low, vmax=max(high, low + 0.1),
+        extent=(left, right, bottom, top), origin="upper", interpolation="nearest",
+    )
+    bar = figure.colorbar(image, ax=axes, shrink=0.82, pad=0.02)
+    bar.set_label("canopy temperature (C)", fontsize=11)
+
+    for patch in patches:
+        if patch.geometry is None:
+            continue
+        x, y = patch.geometry.exterior.xy
+        axes.plot(x, y, color="#2ad6f5", linewidth=1.6)
+        centre = patch.geometry.centroid
+        axes.annotate(
+            f"{patch.chance:.0%}", xy=(centre.x, centre.y), fontsize=10, color="#2ad6f5",
+            ha="center", va="center", fontweight="bold",
+        )
+
+    axes.set_title(title, fontsize=15, loc="left", pad=24)
+    if subtitle:
+        axes.annotate(
+            subtitle, xy=(0, 1), xycoords="axes fraction", xytext=(0, 8),
+            textcoords="offset points", fontsize=10, color="#6f6e69",
+        )
+    _banner(axes, banner)
+    axes.set_xlabel("easting (m)", fontsize=11)
+    axes.set_ylabel("northing (m)", fontsize=11)
+    axes.tick_params(labelsize=8)
+    axes.ticklabel_format(useOffset=False, style="plain")
+    axes.set_aspect("equal")
+
+    figure.savefig(out_path, bbox_inches="tight", facecolor="white")
+    plt.close(figure)
+    log.info("wrote %s", out_path)
+    return out_path

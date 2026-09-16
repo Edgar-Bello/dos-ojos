@@ -419,7 +419,7 @@ def cropped_area(outline: BaseGeometry, units: gpd.GeoDataFrame | None
     return outline, "the whole outline"
 
 
-def _where(point: BaseGeometry, frame: BaseGeometry) -> str:
+def where(point: BaseGeometry, frame: BaseGeometry) -> str:
     """'north-east corner', 'south edge' or 'middle', within the field's extent."""
     minx, miny, maxx, maxy = frame.bounds
     u = (point.x - minx) / max(maxx - minx, 1e-9)
@@ -456,7 +456,7 @@ def find_spots(ground: Ground, extent: BaseGeometry) -> list[Spot]:
             peak = float(values.max() if kind == "high" else values.min())
             spots.append(Spot(label="", kind=kind, area_m2=round(float(area), 1),
                               mean_cm=round(float(values.mean()), 1), peak_cm=round(peak, 1),
-                              where=_where(geometry.centroid, extent), n_units=0,
+                              where=where(geometry.centroid, extent), n_units=0,
                               problem_share=None, geometry=geometry))
     spots.sort(key=lambda s: (s.kind != "high", -s.area_m2))
     counters = {"high": 0, "low": 0}

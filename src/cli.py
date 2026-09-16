@@ -20,6 +20,7 @@ from . import report as report_mod
 from . import metrics as metrics_mod
 from . import odm_runner, video, viz
 from . import terrain as terrain_mod
+from . import thermal as thermal_mod
 from .config import (
     Flight,
     ManifestError,
@@ -1447,6 +1448,155 @@ def _format_terrain(report) -> str:
                                  + ("  <- linked" if item.linked else "")))
     width = max(len(label) for label, _ in rows)
     return "\n".join(f"  {label:<{width}}  {value}" for label, value in rows)
+
+
+@cli.command("thermal")
+@click.argument("flight_id")
+@click.option("--thermal", "thermal_path", required=True,
+              type=click.Path(dir_okay=False, exists=True, path_type=Path),
+              help="Radiometric thermal orthophoto (GeoTIFF), in Celsius, Kelvin or "
+                   "hundredths of a Kelvin.")
+@click.option("--method", type=click.Choice(list(crowns.METHODS)), default="rows",
+              show_default=True, help="Whose flags to cross-check the warm patches against.")
+@click.option("--water-days", type=int, default=None,
+              help="Days of water the field has left  [default: the satellite checkbook's]")
+@click.option("--canopy-min", type=float, default=thermal_mod.CANOPY_MIN_M, show_default=True,
+              help="Canopy at least this tall is crop; anything lower is soil.")
+@click.option("--warm-z", type=float, default=thermal_mod.WARM_Z, show_default=True,
+              help="Robust standard deviations above the canopy median to count as warm.")
+@click.option("--min-patch", type=float, default=thermal_mod.MIN_PATCH_M2, show_default=True,
+              help="Smallest warm patch worth reporting, square metres.")
+@click.pass_obj
+def thermal_cmd(settings: Settings, flight_id: str, thermal_path: Path, method: str,
+                water_days: int | None, canopy_min: float, warm_z: float,
+                min_patch: float) -> None:
+    """Optional: find canopy running hot on a thermal mosaic and score it for pests.
+
+    Thermal cannot tell a bitten plant from a thirsty one on its own, so each
+    warm patch is scored against the ground model, the colour camera's flags and
+    the water checkbook. The score ranks patches to walk out to; it diagnoses
+    nothing.
+    """
+    import geopandas as gpd
+
+    out_dir = settings.flight_out(flight_id)
+    settings.ensure_dirs(flight_id)
+    chm_path = out_dir / "chm.tif"
+    if not chm_path.exists():
+        raise click.ClickException(
+            f"no canopy model at {chm_path}. Run 'dosojos-drone chm {flight_id}' first: "
+            "without it there is no way to measure leaves only, and sunlit soil runs far "
+            "hotter than any crop."
+        )
+    flight = None
+    try:
+        flight = get_flight(settings.manifest_path, flight_id)
+    except ManifestError:
+        pass
+    field_id = flight.field_id if flight else None
+
+    try:
+        heat, unit = thermal_mod.load_thermal(thermal_path)
+    except (chm_mod.ChmError, thermal_mod.ThermalError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    canopy = thermal_mod.align(chm_mod.load_surface(chm_path), heat)
+
+    field = _field_settings(settings, field_id)
+    outline = None
+    if field.get("geometry") is not None:
+        outline = gpd.GeoSeries([field["geometry"]], crs=4326).to_crs(heat.crs).iloc[0]
+    frame = thermal_mod.frame_of(heat, outline)
+    cell_m = max(heat.resolution_m)
+
+    try:
+        patches, stats = thermal_mod.find_patches(
+            heat.data, canopy, heat.transform, cell_m=cell_m, frame=frame,
+            canopy_min_m=canopy_min, warm_z=warm_z, min_patch_m2=min_patch,
+        )
+    except thermal_mod.ThermalError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    spots_path = out_dir / "terrain_spots.geojson"
+    spots: tuple = ()
+    if spots_path.exists():
+        spots = tuple(gpd.read_file(spots_path).to_crs(heat.crs).itertuples())
+        thermal_mod.place_on_ground(patches, spots)
+
+    field_share = None
+    flags_path = out_dir / f"flags_{method}.geojson"
+    if flags_path.exists() and patches:
+        units = gpd.read_file(flags_path).to_crs(heat.crs)
+        thermal_mod.place_on_units(patches, units)
+        judged = units[~units["flag"].isin(flags_mod.NOT_ASSESSED)]
+        if len(judged):
+            field_share = round(float(
+                judged["flag"].isin(("STRESSED", "DEAD", "MISSING")).sum()) / len(judged), 3)
+
+    if water_days is None:
+        status = _satellite_water(settings).get(field_id or "") or {}
+        water_days = status.get("days_left")
+    evidence = thermal_mod.Evidence(
+        water_days=water_days, field_problem_share=field_share, spots=spots,
+    )
+    report = thermal_mod.build_report(
+        flight_id, field_id, unit=unit, cell_m=cell_m, patches=patches, stats=stats,
+        evidence=evidence,
+        notes=[] if flags_path.exists() else
+        [f"no flags_{method}.geojson, so nobody checked whether the colour camera sees "
+         "damage in these patches too; run 'flag' first for a better score."],
+    )
+
+    json_path = out_dir / "thermal.json"
+    json_path.write_text(json.dumps(report.to_dict(), indent=2), encoding="utf-8")
+    patches_path = out_dir / "thermal_patches.geojson"
+    if patches:
+        gpd.GeoDataFrame([p.to_dict() for p in patches],
+                         geometry=[p.geometry for p in patches],
+                         crs=heat.crs).to_file(patches_path, driver="GeoJSON")
+    # The figure shows leaves only, for the same reason the statistics do.
+    leaves = np.where(thermal_mod.canopy_mask(heat.data, canopy, canopy_min), heat.data, np.nan)
+    map_path = viz.save_thermal_png(
+        leaves, patches, out_dir / "thermal.png", transform=heat.transform,
+        title=f"{field_id or flight_id} - canopy temperature",
+        subtitle=f"canopy median {report.canopy_median_c:.1f} C, "
+                 f"{len(patches)} warm patch(es); the percentage is our own score, not a test",
+        banner=_public_banner(flight),
+    )
+
+    click.echo(_format_thermal(report))
+    for note in report.notes:
+        click.secho(f"  NOTE: {note}", fg="yellow")
+    click.echo("")
+    for path in (map_path, json_path, patches_path if patches else None):
+        if path is not None:
+            click.echo(f"  {path}")
+
+
+def _format_thermal(report) -> str:
+    """The canopy's temperature, then every warm patch with the signs behind its score."""
+    rows = [
+        ("thermal read as", f"{report.unit}, {report.cell_m:g} m pixels"),
+        ("canopy measured", f"{report.canopy_m2 / 4046.86:.1f} acres"),
+        ("canopy temperature", f"{report.canopy_median_c:.1f} C, spread {report.canopy_spread_c:.1f} C"),
+        ("running hot", f"{report.warm_share:.1%} of the canopy"),
+    ]
+    width = max(len(label) for label, _ in rows)
+    lines = [f"  {label:<{width}}  {value}" for label, value in rows]
+    if not report.patches:
+        lines.append("")
+        lines.append("  No warm patch big enough to report. Nothing to walk out to.")
+        return "\n".join(lines)
+    lines.append("")
+    lines.append("Warm patches, most worth a look first")
+    for number, patch in enumerate(report.patches, start=1):
+        lines.append(
+            f"  {number}. {patch.chance:.0%} chance it is a pest or disease - "
+            f"{patch.where}, {patch.area_m2:,.0f} m2, {patch.above_c:+.1f} C"
+        )
+        for sign in patch.signs:
+            lines.append(f"     - {sign}")
+        lines.append("     Go and look at it: the camera cannot name what it is.")
+    return "\n".join(lines)
 
 
 AGREEMENT_TEXT = {

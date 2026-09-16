@@ -473,6 +473,7 @@ dosojos-drone metrics f1 --method rows
 dosojos-drone flag    f1 --method rows
 dosojos-drone report  f1 --method rows
 dosojos-drone terrain f1                      # is the ground level; does the stress follow it?
+dosojos-drone thermal f1 --thermal t.tif      # optional: warm patches, scored for pests
 dosojos-drone join                            # merge with the satellite ranking and water
 ```
 
@@ -625,6 +626,93 @@ dosojos-drone terrain F002-lidar
   `cropmap` now passes over such blocks.
 - Used on real Valley cotton and corn in `../public_demo/rgv-crops-2025/`;
   its `SOURCE.md` has the results.
+
+## Thermal, if anyone has one (`thermal`)
+
+Optional, and off the main path: most growers have no thermal camera, and every
+other step works without one. When a flight does carry a **radiometric** thermal
+band, it answers one thing the colour camera cannot — which plants have shut
+their stomata. A plant that stops transpiring stops cooling itself and sits one
+to three degrees above its neighbours long before it looks any different.
+
+```bash
+dosojos-drone chm     f1                           # the canopy mask this needs
+dosojos-drone flag    f1 --method rows             # optional, and it improves the score
+dosojos-drone terrain f1                           # likewise
+dosojos-drone thermal f1 --thermal thermal_ortho.tif
+```
+
+Writes `thermal.png`, `thermal.json` and `thermal_patches.geojson` beside the
+rest of the flight.
+
+**Leaves only.** Sunlit soil between the rows runs about 20 °C above the crop,
+so every statistic and the figure itself are taken over canopy above 0.3 m from
+the CHM. Measured on temperature alone, a row crop's furrows would be every
+"patch" on the field.
+
+**Whatever the camera wrote.** Celsius, Kelvin, and the hundredths of a Kelvin
+FLIR-derived cameras store in a 16-bit integer, told apart by where the numbers
+sit. A picture that only *looks* like heat — a grey or orange JPEG off a
+non-radiometric camera — is refused, with what to do about it.
+
+**Patches, not pixels.** Canopy at least 2 robust standard deviations *and* 1 °C
+above the field's own canopy median, then closed over about one tree spacing.
+That closing is what makes an orchard work: crowns are separated by bare ground,
+so tracing connected warm pixels alone would break a warm block of twenty trees
+into twenty 15 m² patches and report none of them. A patch has to cover the
+larger of 25 m² and 0.2% of the canopy — noise scales with the field, and on 30
+acres the temperature noise alone clumps into dozens of meaningless 40 m² blobs.
+
+### The percentage, and what it is not
+
+**It is a scorecard we wrote, not a calibrated probability, and never a
+diagnosis.** There is no labelled set of infested Valley fields to fit a real
+model to. The number ranks patches and shows its reasoning; every patch carries
+the signs behind it, and the score is floored at 10% and capped at 85% so it can
+never sound certain.
+
+It has to be a score rather than a reading because a hot patch has three common
+causes and thermal cannot separate them:
+
+- the crop is thirsty — but then the whole field runs hot, evenly;
+- the water never reached that spot — a high spot, a row tail, a blocked emitter;
+- something is eating it — root rot, nematodes, borers, sucking insects, wilt.
+
+So each patch is weighed against what the rest of Dos Ojos already knows:
+
+| sign | weight | why |
+|---|---|---|
+| 3 °C or more above the canopy | +2 | a degree or two is ordinary variation |
+| 2 to 3 °C above | +1 | |
+| under 2 °C above | −1 | within what an ordinary field varies by |
+| 200 m² or more | +1 | worth walking out to |
+| a blob, not a streak | +1 | water problems follow the rows and the slope |
+| a streak along the rows | −1 | that is the shape a watering problem makes |
+| level ground under it (`terrain` ran) | +2 | the water was not simply missing it |
+| a high spot under it | −2 | the ground explains the heat without any pest |
+| a low spot under it | −1 | waterlogged roots also stop a plant drinking |
+| the field still has water | +2 | a thirsty field runs hot all over |
+| the field is due water anyway | −2 | the whole crop is short, so this says little |
+| the colour camera flags its plants too | +2 | the damage is visible as well as warm |
+| its plants look normal to the colour camera | −1 | hot but healthy-looking is usually water |
+
+Three points is an even chance. Without `terrain`, `flag` or a water checkbook
+the report says so rather than quietly scoring on less.
+
+### Flying for it
+
+Within two hours of solar noon, clear sky, light wind, crop lit rather than
+shaded. A thin cloud crossing mid-flight paints a cold stripe across the mosaic
+that looks nothing like a pest and wrecks the statistics all the same. When more
+than 35% of the canopy runs hot, the report says the field is short of water
+everywhere, or the flight had weather in it, and not to read the patches hard.
+
+### Seeing it work
+
+`../public_demo/thermal-synthetic/` runs it end to end on a **generated** mosaic
+— no camera took those pictures, and every figure from it carries a SYNTHETIC
+band. It plants one 30 m warm patch and checks the step finds that one and
+nothing else. Replace it the day a real radiometric camera can be borrowed.
 
 ## Real data: a USDA citrus grove (waiting on Docker)
 
@@ -791,6 +879,7 @@ src/
   metrics.py          zonal volume, height, cover, RGB indices
   flags.py            classification, planting grid, missing plants, gaps
   terrain.py          ground grade and evenness, spots, stress links, irrigation advice
+  thermal.py          optional: canopy temperature, warm patches, the pest scorecard
   report.py           flag overlay, histogram, terrain map, block summary, satellite join
   odm_runner.py       docker invocation, staging, verification, diagnosis
   lidar.py            public USGS 3DEP lidar under a field, in place of a flight
