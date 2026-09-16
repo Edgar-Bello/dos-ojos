@@ -135,10 +135,16 @@ From any folder in PowerShell, `C:\Users\edgar\Projects\Dos_Ojos\dosojos_sms\sms
 | `link F003` | A map link for the team to draw a field; saving it texts the farmer the acres |
 | `outline F003 field.kml` | Set an outline from Google Earth (KML) or GeoJSON |
 | `export` | Write `fields.geojson` and `field_log.csv` into the satellite workspace |
-| `daily [--send]` | Export, fetch imagery, weather and soil, run the checkbook, then alerts |
+| `daily [--send]` | Export, fetch imagery, weather and soil, build each field's own normal, run the checkbook, then alerts |
 | `remind [--send]` | Water alerts, "have you watered?" check-ins, reminders of missing facts |
 
 `daily` and `remind` only list what they would send unless given `--send`.
+
+`daily` keeps five years of imagery: this season, plus the four earlier ones that
+"what this field usually does on this date" is built from. Only the "why" page
+draws that band, so a new farm whose first run would be slow can start with
+`--years 2 --skip-baseline` and fill it in later; the water advice never needs it.
+Nothing already cached is fetched twice.
 `outline F001 fields.geojson --id <id>` takes one field out of a file of several.
 Global options: `--data <folder>` (default `Dos_Ojos\farm_data`), `--as-of
 YYYY-MM-DD` to answer as of a pinned day. A demo folder can pin its own day with

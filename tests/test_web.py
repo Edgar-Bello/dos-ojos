@@ -175,6 +175,35 @@ def test_the_map_page_and_saving_the_corners(base: str, app: App, sent: list) ->
     assert "Usted dijo 40." in sent[0][1]
 
 
+def test_the_why_page_and_its_download(base: str, app: App) -> None:
+    with app.db() as conn:
+        farmer = store.add_farmer(conn, "+19565550123")
+        farmer.lang, farmer.state, farmer.name = "es", "idle", "Juan"
+        store.save_farmer(conn, farmer)
+        record = store.add_field(conn, farmer.phone, "Campo Norte")
+        record.crop, record.irrigation, record.acres = "sorghum", "furrow", 40.0
+        record.outline = {"type": "Polygon", "coordinates": [SQUARE + [SQUARE[0]]]}
+        store.save_field(conn, record)
+        token = store.new_link(conn, "explain", record.id, days=14)
+
+    status, page = call(f"{base}/r/{token}")
+    assert status == 200
+    assert "Por qué: Campo Norte".encode() in page
+    assert b"<h2>La respuesta</h2>" in page
+
+    request = urllib.request.Request(f"{base}/r/{token}/file")
+    with urllib.request.urlopen(request, timeout=10) as response:
+        assert response.status == 200
+        assert "attachment" in response.headers["Content-Disposition"]
+        assert response.read().startswith(b"<!doctype html>")
+
+
+def test_an_expired_why_link_says_how_to_get_another(base: str, app: App) -> None:
+    status, page = call(f"{base}/r/never-existed")
+    assert status == 404
+    assert b"PORQUE" in page          # no Accept-Language, so the Spanish page
+
+
 def test_crossed_lines_are_straightened_or_refused(base: str, app: App, sent: list) -> None:
     token = farmer_with_a_pin(app)
     bow_tie = [SQUARE[0], SQUARE[2], SQUARE[1], SQUARE[3]]

@@ -976,8 +976,7 @@ class Turn:
             self.say("explain_none")
             return
         for record in explained:
-            token = store.new_link(self.conn, "explain", record.id, days=LINK_DAYS,
-                                   now=self.bot.now)
+            token = link_token(self.conn, "explain", record.id, self.bot.now)
             self.say("explain_link", field=record.name,
                      link=self.bot.settings.link(f"r/{token}"), days=LINK_DAYS)
 
@@ -1142,10 +1141,20 @@ class Turn:
         return None
 
 
-def map_token(conn: sqlite3.Connection, field_id: str, now: datetime | None = None) -> str:
-    """The field's map link token: the open one if there is one, else a new one."""
+def link_token(conn: sqlite3.Connection, kind: str, field_id: str,
+               now: datetime | None = None) -> str:
+    """One of a field's link tokens: the open one if there is one, else a new one.
+
+    Asking twice should not leave two live links, and a farmer who kept the
+    first text should find that link still works.
+    """
     row = conn.execute(
-        "SELECT token FROM links WHERE kind = 'map' AND field_id = ? AND expires_at > ? "
-        "ORDER BY created_at DESC LIMIT 1", (field_id, store.utc_iso(now))).fetchone()
-    return row["token"] if row else store.new_link(conn, "map", field_id, days=LINK_DAYS,
-                                                    now=now)
+        "SELECT token FROM links WHERE kind = ? AND field_id = ? AND expires_at > ? "
+        "ORDER BY created_at DESC LIMIT 1", (kind, field_id, store.utc_iso(now))).fetchone()
+    return row["token"] if row else store.new_link(conn, kind, field_id, days=LINK_DAYS,
+                                                   now=now)
+
+
+def map_token(conn: sqlite3.Connection, field_id: str, now: datetime | None = None) -> str:
+    """The field's map link token."""
+    return link_token(conn, "map", field_id, now)

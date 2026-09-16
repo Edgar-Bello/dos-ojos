@@ -216,6 +216,15 @@ def test_agua_offers_the_file_and_porque_sends_a_link(phone: Phone, conn) -> Non
     assert "/r/" in reply and "Campo Norte" in reply
 
 
+def test_asking_twice_gives_the_same_link(phone: Phone, conn) -> None:
+    """A farmer who kept the first text should find that link still works."""
+    onboard(phone)
+    register_field(phone)
+    draw(conn, "F001")
+    first = phone("PORQUE")[0].split("/r/")[1].split()[0]
+    assert phone("PORQUE")[0].split("/r/")[1].split()[0] == first
+
+
 def test_why_works_in_english_too(phone: Phone, conn) -> None:
     onboard(phone, lang="2")
     register_field(phone)
