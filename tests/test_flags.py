@@ -309,6 +309,47 @@ def test_too_few_crowns_for_a_grid() -> None:
         infer_planting_grid(np.array([[0, 0], [5, 0], [0, 5]], dtype=float))
 
 
+def test_a_gappy_orchard_is_still_counted() -> None:
+    """Losing a fifth of the trees is an orchard with gaps, and we report them.
+
+    Most neighbours are still a true spacing apart, so the grid is right and the
+    empty positions are real.
+    """
+    rng = np.random.default_rng(7)
+    full = {(i, j) for i in range(10) for j in range(10)}
+    drop = set(map(tuple, rng.choice(sorted(full), size=20, replace=False)))
+    points = _orchard(shape=(10, 10), drop=drop)
+    missing = find_missing_positions(infer_planting_grid(points), points)
+    assert len(missing) == pytest.approx(20, abs=4)
+
+
+def test_wide_rows_of_close_trees_are_refused_not_reported() -> None:
+    """A flawless citrus-shaped orchard must not be reported as two-thirds missing.
+
+    Rows 7.7 m apart holding trees 2.1 m apart is an ordinary citrus planting and
+    the shape of the USDA trial. Both spacings collapse onto the smaller one, the
+    lattice fills the alleys with trees nobody planted, and every one of them reads
+    as missing. Not one tree here is absent.
+    """
+    points = _orchard(spacing=(7.7, 2.1), shape=(4, 40))
+    with pytest.raises(FlagError, match="wrong grid"):
+        find_missing_positions(infer_planting_grid(points), points)
+
+
+def test_the_refusal_says_the_crown_count_still_stands() -> None:
+    """Refusing to count missing trees must not cast doubt on the trees we found."""
+    points = _orchard(drop={(3, 3)})
+    with pytest.raises(FlagError, match="crown\\(s\\) is still sound"):
+        find_missing_positions(infer_planting_grid(points), points, max_empty_share=0.0)
+
+
+def test_an_orchard_with_no_gaps_is_never_refused() -> None:
+    """Nothing empty cannot be too much empty, whatever the limit."""
+    points = _orchard()
+    assert len(find_missing_positions(infer_planting_grid(points), points,
+                                      max_empty_share=0.0)) == 0
+
+
 def test_grid_rotation_round_trips() -> None:
     """Rotating into the grid frame and back must return the original point."""
     grid = PlantingGrid(27.0, 5.0, 4.0, (600000.0, 2900000.0), 64)

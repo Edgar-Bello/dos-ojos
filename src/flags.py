@@ -83,6 +83,28 @@ DEFAULT_MISSING_COVER_FRACTION = 0.70
 #: false MISSING flags lined the east edge, one per row.
 DEFAULT_EDGE_AREA_FRACTION = 0.75
 
+#: Above this share of the inferred planting grid coming up empty, the grid is
+#: wrong and no missing-tree count is reported.
+#:
+#: The grid's spacing comes from the distance between neighbouring crowns, so it
+#: is only as good as the detection, and two shapes of planting break it.
+#:
+#: Trees grown into each other: the detector cuts one crown for two, the gaps it
+#: measures are doubled, and the lattice has twice the positions the orchard has
+#: trees. On the USDA citrus trial that gave 4.32 m spacing where the trees stand
+#: 2.13 m apart, and 272 missing trees in a grove that is nearly fully planted.
+#:
+#: Rows much further apart than the trees within them: both spacings collapse onto
+#: the smaller one, and the lattice fills the alleys with trees nobody planted. A
+#: flawless 7.7 m by 2.1 m orchard with every tree standing reports two thirds of
+#: itself missing.
+#:
+#: An orchard really does lose trees, in ones and twos, and we would rather report
+#: a gappy orchard than hide one. But a grid whose own positions are more than half
+#: empty has not found the planting pattern, and saying so is worth more than a
+#: number nobody should act on.
+MAX_EMPTY_GRID_SHARE = 0.5
+
 #: Verdicts that are not judgements of the crop, and so never count as problems.
 NOT_ASSESSED = ("EDGE", "NO_DATA")
 
@@ -415,12 +437,18 @@ def find_missing_positions(
     *,
     tolerance: float = 0.45,
     area=None,
+    max_empty_share: float = MAX_EMPTY_GRID_SHARE,
 ) -> np.ndarray:
     """Grid positions with no crown within ``tolerance`` of a spacing.
 
     Only positions inside ``area`` are considered, which defaults to
     :func:`planted_area`. Without a bound the grid would extend past the orchard
     edge and report every empty headland position as a missing tree.
+
+    Raises:
+        FlagError: when more than ``max_empty_share`` of the grid is empty, which
+            means the spacing is wrong rather than the orchard being bare. See
+            :data:`MAX_EMPTY_GRID_SHARE`.
     """
     from scipy.spatial import cKDTree
 
@@ -450,6 +478,20 @@ def find_missing_positions(
     limit = tolerance * min(grid.spacing_a_m, grid.spacing_b_m)
     missing = lattice[nearest > limit]
     log.info("found %d empty grid position(s) of %d expected", len(missing), len(lattice))
+
+    empty_share = len(missing) / len(lattice) if len(lattice) else 0.0
+    if empty_share > max_empty_share:
+        raise FlagError(
+            f"the planting grid it worked out ({grid.spacing_a_m:.2f} m x "
+            f"{grid.spacing_b_m:.2f} m) leaves {empty_share:.0%} of its own positions "
+            f"empty, which is not an orchard, it is the wrong grid. Two things do this: "
+            f"trees grown into each other, where the detector cuts one crown for two and "
+            f"the spacing comes out about double; and rows much further apart than the "
+            f"trees within them, where both spacings collapse onto the smaller one and "
+            f"the lattice fills the alleys with trees that were never planted. Either "
+            f"way the phantom positions read as missing trees. Counting "
+            f"{len(points)} crown(s) is still sound."
+        )
     return missing
 
 
