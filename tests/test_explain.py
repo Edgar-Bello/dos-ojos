@@ -159,6 +159,13 @@ def test_a_demo_folder_s_banner_reaches_the_page(settings, farm) -> None:
 # --------------------------------------------------------------------------- #
 
 
+#: The smallest valid PNG, to stand in for a figure the drone half wrote.
+PNG = bytes.fromhex(
+    "89504e470d0a1a0a0000000d494844520000000100000001080600000"
+    "01f15c4890000000a49444154789c6360000002000100ffff03000006"
+    "0005570bf1b70000000049454e44ae426082")
+
+
 def _terrain(settings, **extra) -> dict:
     drone = settings.drone_workspace
     (drone / "flights.json").write_text(json.dumps({"flights": {
@@ -179,23 +186,58 @@ def test_the_ground_section_says_who_measured_it_and_when(settings, farm) -> Non
     assert "Nadie vol" in page                 # nobody flew anything of theirs
 
 
-def _thermal_report(chance: float = 0.62) -> dict:
+def _thermal_report(chance: float = 0.62, **patch) -> dict:
     return {"flight_id": "F001-20260910", "flown_on": "2026-09-10", "notes": [],
             "patches": [{"chance": chance, "where": "north-east corner", "area_m2": 1240.0,
-                         "above_c": 3.1, "signs": ["runs 3.1 C above the rest of the canopy"]}]}
+                         "above_c": 3.1, "signs": ["runs 3.1 C above the rest of the canopy"],
+                         "sign_keys": ["hot"], **patch}]}
 
 
 def test_the_thermal_section_gives_a_chance_and_the_signs_behind_it(settings, farm) -> None:
     page = _built(settings, farm, thermal=_thermal_report())
     assert "62%" in page
     assert "esquina noreste" in page
-    assert "runs 3.1 C above the rest of the canopy" in page
+    # The drone half writes its signs in English; a Spanish page says them in Spanish.
+    assert "corre +3.1 C arriba del resto del cultivo" in page
+    assert "runs 3.1 C above" not in page
+
+
+def test_a_sign_this_page_has_not_learned_still_shows(settings, farm) -> None:
+    """A key the drone half grows later must not silently drop off the page."""
+    report = _thermal_report(sign_keys=["something_new"],
+                             signs=["the moon was in the wrong quarter"])
+    assert "the moon was in the wrong quarter" in _built(settings, farm, thermal=report)
+
+
+def test_the_signs_are_in_english_for_an_english_grower(settings, phone: Phone, conn) -> None:
+    onboard(phone, lang="2")
+    register_field(phone)
+    draw(conn, "F001")
+    page = _built(settings, conn, thermal=_thermal_report())
+    assert "runs +3.1 C above the rest of the canopy" in page
 
 
 def test_the_thermal_section_refuses_to_sound_like_a_diagnosis(settings, farm) -> None:
     page = _built(settings, farm, thermal=_thermal_report())
     assert "no es un diagn" in page.lower() or "No es un an" in page
     assert "Vaya a verlo" in page
+
+
+def test_a_farmer_s_own_flight_adds_its_height_and_flag_pictures(settings, farm) -> None:
+    """Only a drone can give these, so a satellite-only field has no such section."""
+    report = _terrain(settings)
+    folder = settings.drone_workspace / "out" / report["flight_id"]
+    for name in ("chm", "flag_overlay"):
+        (folder / f"{name}.png").write_bytes(PNG)
+
+    page = _built(settings, farm, terrain=report)
+    assert "la altura del cultivo" in page
+    assert "planta por planta" in page
+    assert page.count('<img src="data:image/png;base64,') == 2      # no terrain.png written
+
+
+def test_without_a_flight_there_are_no_flight_pictures(settings, farm) -> None:
+    assert "altura del cultivo" not in _built(settings, farm, terrain=_terrain(settings))
 
 
 def test_without_a_thermal_camera_there_is_no_thermal_section(settings, farm) -> None:

@@ -130,6 +130,22 @@ S = {
         "It matters because water runs downhill: a high spot stays dry even when the whole "
         "field got its full watering, and a low spot ponds. The colours are centimetres above "
         "or below a smooth plane."),
+    "canopy": ("Su vuelo: la altura del cultivo", "Your flight: how tall the crop is"),
+    "canopy_body": (
+        "De las fotos de su propio vuelo salen dos mapas del terreno: uno de la tierra pelona "
+        "y otro de lo alto de las plantas. La resta de los dos es la altura del cultivo, "
+        "planta por planta. Los colores van de bajito a alto.",
+        "Your own flight's photos give two maps: one of the bare ground and one of the top of "
+        "the plants. Subtracting one from the other is the crop's height, plant by plant. The "
+        "colours run from short to tall."),
+    "flags": ("Su vuelo: planta por planta", "Your flight: plant by plant"),
+    "flags_body": (
+        "Cada planta o tramo de surco se compara con el resto de SU campo, no con un número "
+        "fijo: sana, con estrés (de las más chicas o menos verdes), muerta o faltante. Así una "
+        "variedad chica no sale marcada por ser chica.",
+        "Every plant or stretch of row is compared with the rest of YOUR field, not with a "
+        "fixed number: healthy, stressed (among the smallest or least green), dead or missing. "
+        "That way a naturally small variety isn't flagged for being small."),
     "thermal": ("La cámara térmica: posibles plagas", "The thermal camera: possible pests"),
     "thermal_body": (
         "Una planta sana se enfría sola: saca agua por las hojas, como sudar. Una planta que "
@@ -177,6 +193,54 @@ S = {
                      "depend on it.)"),
     "footer": ("Dos Ojos - dos ojos sobre su campo: el satélite y, si usted quiere, su dron.",
                "Dos Ojos - two eyes on your field: the satellite and, if you want, your drone."),
+}
+
+#: The thermal step's signs, in the farmer's own words. The drone half writes
+#: the same list in English prose; a key it grows that is not here falls back to
+#: that prose rather than going missing.
+SIGNS = {
+    "hot": ("corre {above_c} C arriba del resto del cultivo: uno o dos grados es normal, "
+            "tres es una planta que dejó de tomar agua",
+            "runs {above_c} C above the rest of the canopy: a degree or two is ordinary, "
+            "three is a plant that has stopped drinking"),
+    "warm": ("corre {above_c} C arriba del resto del cultivo",
+             "runs {above_c} C above the rest of the canopy"),
+    "faint": ("apenas está {above_c} C arriba del resto: dentro de lo que varía un campo "
+              "cualquiera",
+              "is only {above_c} C above the rest: within what an ordinary field varies by"),
+    "big": ("cubre {area} m2, bastante para ir a verlo",
+            "covers {area} m2, large enough to be worth walking out to"),
+    "compact": ("es una mancha y no una raya a lo largo de los surcos: los problemas de agua "
+                "siguen los surcos y la pendiente, una plaga se abre desde un punto",
+                "is a blob and not a streak along the rows: water problems follow the rows and "
+                "the slope, an infestation spreads outwards from a point"),
+    "streak": ("va como raya a lo largo de los surcos, que es la forma de un problema de riego",
+               "runs as a streak along the rows, which is the shape of a watering problem"),
+    "flat_ground": ("está en terreno que el láser encontró parejo, así que no es que el agua "
+                    "no le llegara",
+                    "sits on ground the laser found level, so it is not that the water missed it"),
+    "high_ground": ("está en una parte alta, adonde al agua le cuesta llegar: el terreno "
+                    "explica el calor sin ninguna plaga",
+                    "sits on a high spot the water struggles to reach: the ground explains the "
+                    "heat without any pest"),
+    "low_ground": ("está en una parte baja donde se encharca, y las raíces ahogadas también "
+                   "dejan de tomar agua",
+                   "sits in a low spot where water stands, and drowned roots also stop drinking"),
+    "field_watered": ("está caliente aunque al campo todavía le queda agua: un campo con sed "
+                      "se calienta parejo, no en manchas",
+                      "is hot while the field still has water: a thirsty field runs hot all "
+                      "over, not in patches"),
+    "field_dry": ("está caliente en un campo al que ya le toca riego, así que esta mancha dice "
+                  "poco",
+                  "is hot on a field that is due water anyway, so this patch says little"),
+    "crop_damaged": ("tiene {share} de sus plantas ya marcadas chicas o pálidas, contra {field} "
+                     "en todo el campo: la cámara de color también ve el daño",
+                     "holds {share} of its plants already flagged small or pale, against {field} "
+                     "across the field: the colour camera sees the damage too"),
+    "crop_fine": ("tiene plantas que a la cámara de color le parecen normales; caliente pero "
+                  "de buen ver suele ser agua, no plaga",
+                  "holds plants the colour camera finds normal; hot but healthy-looking is more "
+                  "often water than pest"),
 }
 
 SOURCES = [
@@ -342,6 +406,7 @@ def build(settings: Settings, farmer: Farmer, item: FieldWater, events: list[Eve
     parts += _charts(item, images, lang)
     parts += _log(events, lang, today)
     parts += _ground(settings, record, terrain, lang)
+    parts += _flight(settings, thermal or terrain, lang)
     parts += _thermal(settings, thermal, lang)
     parts += _sources(lang)
 
@@ -469,6 +534,23 @@ def _ground(settings: Settings, record: FieldRow, report: dict | None, lang: str
     return parts
 
 
+def _flight(settings: Settings, report: dict | None, lang: str) -> list[str]:
+    """The pictures only a farmer's own flight can give: canopy height and the flags.
+
+    Nothing here exists for a satellite-only field, and nothing on the page
+    depends on it.
+    """
+    parts: list[str] = []
+    for name, heading, body in (("chm", "canopy", "canopy_body"),
+                                ("flag_overlay", "flags", "flags_body")):
+        image = _drone_image(settings, report, name)
+        if image:
+            parts.append(f"<h2>{_esc(_(heading, lang))}</h2>")
+            parts.append(f"<p>{_esc(_(body, lang))}</p>")
+            parts.append(f'<figure><img src="{image}" alt=""></figure>')
+    return parts
+
+
 def _thermal(settings: Settings, report: dict | None, lang: str) -> list[str]:
     if not report:
         return []
@@ -487,13 +569,39 @@ def _thermal(settings: Settings, report: dict | None, lang: str) -> list[str]:
         head = _("thermal_patch", lang, chance=f"{patch.get('chance', 0) * 100:.0f}",
                  where=where, area=f"{patch.get('area_m2', 0):,.0f}",
                  above=f"{patch.get('above_c', 0):+.1f}")
-        signs = "".join(f"<li>{_esc(sign)}</li>" for sign in patch.get("signs") or [])
+        signs = "".join(f"<li>{_esc(line)}</li>" for line in _signs(patch, lang))
         parts.append(f'<div class="patch"><div class="chance">{_esc(head)}</div>'
                      f"<ul>{signs}</ul>"
                      f'<p class="note">{_esc(_("thermal_go", lang))}</p></div>')
     for note in report.get("notes") or []:
         parts.append(f'<p class="note">{_esc(note)}</p>')
     return parts
+
+
+def _signs(patch: dict, lang: str) -> list[str]:
+    """One patch's signs in the farmer's language, falling back to what was written.
+
+    The drone half writes both the prose and the key that produced it. A key
+    this page has not learned yet shows in English rather than disappearing.
+    """
+    prose = patch.get("signs") or []
+    keys = patch.get("sign_keys") or []
+    if not keys:
+        return list(prose)
+    values = {
+        "above_c": f"{patch.get('above_c', 0):+.1f}",
+        "area": f"{patch.get('area_m2', 0):,.0f}",
+        "share": f"{(patch.get('problem_share') or 0) * 100:.0f}%",
+        "field": f"{(patch.get('field_share') or 0) * 100:.0f}%",
+    }
+    lines = []
+    for index, key in enumerate(keys):
+        pair = SIGNS.get(key)
+        if pair is None:
+            lines.append(prose[index] if index < len(prose) else key)
+        else:
+            lines.append(text.pick(pair, lang).format(**values))
+    return lines
 
 
 def _sources(lang: str) -> list[str]:
