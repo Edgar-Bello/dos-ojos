@@ -8,7 +8,7 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 import pytest
-from shapely.geometry import box
+from shapely.geometry import Point, box
 
 from dosojos_drone.flags import (
     FlagError,
@@ -490,3 +490,31 @@ def test_a_block_too_small_to_have_a_distribution_is_not_judged() -> None:
 def test_grouping_by_a_missing_column_is_an_error() -> None:
     with pytest.raises(FlagError, match="no column"):
         classify_units(_frame(height_mean_m=[1.0] * 10), method="rows", group_column="block")
+
+
+def test_a_withdrawn_missing_count_does_not_survive_on_disk(tmp_path) -> None:
+    """report reads this file straight off disk, so a stale one is a stale answer.
+
+    The citrus flight refused to count missing trees and still reported 272 of
+    them, because the previous run's file was sitting there.
+    """
+    from dosojos_drone.flags import save_missing
+
+    path = tmp_path / "missing_watershed.geojson"
+    first = gpd.GeoDataFrame({"kind": ["missing"]},
+                             geometry=[Point(600000, 2900000)], crs=UTM)
+    assert save_missing(first, path) is True
+    assert path.exists()
+
+    empty = gpd.GeoDataFrame({"kind": []}, geometry=[], crs=UTM)
+    assert save_missing(empty, path) is False
+    assert not path.exists()
+
+
+def test_nothing_missing_writes_nothing(tmp_path) -> None:
+    """A run that finds no gaps leaves no file to be misread later."""
+    from dosojos_drone.flags import save_missing
+
+    path = tmp_path / "missing_rows.geojson"
+    assert save_missing(None, path) is False
+    assert not path.exists()

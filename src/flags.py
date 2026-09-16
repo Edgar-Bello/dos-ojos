@@ -23,6 +23,7 @@ from __future__ import annotations
 import logging
 import math
 from dataclasses import dataclass
+from pathlib import Path
 
 import geopandas as gpd
 import numpy as np
@@ -583,3 +584,21 @@ def summarise_flags(
     summary["n_no_data"] = int(counts.get("NO_DATA", 0))
     summary["n_edge"] = int(counts.get("EDGE", 0))
     return summary
+
+
+def save_missing(frame, path: Path) -> bool:
+    """Write the missing positions, or clear whatever a previous run left there.
+
+    ``report`` reads this file straight off disk. If a run finds nothing missing,
+    or refuses to count (see :data:`MAX_EMPTY_GRID_SHARE`), an older run's answer
+    left lying beside it comes back in the summary as though this run had made it:
+    the citrus flight withdrew its count and still reported 272 missing trees.
+
+    Returns whether a file is now there.
+    """
+    if frame is not None and not frame.empty:
+        frame.to_file(path, driver="GeoJSON")
+        return True
+    if path.exists():
+        path.unlink()
+    return False

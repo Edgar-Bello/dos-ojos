@@ -744,24 +744,28 @@ Fort Pierce, Florida. The dataset is Ag Data Commons doi:10.15482/USDA.ADC/26946
 public domain, and comes with per-tree height, width and health measured by hand
 weeks before the flight. `check_answer_key.py` there scores the flight against it.
 
-It ran on 2026-09-16 and the score is not flattering, which is the point of having
-an answer key at all:
+It ran on 2026-09-16, twice, and the answer key paid for itself twice over:
 
-| | |
-|---|---|
-| measured by hand | 1.85 m mean |
-| from our canopy model | 1.11 m mean |
-| short by | **0.74 m, 40% of the real height** |
-| correlation | 0.78 |
-| trees found as separate crowns | 132 of 216, **61%** |
+| | `--pc-quality medium` | **`high`** |
+|---|---|---|
+| measured by hand | 1.85 m mean | same |
+| from our canopy model | 1.11 m | **1.46 m** |
+| short by | 0.74 m, 40% | **0.39 m, 21%** |
+| within 25 cm | 0% | **26%** |
+| correlation | 0.78 | 0.77 |
+| trees found as separate crowns | 132 of 216, 61% | **149, 69%** |
+| ODM time, 46 photos | 17.8 min | 27 min |
 
-It ranks the trees right and reads every one short. About 0.49 m of that is ODM's
-surface model not reaching the top of a citrus crown, and 0.25 m is its ground
-model creeping up under the row where there are no ground points to see. **Treat
-tree heights on a tree crop as relative, not absolute.**
+**Use `--pc-quality high` on tree crops.** Fine leaves against sky need the denser
+cloud, and ten more minutes halves the height error. It ranks the trees right at
+either setting and reads every one short: at high quality 0.31 m of that is ODM's
+surface model not reaching the top of a crown and only 0.08 m is its ground model
+creeping up under the row. **Treat tree heights on a tree crop as relative, not
+absolute.**
 
-The 61% is trees 2.1 m apart that have grown into each other: the watershed cuts
-one crown where two trees touch. Counts from a closed tree canopy are a floor.
+The 69% is trees 2.1 m apart that have grown into each other: the watershed cuts
+one crown where two trees touch. Counts from a closed tree canopy are a floor. The
+same merging is what broke the missing-tree grid, above.
 
 ## One page for the whole flight (`page`)
 

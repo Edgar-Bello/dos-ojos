@@ -1152,8 +1152,7 @@ def flag_cmd(
 
     flagged.to_file(out_dir / f"flags_{method}.geojson", driver="GeoJSON")
     missing_path = out_dir / f"missing_{method}.geojson"
-    if missing_frame is not None and not missing_frame.empty:
-        missing_frame.to_file(missing_path, driver="GeoJSON")
+    wrote_missing = flags_mod.save_missing(missing_frame, missing_path)
 
     summary = flags_mod.summarise_flags(flagged, n_missing_positions=n_missing_positions)
     pd.DataFrame([{"flight_id": flight_id, "method": method, **summary}]).to_csv(
@@ -1167,7 +1166,7 @@ def flag_cmd(
     click.echo("")
     for name in (f"flags_{method}.geojson", f"flags_{method}_summary.csv"):
         click.echo(f"  {out_dir / name}")
-    if missing_frame is not None and not missing_frame.empty:
+    if wrote_missing:
         click.echo(f"  {missing_path}")
 
 
