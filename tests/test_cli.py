@@ -22,6 +22,7 @@ hola
 1
 Juan Ejemplo
 si
+2
 Campo Norte
 40
 26.1484, -97.9940
@@ -168,8 +169,8 @@ def test_remind_asks_for_a_missing_fact(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(status_mod, "Water", lambda settings: FakeWater(reason="no_data"))
     data = tmp_path / "farm_data"
     script = tmp_path / "farmer.txt"
-    script.write_text("hola\n1\nJuan\nsi\nCampo Norte\n40\n26.1484, -97.9940\n1\n7/20\nsi\n"
-                      "MENU\n", encoding="utf-8")
+    script.write_text("hola\n1\nJuan\nsi\n1\nCampo Norte\n40\n26.1484, -97.9940\n1\n7/20\n"
+                      "si\nMENU\n", encoding="utf-8")
     run(data, "replay", str(script))
     listed = run(data, "remind").output
     assert "missing" in listed and "falta marcar el mapa de Campo Norte" in listed

@@ -4,10 +4,12 @@
 # furrow-watered from the west, the high side on the government lidar. The dates and
 # inches are invented to match what the satellite saw; the corn was watered "yesterday".
 # Used by setup_sms_demo.cmd, which pins the demo to Tue 20 May 2025.
+# He flies his own drone and borrows a thermal camera, so he picks option 3.
 hola
 1
 Juan Ejemplo
 si
+3
 Algodon Lyford
 45
 26.35487, -97.77464

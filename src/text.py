@@ -89,6 +89,18 @@ METHOD_MENU = ("furrow", "flood", "drip", "sprinkler", "pivot", "none")
 #: Methods where water runs across the ground, so the side it enters matters.
 SURFACE = ("furrow", "flood", "border", "basin")
 
+#: What a farmer signed up for. The satellite runs for everyone and asks nothing
+#: of them; the other two only add what their own camera can see, and only if
+#: they have one. Nobody is ever told they need a drone.
+PLANS: dict[str, tuple[str, str]] = {
+    "satellite": ("sólo satélite", "satellite only"),
+    "drone": ("satélite y dron", "satellite and drone"),
+    "thermal": ("satélite, dron y cámara térmica", "satellite, drone and thermal camera"),
+}
+PLAN_MENU = ("satellite", "drone", "thermal")
+#: The plans where the farmer sends us their own photos.
+FLYING_PLANS = ("drone", "thermal")
+
 SIDES = {"N": ("norte", "north"), "S": ("sur", "south"), "E": ("este", "east"),
          "W": ("oeste", "west")}
 
@@ -148,6 +160,10 @@ def crop_name(key: str | None, lang: str, other: str | None = None) -> str:
 
 def method_name(key: str | None, lang: str) -> str:
     return pick(METHODS.get(key or "furrow", METHODS["furrow"]), lang)
+
+
+def plan_name(key: str | None, lang: str) -> str:
+    return pick(PLANS.get(key or "satellite", PLANS["satellite"]), lang)
 
 
 def day(d: date, lang: str, today: date | None = None) -> str:
@@ -375,12 +391,14 @@ T: dict[str, tuple[str, str]] = {
                    "pueda.",
                    "Thanks. By our numbers {field} needs water now; water it as soon as you "
                    "can."),
-    "help": ("Dos Ojos. Mande: AGUA (cómo van), REGUE fecha pulgadas, LLUVIA pulgadas, SEMBRE, "
-             "COSECHA, DRON (fotos del dron), CAMPOS, NUEVO (otro campo), MAPA, BORRAR (quitar "
-             "lo último), ALTO (no recibir más).{contact}",
-             "Dos Ojos. Text: WATER (how they're doing), WATERED date inches, RAIN inches, "
-             "PLANTED, HARVESTED, DRONE (drone photos), FIELDS, NEW (another field), MAP, UNDO "
-             "(remove the last entry), STOP (no more texts).{contact}"),
+    "help": ("Dos Ojos. Mande: AGUA (cómo van), PORQUE (archivo con gráficas), REGUE fecha "
+             "pulgadas, LLUVIA pulgadas, SEMBRE, COSECHA, DRON (fotos del dron), PLAN (qué "
+             "usa), CAMPOS, NUEVO (otro campo), MAPA, BORRAR (quitar lo último), ALTO (no "
+             "recibir más).{contact}",
+             "Dos Ojos. Text: WATER (how they're doing), WHY (file with the charts), WATERED "
+             "date inches, RAIN inches, PLANTED, HARVESTED, DRONE (drone photos), PLAN (what "
+             "you use), FIELDS, NEW (another field), MAP, UNDO (remove the last entry), STOP "
+             "(no more texts).{contact}"),
     "contact": (" Dudas: {contact}", " Questions: {contact}"),
     "not_understood": ("No entendí; se lo pasé al equipo. Mande AYUDA para ver las opciones.",
                        "I didn't get that; I passed it to the team. Text HELP for the options."),
@@ -475,6 +493,56 @@ T: dict[str, tuple[str, str]] = {
                       "surcos; revise plagas, enfermedades, nutrientes o sal.",
                       "The weak plants follow neither the ground nor the row ends; "
                       "check pests, disease, nutrients or salt."),
+    # --- what they signed up for -----------------------------------------------
+    "plan": (
+        "¿Qué quiere usar? 1 Sólo satélite (no necesita nada) 2 Satélite y su dron "
+        "3 Satélite, dron y cámara térmica (plagas). Siempre puede cambiar con PLAN.",
+        "What would you like to use? 1 Satellite only (you need nothing) 2 Satellite and "
+        "your drone 3 Satellite, drone and thermal camera (pests). Change any time with PLAN."),
+    "plan_satellite": (
+        "Listo: {plan}. No necesita dron ni nada más; el satélite pasa cada 5 días.",
+        "Done: {plan}. You need no drone and nothing else; the satellite passes every 5 days."),
+    "plan_drone": (
+        "Listo: {plan}. El satélite sigue igual. Cuando tenga fotos de un vuelo, mande DRON "
+        "y le paso el enlace para subirlas.",
+        "Done: {plan}. The satellite keeps working the same. When you have photos from a "
+        "flight, text DRONE and I'll send you the upload link."),
+    "plan_thermal": (
+        "Listo: {plan}. Suba las fotos normales y las térmicas juntas con DRON; con las "
+        "térmicas le digo qué tan probable es que haya plaga y en qué parte.",
+        "Done: {plan}. Upload the normal and the thermal photos together with DRONE; with "
+        "thermal I can tell you how likely a pest is, and in which part."),
+    "plan_license": (
+        "Nota: para volar un dron sobre su rancho la ley pide licencia FAA Parte 107 "
+        "(examen de $175). Usted decide si la saca, si contrata a alguien o si se queda "
+        "sólo con el satélite.",
+        "Note: to fly a drone over your farm the law asks for an FAA Part 107 licence "
+        "($175 exam). Up to you whether to get it, hire someone, or stay on satellite only."),
+    "plan_now": ("Ahora tiene: {plan}.", "Right now you have: {plan}."),
+    "drone_not_in_plan": (
+        "Usted está en sólo satélite. Si ya tiene fotos de un dron, mande PLAN y escoja 2 "
+        "para subirlas.",
+        "You're on satellite only. If you already have drone photos, text PLAN and pick 2 "
+        "to upload them."),
+    # --- the explanation file ----------------------------------------------------
+    "explain_offer": ("¿Quiere saber por qué? Responda PORQUE y le mando un archivo con las "
+                      "gráficas.",
+                      "Want to know why? Reply WHY and I'll send you a file with the charts."),
+    "explain_link": ("Por qué {field}: {link} . Trae las gráficas del satélite, la cuenta del "
+                     "agua y el terreno. El enlace dura {days} días.",
+                     "Why {field}: {link} . It has the satellite charts, the water arithmetic "
+                     "and the ground. The link lasts {days} days."),
+    "explain_none": ("Todavía no puedo explicar nada: falta que el satélite mire sus campos. "
+                     "Mande AGUA en unos días.",
+                     "I can't explain anything yet: the satellite hasn't looked at your fields. "
+                     "Text WATER in a few days."),
+    # --- thermal: a possible pest ---------------------------------------------------
+    "pest_chance": ("Cámara térmica: {chance}% de probabilidad de plaga o enfermedad {where} "
+                    "de {field} ({area} m2). Vaya a verlo; la cámara no sabe qué es.",
+                    "Thermal camera: {chance}% chance of a pest or disease {where} of {field} "
+                    "({area} m2). Go and look; the camera can't name it."),
+    "pest_more": (" Hay {n} manchas más; vienen en el archivo de PORQUE.",
+                  " There are {n} more patches; they're in the WHY file."),
     # --- texts nobody asked for -------------------------------------------------
     "alert_now": ("Aviso Dos Ojos: {field} necesita agua ya. Ponga unas {gross} pulgadas por "
                   "{method}. Si ya regó, mande REGUE y la fecha.",

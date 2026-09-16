@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Callable, Iterable
 
-from .text import CROP_MENU, METHOD_MENU
+from .text import CROP_MENU, METHOD_MENU, PLAN_MENU
 
 # --------------------------------------------------------------------------- #
 # Words
@@ -129,6 +129,12 @@ COMMANDS: dict[str, tuple[str, ...]] = {
     "fields": ("campos", "fields", "mis campos", "lista", "list"),
     "map": ("mapa", "map"),
     "drone": ("dron", "drone", "vuelo", "flight", "volamos"),
+    "plan": ("plan", "planes", "paquete", "servicio", "nivel"),
+    # Not "info" or "opciones": those already mean HELP, and a farmer who wants
+    # the menu should never get a file instead.
+    "explain": ("porque", "por que", "detalle", "detalles", "explicacion", "explique",
+                "explicame", "grafica", "graficas", "why", "detail", "details", "explain",
+                "chart", "charts"),
     "undo": ("borrar", "borra", "undo", "deshacer", "quitar", "quita", "delete"),
     "menu": ("menu", "salir", "exit", "inicio"),
     "lang_es": ("espanol", "spanish", "en espanol"),
@@ -245,6 +251,33 @@ def method(text: str | None) -> str | None:
     joined = " ".join(tokens)
     for key, stems in _METHOD_WORDS.items():
         if any((" " in s and s in joined) or s in tokens for s in stems):
+            return key
+    return None
+
+
+#: Words for each plan, for farmers who answer the question in words.
+_PLAN_WORDS: dict[str, tuple[str, ...]] = {
+    "thermal": ("termica", "termico", "thermal", "calor", "heat", "plagas", "plaga", "pest",
+                "pests"),
+    "drone": ("dron", "drone", "dos", "both"),
+    "satellite": ("satelite", "satellite", "solo satelite", "satellite only", "nada",
+                  "ninguno", "nothing", "none"),
+}
+
+
+def plan(text: str | None) -> str | None:
+    """Which service a farmer picked: the menu number, or the words for it.
+
+    Thermal is looked for first: "dron y termica" names both, and the larger of
+    the two is what they meant.
+    """
+    choice = menu_choice(text, len(PLAN_MENU))
+    if choice:
+        return PLAN_MENU[choice - 1]
+    tokens = words(text)
+    joined = " ".join(tokens)
+    for key, stems in _PLAN_WORDS.items():
+        if any((" " in stem and stem in joined) or stem in tokens for stem in stems):
             return key
     return None
 

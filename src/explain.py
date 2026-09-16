@@ -1,0 +1,503 @@
+"""The "why" file: one page showing how a field's answer was worked out.
+
+A text message can say "water in about a day". It cannot show the arithmetic, and
+a grower asked to open a valve on our say-so is owed the arithmetic. This builds
+one self-contained page per field, offered after every AGUA and never sent
+unasked: the charts, the numbers behind them, and what each one means in
+ordinary words.
+
+Everything here is drawn from what already exists. The satellite charts come
+from the satellite half's own plotting code, the same figures the team looks at,
+so a grower and the team are reading one picture and not two. Images are inlined
+as data URIs so the page is a single file that keeps working after it is saved,
+forwarded or opened with no signal.
+
+Nothing on this page is new analysis. If the page and a text message ever
+disagree, the text message is the bug.
+"""
+
+from __future__ import annotations
+
+import base64
+import html
+import logging
+from datetime import date
+from pathlib import Path
+
+from dosojos_sat import charts as sat_charts
+from dosojos_sat import water as sat_water
+
+from . import text
+from .config import Settings
+from .status import FieldWater
+from .store import Event, Farmer, FieldRow
+
+log = logging.getLogger(__name__)
+
+#: Events worth listing: what the farmer told us, which is what went into the sums.
+SHOWN_KINDS = ("planted", "irrigated", "rain", "harvested")
+
+S = {
+    "title": ("Por qué: {field}", "Why: {field}"),
+    "made": ("Hecho el {day} para {name}", "Made on {day} for {name}"),
+    "save": ("Guardar este archivo", "Save this file"),
+    "answer": ("La respuesta", "The answer"),
+    "how": ("Cómo salió ese número", "How that number came out"),
+    "step_soil": ("1. Cuánta agua cabe en su suelo", "1. How much water your soil holds"),
+    "step_soil_body": (
+        "El mapa de suelos del USDA dice que {field} es {soil}. Bajo el cultivo, las raíces "
+        "llegan hoy a unas {root} pulgadas de hondo, y en esa capa caben {capacity} pulgadas "
+        "de agua aprovechable. El cultivo empieza a sufrir antes de vaciarla: cuando quedan "
+        "menos de {stress} pulgadas.",
+        "The USDA soil map says {field} is {soil}. Under the crop the roots reach about "
+        "{root} inches down today, and that layer holds {capacity} inches of usable water. "
+        "The crop starts to suffer before it runs out: below {stress} inches left."),
+    "step_in": ("2. Lo que entró", "2. What went in"),
+    "step_in_body": (
+        "Contamos desde {start} ({start_reason}). Desde entonces entraron {irrigation} "
+        "pulgadas de riego que usted nos avisó y {rain} pulgadas de lluvia.",
+        "We count from {start} ({start_reason}). Since then {irrigation} inches of "
+        "irrigation you told us about went in, plus {rain} inches of rain."),
+    "step_out": ("3. Lo que salió", "3. What went out"),
+    "step_out_body": (
+        "Cada día el sol y el aire se llevan agua. La estación del gobierno (gridMET) dice "
+        "cuánta se llevaría un pasto de referencia: {eto} pulgadas al día. Su cultivo no gasta "
+        "lo mismo: gasta esa cifra por un factor que sale de qué tan verde y tapado está el "
+        "campo en la foto del satélite, hoy {kc}. Eso da {use} pulgadas al día.",
+        "Every day the sun and the air take water away. The government weather grid (gridMET) "
+        "says how much a reference grass would lose: {eto} inches a day. Your crop doesn't use "
+        "the same: it uses that figure times a factor taken from how green and how covered the "
+        "field looks to the satellite, today {kc}. That gives {use} inches a day."),
+    "step_left": ("4. Lo que queda", "4. What's left"),
+    "step_left_body": (
+        "Quedan {left} pulgadas aprovechables. A {use} pulgadas al día, eso alcanza para "
+        "{days}. Damos un rango ({low} a {high} días) porque el clima de los próximos días no "
+        "se sabe: el rango es la cuenta con 20% más y 20% menos de gasto.",
+        "There are {left} usable inches left. At {use} inches a day that lasts {days}. We give "
+        "a range ({low} to {high} days) because the next few days' weather isn't known: the "
+        "range is the same sum with 20% more and 20% less use."),
+    "step_left_plenty": (
+        "Quedan {left} pulgadas aprovechables, más de lo que el cultivo gastará en los "
+        "próximos {horizon} días.",
+        "There are {left} usable inches left, more than the crop will use in the next "
+        "{horizon} days."),
+    "chart_ndvi": ("El satélite: su campo contra sí mismo",
+                   "The satellite: your field against itself"),
+    "chart_ndvi_body": (
+        "La línea verde es lo verde que está {field} este año, medido por el satélite "
+        "Sentinel-2 cada cinco días. La banda gris es lo que ESTE MISMO campo suele tener en "
+        "esta fecha, sacado de {years}. Nunca comparamos su campo con el de otro: cada suelo y "
+        "cada variedad son distintos, así que el único punto de comparación justo es su propia "
+        "historia. Un punto por debajo de la banda quiere decir que el campo va más atrasado "
+        "que sus propios años anteriores.",
+        "The green line is how green {field} is this year, measured by the Sentinel-2 satellite "
+        "every five days. The grey band is what THIS SAME field usually shows on this date, "
+        "from {years}. We never compare your field with anyone else's: every soil and every "
+        "variety is different, so the only fair yardstick is its own history. A point below the "
+        "band means the field is behind its own earlier years."),
+    "chart_water": ("La cuenta del agua, día por día", "The water account, day by day"),
+    "chart_water_body": (
+        "Arriba, el agua que queda en la zona de raíces, como un tanque que se llena con riego "
+        "y lluvia y se vacía con el sol. La línea roja punteada es donde el cultivo empieza a "
+        "sufrir. La línea punteada al final es hacia dónde va si no llueve. Abajo, cada riego "
+        "que usted nos avisó y cada lluvia.",
+        "On top, the water left in the root zone, like a tank that fills with irrigation and "
+        "rain and empties with the sun. The dashed red line is where the crop starts to suffer. "
+        "The dotted line at the end is where it goes if no rain comes. Below, every irrigation "
+        "you told us about and every rain."),
+    "log": ("Lo que usted nos dijo", "What you told us"),
+    "log_body": ("Estas son las fechas con las que se hizo la cuenta. Si alguna está mal, "
+                 "mándenos el dato corregido y la cuenta cambia sola.",
+                 "These are the dates the sums were made with. If one is wrong, text us the "
+                 "correction and the sums change by themselves."),
+    "log_empty": ("Todavía no nos ha dicho ningún riego ni lluvia de este campo, así que la "
+                  "cuenta partió de un supuesto.",
+                  "You haven't told us about any watering or rain on this field yet, so the "
+                  "sums started from an assumption."),
+    "ground": ("El terreno", "The ground"),
+    "ground_lidar": (
+        "El suelo bajo {field} se midió con el láser aéreo del gobierno (USGS 3DEP) en {year}. "
+        "Nadie voló nada suyo. Si niveló después de esa fecha, esto no lo ve.",
+        "The ground under {field} was measured by the government's airborne laser (USGS 3DEP) "
+        "in {year}. Nobody flew anything of yours. If you levelled after that, this "
+        "can't see it."),
+    "ground_drone": ("El suelo bajo {field} salió de las fotos de su propio vuelo del {year}.",
+                     "The ground under {field} came from your own flight's photos, {year}."),
+    "ground_why": (
+        "Importa porque el agua corre cuesta abajo: una parte alta se queda seca aunque el "
+        "campo entero lleve el riego completo, y una parte baja se encharca. Los colores son "
+        "centímetros por encima o por debajo de un plano liso.",
+        "It matters because water runs downhill: a high spot stays dry even when the whole "
+        "field got its full watering, and a low spot ponds. The colours are centimetres above "
+        "or below a smooth plane."),
+    "thermal": ("La cámara térmica: posibles plagas", "The thermal camera: possible pests"),
+    "thermal_body": (
+        "Una planta sana se enfría sola: saca agua por las hojas, como sudar. Una planta que "
+        "deja de hacerlo se calienta uno o tres grados antes de que se le note nada a la vista. "
+        "Eso es lo que ve esta cámara. Lo que NO puede ver es la causa: sed, agua que no llegó, "
+        "o algo que se la está comiendo. Por eso cada mancha lleva un porcentaje nuestro, hecho "
+        "comparándola con el terreno, con la cuenta del agua y con lo que la cámara de color ya "
+        "había marcado. No es un análisis de laboratorio ni un diagnóstico: es un orden en el "
+        "que vale la pena ir a caminar el campo.",
+        "A healthy plant cools itself: it pulls water out through its leaves, like sweating. A "
+        "plant that stops doing that runs one to three degrees hotter before anything shows to "
+        "the eye. That is what this camera sees. What it can NOT see is the cause: thirst, "
+        "water that never arrived, or something eating it. So every patch carries a percentage "
+        "of ours, made by comparing it with the ground, with the water account and with what "
+        "the colour camera had already flagged. It is not a lab test and not a diagnosis: it is "
+        "an order in which to go and walk the field."),
+    "thermal_patch": ("{chance}% - {where}, {area} m2, {above} C más caliente que el resto",
+                      "{chance}% - {where}, {area} m2, {above} C hotter than the rest"),
+    "thermal_none": ("La cámara térmica no encontró ninguna mancha caliente digna de reportar.",
+                     "The thermal camera found no warm patch worth reporting."),
+    "thermal_go": ("Vaya a verlo. La cámara no sabe qué es.",
+                   "Go and look. The camera can't name what it is."),
+    "sources": ("De dónde salen los números", "Where the numbers come from"),
+    "limits": ("Lo que esto no es", "What this is not"),
+    "limits_body": (
+        "Esto es una cuenta, no una medición de la humedad de su suelo. Se apoya en fechas que "
+        "usted nos dio, en un mapa de suelos hecho por regiones y no por su campo, y en el "
+        "pronóstico de que mañana se parece a hoy. Sirve para decidir a cuál campo ir primero. "
+        "Si abre una calicata y ve otra cosa, la calicata tiene la razón: mándenos el dato.",
+        "This is an account, not a measurement of your soil's moisture. It leans on dates you "
+        "gave us, on a soil map drawn by region rather than by your field, and on the guess "
+        "that tomorrow resembles today. It is for deciding which field to go to first. If you "
+        "dig a hole and see otherwise, the hole is right: text us."),
+    "no_season": ("(Falta la gráfica: el satélite todavía no junta suficientes fotos de este "
+                  "campo.)",
+                  "(Chart missing: the satellite hasn't gathered enough images of this field "
+                  "yet.)"),
+    "no_normal": ("(Falta la banda gris: todavía no tenemos suficientes años de este campo "
+                  "para saber qué es normal en él. Se va llenando con cada temporada.)",
+                  "(The grey band is missing: we don't have enough years of this field yet to "
+                  "know what is normal for it. It fills in with each season.)"),
+    "chart_failed": ("(La gráfica no se pudo dibujar esta vez. Los números de arriba no "
+                     "dependen de ella.)",
+                     "(The chart could not be drawn this time. The numbers above do not "
+                     "depend on it.)"),
+    "footer": ("Dos Ojos - dos ojos sobre su campo: el satélite y, si usted quiere, su dron.",
+               "Dos Ojos - two eyes on your field: the satellite and, if you want, your drone."),
+}
+
+SOURCES = [
+    ("Sentinel-2 (ESA/Copernicus)",
+     ("fotos del satélite cada 5 días, gratis y públicas",
+      "satellite images every 5 days, free and public")),
+    ("gridMET (University of Idaho)",
+     ("clima diario en cuadros de 4 km", "daily weather on a 4 km grid")),
+    ("USDA SSURGO", ("mapa de suelos", "soil map")),
+    ("FAO-56", ("el método de la cuenta del agua", "the water accounting method")),
+    ("USGS 3DEP", ("láser aéreo para el terreno", "airborne laser for the ground")),
+]
+
+STYLE = """
+:root { color-scheme: light; }
+* { box-sizing: border-box; }
+body { margin: 0; background: #f7f6f2; color: #23221e;
+       font: 17px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+main { max-width: 760px; margin: 0 auto; padding: 24px 16px 64px; }
+h1 { font-size: 27px; line-height: 1.2; margin: 0 0 4px; }
+h2 { font-size: 21px; margin: 40px 0 10px; padding-top: 18px; border-top: 2px solid #e2e0d8; }
+h3 { font-size: 17px; margin: 22px 0 4px; color: #4a483f; }
+p { margin: 10px 0; }
+.made { color: #6f6e69; font-size: 15px; margin: 0 0 20px; }
+.banner { background: #fde68a; color: #4a3c00; padding: 10px 16px; font-weight: 600;
+          text-align: center; }
+.answer { background: #fff; border-left: 6px solid #199e70; border-radius: 10px;
+          padding: 18px 20px; font-size: 20px; font-weight: 600; margin: 18px 0; }
+.answer.now { border-left-color: #d03b3b; }
+figure { margin: 14px 0; }
+img { max-width: 100%; height: auto; border-radius: 10px; background: #fff; display: block; }
+table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 16px; }
+th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid #e2e0d8; }
+th { color: #6f6e69; font-weight: 600; }
+td.n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.save { display: inline-block; background: #199e70; color: #fff; text-decoration: none;
+        padding: 11px 18px; border-radius: 9px; font-weight: 600; margin: 6px 0 4px; }
+.patch { background: #fff; border-radius: 10px; padding: 14px 16px; margin: 12px 0;
+         border-left: 6px solid #eda100; }
+.patch .chance { font-size: 19px; font-weight: 700; }
+.patch ul { margin: 8px 0 0; padding-left: 20px; color: #4a483f; font-size: 15px; }
+.note { color: #6f6e69; font-size: 15px; }
+footer { margin-top: 44px; color: #6f6e69; font-size: 14px; text-align: center; }
+@media print { body { background: #fff; } .save { display: none; } }
+"""
+
+
+def _(key: str, lang: str, **values: object) -> str:
+    """One of this page's strings, in the farmer's language, with its blanks filled."""
+    return text.pick(S[key], lang).format(**values)
+
+
+def _esc(value: object) -> str:
+    return html.escape(str(value), quote=True)
+
+
+def _inline(path: Path) -> str | None:
+    """A PNG as a data URI, so the saved file still shows it with no signal."""
+    try:
+        blob = base64.b64encode(Path(path).read_bytes()).decode("ascii")
+    except OSError as exc:
+        log.warning("chart %s not readable: %s", path, exc)
+        return None
+    return "data:image/png;base64," + blob
+
+
+def _inches(value: float | None, digits: int = 1) -> str:
+    return "?" if value is None else f"{value:.{digits}f}"
+
+
+# --------------------------------------------------------------------------- #
+# The charts
+# --------------------------------------------------------------------------- #
+
+
+def draw_charts(item: FieldWater, out_dir: Path, *, banner: str | None = None) -> dict[str, str]:
+    """The satellite and water figures as data URIs, skipping any that cannot be drawn.
+
+    A missing chart is not an error: a field registered last week has no season
+    to plot and no years of its own to plot it against. Each entry is either a
+    data URI or the key of the sentence that goes where the picture would have
+    been, so the page can say which of those happened.
+    """
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    status, record = item.status, item.field
+    images: dict[str, str] = {}
+    if status is None:
+        return images
+
+    year = date.fromisoformat(status.as_of).year
+    season = item.ndvi
+    if season is not None and not season.empty:
+        season = season[season["date"].map(lambda d: d.year) == year]
+    if season is None or season.empty:
+        images["ndvi"] = "no_season"
+    elif item.baseline is None or item.baseline.empty:
+        # The season on its own would be a green line with nothing to judge it
+        # against, and the comparison is the whole point of the picture.
+        images["ndvi"] = "no_normal"
+    else:
+        try:
+            path = sat_charts.plot_field(
+                field_id=record.id, name=record.name, crop=status.crop,
+                index_name="NDVI", baseline=item.baseline, season=season, year=year,
+                out_dir=out_dir, cutoff=date.fromisoformat(status.as_of), banner=banner,
+            )
+            images["ndvi"] = _inline(path) or "chart_failed"
+        except Exception:            # a chart is never worth failing the page over
+            log.exception("could not draw the NDVI chart for %s", record.id)
+            images["ndvi"] = "chart_failed"
+
+    if item.daily is None or item.daily.empty:
+        images["water"] = "no_season"
+    else:
+        try:
+            path = sat_charts.plot_water(
+                status=status.to_dict(), daily=item.daily,
+                projection=item.projection, out_dir=out_dir, banner=banner,
+            )
+            images["water"] = _inline(path) or "chart_failed"
+        except Exception:
+            log.exception("could not draw the water chart for %s", record.id)
+            images["water"] = "chart_failed"
+    return images
+
+
+def _drone_image(settings: Settings, report: dict | None, name: str) -> str | None:
+    """A figure the drone half wrote beside its report, as a data URI."""
+    if not report or not report.get("flight_id"):
+        return None
+    path = settings.drone_workspace / "out" / report["flight_id"] / f"{name}.png"
+    return _inline(path) if path.exists() else None
+
+
+# --------------------------------------------------------------------------- #
+# The page
+# --------------------------------------------------------------------------- #
+
+
+def build(settings: Settings, farmer: Farmer, item: FieldWater, events: list[Event], *,
+          today: date, terrain: dict | None = None, thermal: dict | None = None,
+          download: str | None = None) -> str:
+    """One field's explanation as a single HTML page."""
+    lang = farmer.language
+    record, status = item.field, item.status
+    images = draw_charts(item, settings.sms_dir / "explain" / record.id,
+                         banner=settings.banner)
+    parts: list[str] = []
+    if settings.banner:
+        parts.append(f'<div class="banner">{_esc(settings.banner)}</div>')
+    parts.append("<main>")
+    parts.append(f"<h1>{_esc(_('title', lang, field=record.name))}</h1>")
+    parts.append(f'<p class="made">'
+                 f"{_esc(_('made', lang, day=text.day(today, lang), name=farmer.name or ''))}"
+                 f"</p>")
+    if download:
+        parts.append(f'<a class="save" href="{_esc(download)}" download>'
+                     f"{_esc(_('save', lang))}</a>")
+
+    parts += _answer(item, lang, today)
+    parts += _arithmetic(item, events, lang)
+    parts += _charts(item, images, lang)
+    parts += _log(events, lang, today)
+    parts += _ground(settings, record, terrain, lang)
+    parts += _thermal(settings, thermal, lang)
+    parts += _sources(lang)
+
+    parts.append(f"<footer>{_esc(_('footer', lang))}</footer>")
+    parts.append("</main>")
+    body = "\n".join(parts)
+    return (f'<!doctype html><html lang="{lang}"><head><meta charset="utf-8">'
+            f'<meta name="viewport" content="width=device-width, initial-scale=1">'
+            f"<title>{_esc(_('title', lang, field=record.name))}</title>"
+            f"<style>{STYLE}</style></head><body>{body}</body></html>")
+
+
+def _answer(item: FieldWater, lang: str, today: date) -> list[str]:
+    """The same sentence the text message said, at the top, so the two can be checked."""
+    from .status import message as status_message
+
+    urgent = item.status is not None and item.status.days_left == 0
+    return [f"<h2>{_esc(_('answer', lang))}</h2>",
+            f'<div class="answer{" now" if urgent else ""}">'
+            f"{_esc(status_message(item, lang, today))}</div>"]
+
+
+def _arithmetic(item: FieldWater, events: list[Event], lang: str) -> list[str]:
+    """The four steps of the checkbook, each with this field's own numbers."""
+    s = item.status
+    if s is None:
+        return []
+    parts: list[str] = [f"<h2>{_esc(_('how', lang))}</h2>"]
+
+    def step(heading: str, body: str, **values) -> None:
+        parts.append(f"<h3>{_esc(_(heading, lang))}</h3>")
+        parts.append(f"<p>{_esc(_(body, lang, **values))}</p>")
+
+    step("step_soil", "step_soil_body",
+         field=item.field.name,
+         soil=(item.soil or {}).get("name") or (s.soil or {}).get("name") or "?",
+         root=_inches(s.root_depth_in, 0), capacity=_inches(s.capacity_in),
+         stress=_inches(s.stress_point_in))
+
+    start = date.fromisoformat(s.start)
+    went_in = {"irrigated": 0.0, "rain": 0.0}
+    for event in events:
+        if event.kind in went_in and event.voided_at is None and event.day >= start:
+            # An irrigation with no depth given still happened; the checkbook takes
+            # it as a full refill, so no total here could be right either way. It
+            # stays out of the sum and shows in the table of dates below.
+            went_in[event.kind] += event.inches or 0.0
+    step("step_in", "step_in_body", start=text.day(start, lang),
+         start_reason=s.start_reason, irrigation=_inches(went_in["irrigated"]),
+         rain=_inches(went_in["rain"]))
+
+    step("step_out", "step_out_body", eto=_inches(s.eto_in_day, 2),
+         kc=f"{s.kc:.2f}" if s.kc else "?", use=_inches(s.use_in_day, 2))
+
+    if s.days_left is None:
+        step("step_left", "step_left_plenty", left=_inches(s.until_stress_in),
+             horizon=sat_water.MAX_PROJECTION_DAYS)
+    else:
+        low, high = s.days_range or (s.days_left, s.days_left)
+        step("step_left", "step_left_body", left=_inches(s.until_stress_in),
+             use=_inches(s.use_in_day, 2), days=text.about_days(s.days_left, lang),
+             low=low, high=high)
+    return parts
+
+
+def _charts(item: FieldWater, images: dict[str, str], lang: str) -> list[str]:
+    span = item.baseline_years
+    years = (f"{span[0]}-{span[1]}" if span else
+             text.pick(("sus años anteriores", "its earlier years"), lang))
+    parts = [f"<h2>{_esc(_('chart_ndvi', lang))}</h2>",
+             f"<p>{_esc(_('chart_ndvi_body', lang, field=item.field.name, years=years))}</p>"]
+    parts.append(_figure(images.get("ndvi"), lang))
+    parts.append(f"<h2>{_esc(_('chart_water', lang))}</h2>")
+    parts.append(f"<p>{_esc(_('chart_water_body', lang))}</p>")
+    parts.append(_figure(images.get("water"), lang))
+    return parts
+
+
+def _figure(source: str | None, lang: str) -> str:
+    """The picture, or, in its place, the sentence saying why there isn't one."""
+    if not source:
+        source = "chart_failed"
+    if not source.startswith("data:"):
+        return f'<p class="note">{_esc(_(source, lang))}</p>'
+    return f'<figure><img src="{source}" alt=""></figure>'
+
+
+def _log(events: list[Event], lang: str, today: date) -> list[str]:
+    """Every date the sums used, so a wrong one is easy to spot and correct."""
+    shown = [e for e in events if e.kind in SHOWN_KINDS and e.voided_at is None]
+    parts = [f"<h2>{_esc(_('log', lang))}</h2>"]
+    if not shown:
+        parts.append(f"<p>{_esc(_('log_empty', lang))}</p>")
+        return parts
+    parts.append(f"<p>{_esc(_('log_body', lang))}</p>")
+    rows = []
+    for event in sorted(shown, key=lambda e: e.day, reverse=True)[:20]:
+        kind = text.pick({"planted": ("siembra", "planted"),
+                          "irrigated": ("riego", "watered"),
+                          "rain": ("lluvia", "rain"),
+                          "harvested": ("cosecha", "harvested")}[event.kind], lang)
+        inches = "" if event.inches is None else f"{text.inches(event.inches)} in"
+        rows.append(f"<tr><td>{_esc(text.day(event.day, lang, today))}</td>"
+                    f"<td>{_esc(kind)}</td><td class='n'>{_esc(inches)}</td></tr>")
+    parts.append("<table>" + "".join(rows) + "</table>")
+    return parts
+
+
+def _ground(settings: Settings, record: FieldRow, report: dict | None, lang: str) -> list[str]:
+    if not report:
+        return []
+    year = str(report.get("flown_on") or "")[:4] or "?"
+    who = "ground_lidar" if report.get("ground_source") == "lidar" else "ground_drone"
+    parts = [f"<h2>{_esc(_('ground', lang))}</h2>",
+             f"<p>{_esc(_(who, lang, field=record.name, year=year))}</p>",
+             f"<p>{_esc(_('ground_why', lang))}</p>"]
+    image = _drone_image(settings, report, "terrain")
+    if image:
+        parts.append(f'<figure><img src="{image}" alt=""></figure>')
+    todo = [item for item in report.get("advice") or [] if item.get("priority") == 1]
+    if todo:
+        parts.append("<ul>" + "".join(
+            f"<li>{_esc(item.get('finding', ''))} {_esc(item.get('advice', ''))}</li>"
+            for item in todo[:4]) + "</ul>")
+    return parts
+
+
+def _thermal(settings: Settings, report: dict | None, lang: str) -> list[str]:
+    if not report:
+        return []
+    parts = [f"<h2>{_esc(_('thermal', lang))}</h2>",
+             f"<p>{_esc(_('thermal_body', lang))}</p>"]
+    image = _drone_image(settings, report, "thermal")
+    if image:
+        parts.append(f'<figure><img src="{image}" alt=""></figure>')
+    patches = sorted(report.get("patches") or [], key=lambda p: p.get("chance", 0), reverse=True)
+    if not patches:
+        parts.append(f"<p>{_esc(_('thermal_none', lang))}</p>")
+        return parts
+    for patch in patches:
+        where = text.pick(text.PLACES.get(patch.get("where") or "middle",
+                                          ("en el centro", "in the middle")), lang)
+        head = _("thermal_patch", lang, chance=f"{patch.get('chance', 0) * 100:.0f}",
+                 where=where, area=f"{patch.get('area_m2', 0):,.0f}",
+                 above=f"{patch.get('above_c', 0):+.1f}")
+        signs = "".join(f"<li>{_esc(sign)}</li>" for sign in patch.get("signs") or [])
+        parts.append(f'<div class="patch"><div class="chance">{_esc(head)}</div>'
+                     f"<ul>{signs}</ul>"
+                     f'<p class="note">{_esc(_("thermal_go", lang))}</p></div>')
+    for note in report.get("notes") or []:
+        parts.append(f'<p class="note">{_esc(note)}</p>')
+    return parts
+
+
+def _sources(lang: str) -> list[str]:
+    rows = "".join(f"<tr><td>{_esc(name)}</td><td>{_esc(text.pick(what, lang))}</td></tr>"
+                   for name, what in SOURCES)
+    return [f"<h2>{_esc(_('sources', lang))}</h2>", f"<table>{rows}</table>",
+            f"<h2>{_esc(_('limits', lang))}</h2>", f"<p>{_esc(_('limits_body', lang))}</p>"]

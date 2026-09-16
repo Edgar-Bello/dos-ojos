@@ -209,8 +209,8 @@ def test_mexico_is_refused(phone: Phone) -> None:
 # ---- once set up ------------------------------------------------------------------
 
 
-def two_fields(phone: Phone, conn) -> None:
-    onboard(phone)
+def two_fields(phone: Phone, conn, *, plan: str = "1") -> None:
+    onboard(phone, plan=plan)
     register_field(phone)
     phone("NUEVO")
     register_field(phone, "La Loma", last="9/1 3")
@@ -297,9 +297,10 @@ def test_undo_voids_the_last_entry(phone: Phone, conn) -> None:
 def test_status_answers_per_field(phone: Phone, conn, water: FakeWater) -> None:
     two_fields(phone, conn)
     replies = phone("AGUA")
-    assert len(replies) == 2
+    assert len(replies) == 3                    # a field each, then the offer of the why file
     assert replies[0].startswith("Campo Norte (sorgo): tiene agua para unos 5 dias (4 a 7)")
     assert "5.3 pulgadas por surcos" in replies[0]
+    assert "PORQUE" in replies[-1]
 
 
 def test_the_ground_report_follows_when_a_watering_is_near(phone: Phone, conn, settings,
@@ -318,13 +319,13 @@ def test_the_ground_report_follows_when_a_watering_is_near(phone: Phone, conn, s
 
     replies = phone("AGUA")
     assert replies[1].startswith("Terreno: Hay una parte alta en el lado oeste")
-    assert len(replies) == 3                    # La Loma has no flight
+    assert len(replies) == 4                    # La Loma has no flight; then the offer
 
     water.status = FakeStatus(days_left=20, days_range=[16, 25], water_by="2026-10-02")
-    assert len(phone("AGUA")) == 2              # nothing to change before a far-off watering
+    assert len(phone("AGUA")) == 3              # nothing to change before a far-off watering
 
     water.status = FakeStatus(method="none")
-    assert len(phone("AGUA")) == 2              # rainfed: no watering to change
+    assert len(phone("AGUA")) == 3              # rainfed: no watering to change
 
 
 def test_status_when_a_map_is_missing(phone: Phone, conn) -> None:
@@ -422,7 +423,7 @@ def test_a_problem_photo(phone: Phone, conn, tmp_path) -> None:
 
 
 def test_drone_photos_get_an_upload_link(phone: Phone, conn) -> None:
-    two_fields(phone, conn)
+    two_fields(phone, conn, plan="2")
     phone("DRON")
     assert "sin cultivo" in phone("1")[0]
     phone("si")

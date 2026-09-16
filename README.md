@@ -12,7 +12,8 @@ stays on this computer, in the phone simulator and the terminal chat.
 
 ## What the bot asks, and in what order
 
-For each field, skipping whatever is already known:
+First, once: their name, whether they want alerts, and **which of the three
+services they want**. Then, for each field, skipping whatever is already known:
 
 1. What the farmer calls it, and about how many acres it is.
 2. Where it is: a Google Maps pin (a short link is followed), coordinates, or
@@ -35,7 +36,9 @@ After that a farmer texts when something happens:
 | `LLUVIA 1.2` / `RAIN 1.2` | A rain gauge reading, for all fields unless one is named |
 | `COSECHA` / `HARVESTED` | A harvest. The bot then suggests a flight over bare soil |
 | `SEMBRE sorgo` / `PLANTED` | A new crop and its planting date |
-| `DRON` / `DRONE` | A link to upload a flight's photos |
+| `DRON` / `DRONE` | A link to upload a flight's photos (satellite-only farmers are told how to switch) |
+| `PORQUE` / `WHY` | A link to a page showing how that answer was worked out, charts and all |
+| `PLAN` | What they signed up for, and the menu to change it |
 | a photo | A water ticket (read as an irrigation) or a problem for the team |
 | `MAPA`, `CAMPOS`, `NUEVO` | The map link, the list of fields, another field |
 | `BORRAR` / `UNDO` | Take back the last entry (it is voided, never deleted) |
@@ -43,6 +46,30 @@ After that a farmer texts when something happens:
 
 Anything the bot does not understand is passed to the team (`todo`), and the
 farmer is told so.
+
+## What a farmer signs up for
+
+Asked once, straight after consent, and changed any time with `PLAN`. The point
+of the menu is that **the first option needs nothing at all**: no drone, no
+licence, no hardware. A farmer who never buys anything still gets the whole
+satellite side, every five days, forever.
+
+| | What it adds | What it costs them |
+|---|---|---|
+| **1 Satellite only** | Everything: when to water, how much, and the ground from public airborne lidar where it exists | nothing |
+| **2 Satellite and drone** | Their own flight's photos: canopy height, row gaps, plant-by-plant flags, a ground map of their own | a drone and a licence |
+| **3 ...and a thermal camera** | Warm patches scored for pests or disease, with the reasoning | a thermal camera too |
+
+Picking 2 or 3 gets one extra text, and it is a warning rather than a sales
+pitch: flying a drone over your own farm for your own business is commercial
+use, so US law asks for an **FAA Part 107 certificate** — a $175 exam, not the
+thousands people assume, but still a real hurdle. **How they get the photos is
+entirely up to them**: fly it themselves with the certificate, buy a drone that
+flies its own grid, or have someone who already holds one fly it. We never tell
+a farmer they need a drone, and we never tell them they can skip the licence.
+
+`DRON` is refused to a farmer on option 1, with the one message that switches
+them over. The thermal answer only ever reaches option 3.
 
 ## Why the numbers can be trusted
 
@@ -60,6 +87,38 @@ farmer is told so.
 - **Every event keeps the text it came from** (`field_log.csv` notes say
   `sms message 123`), and the ticket photo if there was one. A correction voids
   the old entry rather than erasing it.
+- **The whole working is one text away.** Every AGUA ends with an offer, not a
+  file: *"¿Quiere saber por qué? Responda PORQUE."* See below.
+
+## The "why" file (`PORQUE` / `WHY`)
+
+A text message can say "water in about a day". It cannot show the arithmetic,
+and a grower asked to open a valve on our say-so is owed the arithmetic. So AGUA
+offers a link, one per field, and sends nothing unless they ask. The page holds:
+
+- **the same sentence the text message said**, at the top, so the two can be
+  checked against each other;
+- **the four steps**, with that field's own numbers: what its soil holds, what
+  went in from their own texts, what the sun took out (reference ET from gridMET
+  times a crop factor read off the satellite), and what is left;
+- **the satellite chart**: this year's greenness against the grey band of what
+  *this same field* usually does on this date. The page says in plain words why
+  the yardstick is the field's own history and never another farm;
+- **the water chart**: the root zone as a tank, with every irrigation and rain;
+- **every date the sums used**, so a wrong one is easy to spot and correct;
+- **the ground**, when lidar or a flight measured it, saying who measured it and
+  in which year;
+- **the thermal patches**, for farmers on option 3, each with its score and the
+  signs behind it;
+- **where the numbers come from, and what this is not** — an account, not a
+  soil-moisture probe.
+
+The charts are the satellite half's own figures, so the team and the grower read
+one picture and not two, and they are inlined as data URIs: the page is a single
+file that still works saved, forwarded, or opened with no signal. `/r/<token>`
+shows it and `/r/<token>/file` downloads it; the link lasts 14 days like the
+others. Nothing on the page is new analysis — if the page and a text message
+ever disagree, the text message is the bug.
 
 ## The team's commands
 
@@ -137,12 +196,14 @@ see `public_demo\rgv-crops-2025\SOURCE.md`):
 Three MADE-UP farmers on pretend 555 numbers register them by text. Their
 planting and watering dates are invented to match what the satellite saw.
 
-| Farmer | Texts in | Field | Watered by |
-|---|---|---|---|
-| Juan Ejemplo, 956-555-0123 | Spanish | F001 Algodon Lyford (cotton, planted 14 Mar) | furrows, from the west |
-| | | F002 Maiz Lyford (corn, planted 21 Feb, watered "ayer") | furrows, from the west |
-| Maria Ejemplo, 956-555-0142 | Spanish | F003 Sorgo Elsa (grain sorghum, planted 12 Mar) | rainfed (temporal) |
-| Mary Example, 956-555-0187 | English | F004 Monte Alto Grove (citrus) | flooding, from the north |
+They also pick a different service each, so the demo shows all three.
+
+| Farmer | Texts in | Signed up for | Field | Watered by |
+|---|---|---|---|---|
+| Juan Ejemplo, 956-555-0123 | Spanish | 3 satellite, drone and thermal | F001 Algodon Lyford (cotton, planted 14 Mar) | furrows, from the west |
+| | | | F002 Maiz Lyford (corn, planted 21 Feb, watered "ayer") | furrows, from the west |
+| Maria Ejemplo, 956-555-0142 | Spanish | 1 satellite only | F003 Sorgo Elsa (grain sorghum, planted 12 Mar) | rainfed (temporal) |
+| Mary Example, 956-555-0187 | English | 2 satellite and drone | F004 Monte Alto Grove (citrus) | flooding, from the north |
 
 The demo is pinned to Tuesday 20 May 2025, so its answers never drift. The pin
 is `DOSOJOS_AS_OF` in `examples\demo_data\sms\sms.env`, and the map links in the
@@ -157,6 +218,11 @@ minutes, mostly satellite images:
 3. It runs `daily --send`: satellite, gridMET weather, SSURGO soil, the checkbook,
    and the alerts. The alerts stay in the simulator.
 4. It fetches the government lidar ground under the two furrow fields.
+5. It runs the optional thermal step on Juan's corn. **That one mosaic is
+   synthetic**: we have no thermal camera, so it is generated by
+   `public_demo\thermal-synthetic\make_thermal.py`, and every figure from it
+   carries a SYNTHETIC band. Delete that block from `setup_sms_demo.cmd` for a
+   demo with no made-up pictures in it at all; everything else keeps working.
 
 **What each field answers to AGUA** (Juan and Mary also get an alert at set-up):
 
@@ -168,6 +234,11 @@ minutes, mostly satellite images:
   Answer "WATERED today 5", then "yes", and it comes back with about 16 days.
 - **Sorghum:** it needs rain now, at boot to flowering "when drought hurts most".
   It is rainfed, so the bot talks about rain, not watering.
+
+Then every AGUA ends with *"¿Quiere saber por qué? Responda PORQUE"*. Answer
+`PORQUE` and each field comes back with a link to its own page of charts and
+arithmetic. Juan's corn also carries a thermal line — a warm patch in one corner
+with our score for it — because he is the one who signed up for a thermal camera.
 
 **The simulator.** The second script opens it. Switch between the three phones,
 text AGUA, report a watering (REGUE hoy 5 / WATERED today 4) and see the days
@@ -232,7 +303,8 @@ src/
   parse.py      dates, inches, crops, methods, sides, places, yes and no
   store.py      SQLite: farmers, fields, events, messages, links, uploads
   bot.py        the conversation: questions, actions, read-backs
-  status.py     the checkbook and the drone's ground report, as texts
+  status.py     the checkbook, the ground report and the thermal patches, as texts
+  explain.py    the "why" page: the arithmetic, the charts, the sources
   export.py     fields.geojson, field_log.csv, flights.json
   outbox.py     sending: STOP, quiet hours, the simulator
   twilio.py     webhook signature, TwiML, sending, photos
@@ -240,7 +312,7 @@ src/
   pages/        map.html, upload.html, sim.html
   cli.py        click commands
 examples/       the demo: a made-up farmer, the placeholder outline, launchers
-tests/          485 tests, no network required
+tests/          559 tests, no network required
 ```
 
 ## Tests

@@ -7,6 +7,8 @@ plenty for a pilot: a reply takes milliseconds.
 - ``POST /sms/status``: Twilio reporting a text delivered or lost.
 - ``/f/<token>``: tap the field's corners on aerial imagery; saving texts back.
 - ``/u/<token>``: upload a drone flight's photos, one file at a time, resumable.
+- ``/r/<token>``: why a field got the answer it got, charts and all; ``/r/<token>/file``
+  is the same page as a download.
 - ``/sim``: a phone on screen, for demos and testing. Off unless ``--sim``, and
   refused to anything arriving through a tunnel, since it can pose as any number.
 """
@@ -30,10 +32,10 @@ from shapely.validation import make_valid
 
 from dosojos_sat.fields import compute_acres, utm_epsg_for
 
-from . import export, outbox, parse, store, text, twilio
+from . import explain, export, outbox, parse, store, text, twilio
 from .bot import Bot, Inbound, Media, map_token
 from .config import Settings
-from .status import Water
+from .status import Water, latest_terrain, latest_thermal
 
 log = logging.getLogger(__name__)
 
@@ -84,8 +86,9 @@ PAGE_TEXT = {
         "failed": ("Falló {name}: {error}", "{name} failed: {error}"),
         "nothing": ("Todavía no ha subido nada.", "Nothing uploaded yet."),
     },
-    "gone": ("Este enlace ya no sirve. Mande MAPA o DRON por mensaje para recibir otro.",
-             "This link no longer works. Text MAP or DRONE to get a new one."),
+    "gone": ("Este enlace ya no sirve. Mande MAPA, DRON o PORQUE por mensaje para recibir "
+             "otro.",
+             "This link no longer works. Text MAP, DRONE or WHY to get a new one."),
 }
 
 
@@ -336,6 +339,27 @@ class App:
         log.info("upload %s finished: %s files for %s", flight_id, upload["files"], record.id)
         return {"ok": True, "files": upload["files"], "flight": flight_id}
 
+    # ---- the explanation page ----------------------------------------------------------
+
+    def explain_page(self, token: str, *, download: bool = False) -> bytes:
+        """Why one field got the answer it got. Slow by the standards of this
+        server, a second or two, because it redraws the charts; it is asked for
+        by hand, at most a few times a day."""
+        with self.db() as conn:
+            link, record, farmer = self._link(conn, token, "explain")
+            events = store.events_for(conn, record.id)
+            store.use_link(conn, token)
+        settings = self.settings
+        today = (self.now or settings.now()).date()
+        item = self.water.field(record, events, today, full=True)
+        page = explain.build(
+            settings, farmer, item, events, today=today,
+            terrain=latest_terrain(settings, record.id),
+            thermal=latest_thermal(settings, record.id) if farmer.plan == "thermal" else None,
+            download=None if download else f"{token}/file",
+        )
+        return page.encode("utf-8")
+
     # ---- the simulator ---------------------------------------------------------------------
 
     def sim_page(self) -> bytes:
@@ -457,6 +481,20 @@ class Handler(BaseHTTPRequestHandler):
                     self._send(200, app.upload_page(parts[1]))
                 elif len(parts) == 3 and parts[0] == "u" and parts[2] == "files":
                     self._json(app.upload_list(parts[1]))
+                elif len(parts) == 2 and parts[0] == "r":
+                    self._send(200, app.explain_page(parts[1]))
+                elif len(parts) == 3 and parts[0] == "r" and parts[2] == "file":
+                    body = app.explain_page(parts[1], download=True)
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/html; charset=utf-8")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.send_header("Content-Disposition",
+                                     'attachment; filename="dos-ojos.html"')
+                    self.send_header("Cache-Control", "no-store")
+                    self.send_header("X-Content-Type-Options", "nosniff")
+                    self.end_headers()
+                    if self.command != "HEAD":
+                        self.wfile.write(body)
                 elif parts == ["sim"]:
                     self._sim_allowed()
                     self._send(200, app.sim_page())

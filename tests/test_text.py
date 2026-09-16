@@ -38,7 +38,8 @@ SAMPLE = {"link": "https://dosojos.example.com/f/AbCdEfGhIjKlMnOp", "field": "Ca
           "options": "1 Campo Norte, 2 La Loma, 3 Todos", "a": "mié 4 mar", "b": "vie 3 abr",
           "stage": "embuche y floración", "where": "en el lado oeste", "yd": "147",
           "contact": "Edgar 956-555-0100", "amount": ", 4 pulgadas",
-          "about": "unos 12 días", "year": "2019"}
+          "about": "unos 12 días", "year": "2019", "plan": "satélite y dron",
+          "chance": "65", "area": "1,240"}
 
 
 @pytest.mark.parametrize("key", sorted(text.T))

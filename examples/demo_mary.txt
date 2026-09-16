@@ -2,10 +2,12 @@
 # Her grove is a real citrus grove near Monte Alto from public USDA data
 # (demo_fields.geojson), flood-irrigated from the north; the three waterings are invented.
 # Used by setup_sms_demo.cmd.
+# She has a drone but has not flown it yet, so she picks option 2.
 hello
 2
 Mary Example
 yes
+2
 Monte Alto Grove
 35
 26.38276, -97.98556

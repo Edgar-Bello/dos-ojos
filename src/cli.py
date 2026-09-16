@@ -437,13 +437,23 @@ def _sat(ctx: Context, *args: str) -> None:
         raise click.ClickException(f"'dosojos-sat {' '.join(args)}' failed; see its message above")
 
 
+#: Years of history behind "what this field usually does on this date". Four is
+#: what the satellite half's baseline defaults to, and the least that makes a
+#: percentile mean anything.
+BASELINE_YEARS = 4
+
+
 @cli.command("daily")
 @click.option("--send", is_flag=True, help="Send the alerts and reminders (else list them).")
 @click.option("--skip-fetch", is_flag=True, help="Use the imagery already cached.")
-@click.option("--years", type=int, default=2, show_default=True,
-              help="Years of imagery to keep (the checkbook needs this season and last).")
+@click.option("--years", type=int, default=BASELINE_YEARS + 1, show_default=True,
+              help="Years of imagery to keep: this season, plus the years the field's "
+                   "own normal is built from.")
+@click.option("--skip-baseline", is_flag=True,
+              help="Don't rebuild each field's own normal (it changes slowly).")
 @click.pass_obj
-def daily_cmd(ctx: Context, send: bool, skip_fetch: bool, years: int) -> None:
+def daily_cmd(ctx: Context, send: bool, skip_fetch: bool, years: int,
+              skip_baseline: bool) -> None:
     """Once a day: export, fetch imagery, weather and soil, then alerts and reminders."""
     result = _export(ctx)
     if not result.field_ids:
@@ -452,14 +462,24 @@ def daily_cmd(ctx: Context, send: bool, skip_fetch: bool, years: int) -> None:
     today = ctx.as_of or ctx.settings.now().date()
     _sat(ctx, "init-fields", str(result.fields_path))
     if not skip_fetch and ctx.as_of:
-        # A pinned demo needs its own season, not every image up to the real today.
-        _sat(ctx, "fetch", "--start", (today - timedelta(days=400)).isoformat(),
+        # A pinned demo needs its own years, not every image up to the real today.
+        _sat(ctx, "fetch", "--start", date(today.year - years + 1, 1, 1).isoformat(),
              "--end", today.isoformat())
     elif not skip_fetch:
         _sat(ctx, "fetch", "--years", str(years))
     _sat(ctx, "weather", "--start", (today - timedelta(days=400)).isoformat(),
          "--end", today.isoformat())
     _sat(ctx, "soil")
+    if not skip_baseline:
+        # What each field usually does on this date, from its own earlier years.
+        # Only the "why" page draws it, so a field with too little history behind
+        # it costs a chart and never a failed run.
+        try:
+            _sat(ctx, "baseline", "--season", str(today.year),
+                 "--history-years", str(BASELINE_YEARS))
+        except click.ClickException as exc:
+            click.secho(f"NOTE: no field normal yet ({exc.message}); the water advice "
+                        "does not need one.", fg="yellow")
     growing = [i for i in result.field_ids if _crop_of(ctx, i) not in (None, "none")]
     if growing:
         _sat(ctx, "water", "--as-of", today.isoformat(), "--fields", ",".join(growing))

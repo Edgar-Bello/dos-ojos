@@ -2,10 +2,12 @@
 # Her field is a real grain sorghum field near Elsa from public USDA data
 # (demo_fields.geojson), planted Mar 12 and never irrigated (rainfed, "temporal").
 # Used by setup_sms_demo.cmd.
+# She has no drone, so she picks satellite only (option 1).
 hola
 1
 Maria Ejemplo
 si
+1
 Sorgo Elsa
 50
 26.28407, -98.01321

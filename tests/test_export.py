@@ -81,7 +81,7 @@ def test_nothing_to_export_removes_a_stale_fields_file(conn, settings) -> None:
 
 
 def test_a_finished_upload_becomes_a_flight(phone: Phone, conn, settings) -> None:
-    onboard(phone)
+    onboard(phone, plan="2")
     register_field(phone)
     manifest = settings.drone_workspace / "flights.json"
     manifest.write_text(json.dumps({"flights": {"old-001": {"field_id": "F009"}}}),

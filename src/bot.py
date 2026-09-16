@@ -292,11 +292,31 @@ class Turn:
         self.f.alerts = answer
         self.f.consent_at = store.now_iso() if answer else None
         self.say("consent_yes" if answer else "consent_no")
+        self._ask("plan")
+
+    def _on_plan(self) -> None:
+        chosen = parse.plan(self.body)
+        if chosen is None:
+            self._retry("menu_number")
+            return
+        self._set_plan(chosen)
         if self.fields():
             self._to_idle()
             return
         self.ctx["first"] = True
         self._ask("field_name")
+
+    def _set_plan(self, chosen: str) -> None:
+        """Record the plan and say what it means, licence included.
+
+        A farmer picking a drone is told what the law asks before they spend
+        anything. How they get the photos is theirs to decide: fly it themselves
+        with a licence, or have someone who holds one fly it for them.
+        """
+        self.f.plan = chosen
+        self.say("plan_" + chosen, plan=text.plan_name(chosen, self.lang))
+        if chosen in text.FLYING_PLANS:
+            self.say("plan_license")
 
     # ---- a field ------------------------------------------------------------
 
@@ -897,7 +917,15 @@ class Turn:
         elif command == "planted":
             self._start("planted", prompt="planted", then="idle")
         elif command == "drone":
+            if self.f.plan not in text.FLYING_PLANS:
+                self.say("drone_not_in_plan")
+                return
             self._start("drone", window="flight", prompt="ask_flight_day")
+        elif command == "plan":
+            self.say("plan_now", plan=text.plan_name(self.f.plan, self.lang))
+            self._ask("plan")
+        elif command == "explain":
+            self._explain()
         elif command == "map":
             self._start("map")
         elif command == "undo":
@@ -924,6 +952,34 @@ class Turn:
                 lines = status_mod.ground_lines(report, self.lang, intake=item.intake)
                 if lines:
                     self.out.append(say("ground_label", self.lang) + " ".join(lines))
+            # A thermal camera is the farmer's own, and only they have one.
+            if self.f.plan == "thermal":
+                pest = status_mod.pest_line(
+                    status_mod.latest_thermal(self.bot.settings, item.field.id),
+                    self.lang, item.field.name)
+                if pest:
+                    self.out.append(pest)
+        # Offered, never sent: a file of charts is a lot to push at someone who
+        # only asked whether to water. They ask for it by replying PORQUE.
+        if any(item.status is not None for item in results):
+            self.say("explain_offer")
+
+    def _explain(self) -> None:
+        """A link to the page showing how each field's answer was worked out.
+
+        One link per field with a real checkbook, since the working is per field.
+        """
+        explained = [r for r in self.fields()
+                     if self.bot.water.field(r, store.events_for(self.conn, r.id),
+                                             self.today).status is not None]
+        if not explained:
+            self.say("explain_none")
+            return
+        for record in explained:
+            token = store.new_link(self.conn, "explain", record.id, days=LINK_DAYS,
+                                   now=self.bot.now)
+            self.say("explain_link", field=record.name,
+                     link=self.bot.settings.link(f"r/{token}"), days=LINK_DAYS)
 
     def _list_fields(self) -> None:
         records = self.fields()
@@ -1046,6 +1102,8 @@ class Turn:
             return say("name", lang)
         if state == "consent":
             return say("consent", lang, name=self.f.name or "")
+        if state == "plan":
+            return say("plan", lang)
         if state == "field_name":
             return say("field_name_first" if self.ctx.get("first") else "field_name", lang)
         if state in ("f:acres", "f:location", "f:crop", "f:crop_other", "f:method", "f:side"):

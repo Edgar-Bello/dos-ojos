@@ -18,7 +18,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterator
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS farmers (
     state        TEXT NOT NULL DEFAULT 'new',  -- the question waiting for an answer
     context      TEXT NOT NULL DEFAULT '{}',
     alerts       INTEGER,                      -- 1 wants alerts, 0 does not, NULL not asked
+    plan         TEXT NOT NULL DEFAULT 'satellite',  -- satellite | drone | thermal
     consent_at   TEXT,
     opted_out_at TEXT,
     created_at   TEXT NOT NULL,
@@ -93,7 +94,7 @@ CREATE INDEX IF NOT EXISTS events_field ON events(field_id, day);
 
 CREATE TABLE IF NOT EXISTS links (
     token      TEXT PRIMARY KEY,
-    kind       TEXT NOT NULL,                  -- map | upload
+    kind       TEXT NOT NULL,                  -- map | upload | explain
     field_id   TEXT NOT NULL REFERENCES fields(id),
     meta       TEXT NOT NULL DEFAULT '{}',
     created_at TEXT NOT NULL,
@@ -123,6 +124,14 @@ CREATE TABLE IF NOT EXISTS alerts (
 
 EVENT_KINDS = ("planted", "irrigated", "rain", "harvested", "photo")
 
+#: Columns added after the first databases were made. SQLite cannot bring an
+#: existing table forward through CREATE TABLE IF NOT EXISTS, so each one is
+#: added on open if it is not there yet. A farm's database is the record of
+#: everything the farmers said; it is migrated, never rebuilt.
+ADDED_COLUMNS: dict[str, dict[str, str]] = {
+    "farmers": {"plan": "TEXT NOT NULL DEFAULT 'satellite'"},
+}
+
 
 # --------------------------------------------------------------------------- #
 # Connection
@@ -139,10 +148,24 @@ def connect(db_path: Path) -> sqlite3.Connection:
     conn.execute("PRAGMA journal_mode = WAL")
     conn.execute("PRAGMA busy_timeout = 30000")
     conn.executescript(_SCHEMA)
+    migrate(conn)
     conn.execute("INSERT INTO meta(key, value) VALUES('schema_version', ?) "
-                 "ON CONFLICT(key) DO NOTHING", (str(SCHEMA_VERSION),))
+                 "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                 (str(SCHEMA_VERSION),))
     conn.commit()
     return conn
+
+
+def migrate(conn: sqlite3.Connection) -> list[str]:
+    """Add any column a newer version needs; returns the ones added."""
+    added = []
+    for table, columns in ADDED_COLUMNS.items():
+        have = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+        for name, declaration in columns.items():
+            if name not in have:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {declaration}")
+                added.append(f"{table}.{name}")
+    return added
 
 
 @contextmanager
@@ -201,6 +224,9 @@ class Farmer:
     state: str = "new"
     context: dict = dc_field(default_factory=dict)
     alerts: bool | None = None
+    #: What this farmer signed up for: satellite only, plus their own drone
+    #: photos, or plus a thermal camera. See text.PLANS.
+    plan: str = "satellite"
     consent_at: str | None = None
     opted_out_at: str | None = None
     created_at: str = ""
@@ -215,6 +241,7 @@ def _farmer(row: sqlite3.Row) -> Farmer:
         phone=row["phone"], name=row["name"], lang=row["lang"], channel=row["channel"],
         state=row["state"], context=json.loads(row["context"] or "{}"),
         alerts=None if row["alerts"] is None else bool(row["alerts"]),
+        plan=row["plan"] or "satellite",
         consent_at=row["consent_at"], opted_out_at=row["opted_out_at"],
         created_at=row["created_at"],
     )
@@ -235,10 +262,10 @@ def add_farmer(conn: sqlite3.Connection, phone: str, *, channel: str = "sms") ->
 def save_farmer(conn: sqlite3.Connection, farmer: Farmer) -> None:
     conn.execute(
         """UPDATE farmers SET name = ?, lang = ?, channel = ?, state = ?, context = ?,
-               alerts = ?, consent_at = ?, opted_out_at = ?, updated_at = ?
+               alerts = ?, plan = ?, consent_at = ?, opted_out_at = ?, updated_at = ?
            WHERE phone = ?""",
         (farmer.name, farmer.lang, farmer.channel, farmer.state, json.dumps(farmer.context),
-         None if farmer.alerts is None else int(farmer.alerts), farmer.consent_at,
+         None if farmer.alerts is None else int(farmer.alerts), farmer.plan, farmer.consent_at,
          farmer.opted_out_at, now_iso(), farmer.phone),
     )
 

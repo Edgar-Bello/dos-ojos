@@ -54,6 +54,24 @@ class FakeStatus:
     confidence: str = "high"
     last_irrigation: str | None = "2026-08-18"
     start: str = "2026-07-20"
+    # ...and the rest, which only the explanation page shows.
+    field_id: str = "F001"
+    name: str = "Campo Norte"
+    crop: str = "grain sorghum"
+    as_of: str = "2026-09-12"
+    start_reason: str = "planted 20 Jul"
+    root_depth_in: float | None = 36.0
+    capacity_in: float | None = 6.2
+    stress_point_in: float | None = 2.5
+    until_stress_in: float | None = 1.6
+    eto_in_day: float | None = 0.27
+    kc: float | None = 1.05
+    use_in_day: float | None = 0.28
+    soil: dict = dc_field(default_factory=lambda: {"name": "Hidalgo sandy clay loam",
+                                                   "awc_in_per_ft": 1.9, "intake": "slow"})
+
+    def to_dict(self) -> dict:
+        return {f: getattr(self, f) for f in self.__dataclass_fields__}
 
 
 class FakeWater:
@@ -64,7 +82,7 @@ class FakeWater:
         self.reason = reason
         self.calls: list[str] = []
 
-    def field(self, record, events, as_of: date) -> FieldWater:
+    def field(self, record, events, as_of: date, *, full: bool = False) -> FieldWater:
         self.calls.append(record.id)
         if record.outline is None:
             return FieldWater(record, reason="no_map")
@@ -123,9 +141,9 @@ def phone(bot: Bot) -> Phone:
     return Phone(bot)
 
 
-def onboard(phone: Phone, *, lang: str = "1") -> None:
-    """Up to the first field's name question."""
-    phone.all("hola", lang, "Juan Ejemplo", "si")
+def onboard(phone: Phone, *, lang: str = "1", plan: str = "1") -> None:
+    """Up to the first field's name question; ``plan`` is 1 satellite, 2 drone, 3 thermal."""
+    phone.all("hola", lang, "Juan Ejemplo", "si", plan)
 
 
 def register_field(phone: Phone, name: str = "Campo Norte", *, pin: str = "26.1484, -97.9940",

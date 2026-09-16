@@ -56,12 +56,22 @@ class FieldWater:
 
     ``reason`` is ``no_map`` (no outline to look at), ``no_crop`` or
     ``no_data`` (the daily run has not fetched this field yet).
+
+    The frames are filled only when asked for with ``full``: they are what the
+    explanation page draws its charts from, and reading them on every AGUA would
+    make a one-line answer cost a great deal more than it needs to.
     """
 
     field: FieldRow
     status: sat_water.WaterStatus | None = None
     reason: str | None = None
     intake: str | None = None
+    soil: dict | None = None
+    daily: object | None = None          # the day-by-day balance
+    projection: object | None = None     # the path forward from today
+    ndvi: object | None = None           # this season's satellite readings
+    baseline: object | None = None       # what this field usually does, by day of year
+    baseline_years: tuple[int, int] | None = None   # the years that normal was built from
 
 
 class Water:
@@ -74,13 +84,16 @@ class Water:
     def db_path(self):
         return self.settings.sat_workspace / "cache" / "dosojos.sqlite"
 
-    def field(self, record: FieldRow, events: Sequence[Event], as_of: date) -> FieldWater:
+    def field(self, record: FieldRow, events: Sequence[Event], as_of: date, *,
+              full: bool = False) -> FieldWater:
+        """One field's checkbook; with ``full``, the frames behind it as well."""
         if record.outline is None:
             return FieldWater(record, reason="no_map")
         if record.crop in (None, "none"):
             return FieldWater(record, reason="no_crop")
         if not self.db_path.exists():
             return FieldWater(record, reason="no_data")
+        baseline = baseline_years = None
         with sat_cache.session(self.db_path) as conn:
             cached = sat_cache.get_soil(conn, record.id)
             if cached is None:
@@ -89,8 +102,13 @@ class Water:
             weather = sat_cache.get_weather(conn, record.id, as_of - timedelta(days=400), as_of)
             ndvi = sat_cache.get_observations(conn, record.id, "NDVI",
                                               year_range=(as_of.year - 1, as_of.year))
+            if full:
+                baseline = sat_cache.get_baseline(conn, record.id, "NDVI")
+                run = sat_cache.baseline_run_info(conn, record.id, "NDVI") or {}
+                if run.get("year_min") and run.get("year_max"):
+                    baseline_years = (int(run["year_min"]), int(run["year_max"]))
         try:
-            status, _, _ = sat_water.checkbook(
+            status, daily, projection = sat_water.checkbook(
                 field_id=record.id, name=record.name, crop_text=crop_text(record),
                 soil=profile, soil_note={"name": profile.name, "intake": profile.intake},
                 weather=weather, ndvi=ndvi, events=log_events(events), as_of=as_of,
@@ -99,7 +117,11 @@ class Water:
         except sat_water.WaterError as exc:
             log.info("%s: no checkbook yet: %s", record.id, exc)
             return FieldWater(record, reason="no_data")
-        return FieldWater(record, status=status, intake=profile.intake)
+        if not full:
+            return FieldWater(record, status=status, intake=profile.intake)
+        return FieldWater(record, status=status, intake=profile.intake,
+                          soil=cached.get("profile"), daily=daily, projection=projection,
+                          ndvi=ndvi, baseline=baseline, baseline_years=baseline_years)
 
 
 def urgency(item: FieldWater) -> tuple:
@@ -158,8 +180,12 @@ def message(item: FieldWater, lang: str, today: date, *,
 # --------------------------------------------------------------------------- #
 
 
-def latest_terrain(settings: Settings, field_id: str) -> dict | None:
-    """The most recent flight's terrain.json for a field, if the team has run one."""
+def latest_report(settings: Settings, field_id: str, name: str) -> dict | None:
+    """The newest flight's ``name``.json for a field, if the team has run that step.
+
+    Returns the report with ``flown_on`` and ``flight_id`` added, so a page can
+    say when the field was looked at and find the figures beside it.
+    """
     manifest = settings.drone_workspace / "flights.json"
     if not manifest.exists():
         return None
@@ -170,15 +196,53 @@ def latest_terrain(settings: Settings, field_id: str) -> dict | None:
         return None
     found = []
     for flight_id, entry in flights.items():
-        report = settings.drone_workspace / "out" / flight_id / "terrain.json"
+        report = settings.drone_workspace / "out" / flight_id / f"{name}.json"
         if entry.get("field_id") == field_id and report.exists():
-            found.append((entry.get("flown_on") or "", report))
+            found.append((entry.get("flown_on") or "", flight_id, report))
     if not found:
         return None
-    flown_on, path = max(found)
+    flown_on, flight_id, path = max(found)
     report = json.loads(path.read_text(encoding="utf-8"))
     report["flown_on"] = flown_on or None
+    report["flight_id"] = flight_id
     return report
+
+
+def latest_terrain(settings: Settings, field_id: str) -> dict | None:
+    """The most recent flight's terrain.json for a field, if the team has run one."""
+    return latest_report(settings, field_id, "terrain")
+
+
+def latest_thermal(settings: Settings, field_id: str) -> dict | None:
+    """The most recent flight's thermal.json, for farmers who flew a thermal camera."""
+    return latest_report(settings, field_id, "thermal")
+
+
+#: Below this the score says little worth a text message; it still shows on the
+#: explanation page, where there is room to say how weak it is.
+PEST_WORTH_TEXTING = 0.4
+
+
+def pest_line(report: dict | None, lang: str, field_name: str) -> str | None:
+    """The warmest patch worth telling a farmer about, as one text.
+
+    Only the strongest patch goes out by message. A list of five warm spots in
+    160 characters helps nobody; the rest are in the explanation file.
+    """
+    if not report:
+        return None
+    patches = [p for p in report.get("patches") or []
+               if (p.get("chance") or 0) >= PEST_WORTH_TEXTING]
+    if not patches:
+        return None
+    worst = max(patches, key=lambda p: p["chance"])
+    where = text.pick(text.PLACES.get(worst.get("where") or "middle",
+                                      ("en el centro", "in the middle")), lang)
+    body = say("pest_chance", lang, chance=f"{worst['chance'] * 100:.0f}", where=where,
+               field=field_name, area=f"{worst.get('area_m2', 0):,.0f}")
+    if len(patches) > 1:
+        body += say("pest_more", lang, n=len(patches) - 1)
+    return body
 
 
 def ground_lines(report: dict | None, lang: str, *, intake: str | None = None,
