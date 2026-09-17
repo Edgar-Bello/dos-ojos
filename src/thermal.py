@@ -50,6 +50,19 @@ KELVIN_ZERO = 273.15
 #: which on a sunny afternoon runs 20 degrees hotter than any leaf and would
 #: swamp every statistic here.
 CANOPY_MIN_M = 0.30
+
+#: When a flight carries no canopy height model, leaves are told from soil on
+#: the thermal frames themselves (see ``mosaic``), and this is the share of a
+#: cell that has to be leaf for its temperature to be a crop temperature.
+#:
+#: Thirty per cent, because thin canopy runs hot and nothing can be done about
+#: that: a lone plant with sunlit soil all around it is warmed by the ground it
+#: stands on and cannot cool itself against it. Measured on the Maricopa scan,
+#: cells between 5 and 15 per cent leaf read 2 C above cells that were nearly
+#: all leaf, and the alleys between trial plots - bare ground with a few
+#: stragglers in them - came out as the hottest "patches" on the field. Below
+#: this share a square is not a canopy temperature at all, whatever it reads.
+MIN_LEAF_FRACTION = 0.30
 #: A patch smaller than this is noise, a bird or a single plant, not something
 #: to send anyone across a field for. Measured on the patch's footprint on the
 #: ground, which is what a grower walks.
@@ -59,6 +72,14 @@ MIN_PATCH_M2 = 25.0
 #: of 40 m2 blobs, every one of them meaningless; an absolute floor lets them all
 #: through while a relative one does not. The larger of the two governs.
 MIN_PATCH_SHARE = 0.002
+#: Canopy temperature is averaged over this much ground before patches are
+#: traced. A thermal camera flown low, or a scanner on rails, resolves a single
+#: leaf, and one leaf's temperature is not a thing anybody acts on: at
+#: centimetre cells the spread within a healthy crop is several degrees, which
+#: buries any patch. Half a metre is about one plant, and the smallest thing
+#: worth walking to. A mosaic already coarser than this is left alone.
+PATCH_SCALE_M = 0.5
+
 #: Warm canopy within this distance is one patch. An orchard's canopy is
 #: disconnected by construction - round crowns with bare ground between them -
 #: so tracing connected warm pixels would break a warm block of twenty trees
@@ -201,6 +222,13 @@ class ThermalReport:
     field_id: str | None
     unit: str
     cell_m: float
+    #: How leaves were told from soil: "height" from a canopy model, or "heat"
+    #: by contrast on the thermal frames when the flight had no colour camera.
+    #: The second is the weaker of the two and every reader should know which.
+    leaves_from: str
+    #: How the mosaic was built, when it was built here from frames: see
+    #: ``mosaic.Scan``. None when a finished thermal orthophoto was handed in.
+    scan: dict | None
     canopy_m2: float
     canopy_median_c: float
     canopy_spread_c: float
@@ -225,6 +253,34 @@ def canopy_mask(celsius: np.ndarray, canopy_m: np.ndarray,
     return np.isfinite(celsius) & np.isfinite(canopy_m) & (canopy_m >= canopy_min_m)
 
 
+def leaf_mask(celsius: np.ndarray, fraction: np.ndarray,
+              min_fraction: float = MIN_LEAF_FRACTION) -> np.ndarray:
+    """The same thing, where leaves were told by temperature rather than height.
+
+    ``fraction`` is how much of each cell the camera saw leaf in, which is what
+    ``mosaic`` writes beside its thermal map for a flight with no colour camera
+    on it.
+    """
+    return np.isfinite(celsius) & np.isfinite(fraction) & (fraction >= min_fraction)
+
+
+def over(values: np.ndarray, canopy: np.ndarray, *, radius_cells: float) -> np.ndarray:
+    """Each canopy cell replaced by the average canopy around it.
+
+    Averaged over leaves only: the soil between the rows is not mixed back in
+    at the last moment, having been kept out all along.
+    """
+    from scipy import ndimage
+
+    size = max(1, int(round(2 * radius_cells)) | 1)
+    if size <= 1:
+        return values
+    warm = ndimage.uniform_filter(np.where(canopy, values, 0.0), size=size, mode="nearest")
+    share = ndimage.uniform_filter(canopy.astype(float), size=size, mode="nearest")
+    smoothed = np.divide(warm, share, out=np.full_like(warm, np.nan), where=share > 0)
+    return np.where(canopy, smoothed, np.nan)
+
+
 def robust_stats(values: np.ndarray) -> tuple[float, float]:
     """Median and a standard-deviation equivalent that a hot patch cannot drag."""
     finite = values[np.isfinite(values)]
@@ -240,22 +296,31 @@ def find_patches(
     frame: BaseGeometry, canopy_min_m: float = CANOPY_MIN_M, warm_z: float = WARM_Z,
     min_warm_c: float = MIN_WARM_C, min_patch_m2: float = MIN_PATCH_M2,
     min_patch_share: float = MIN_PATCH_SHARE, group_gap_m: float = GROUP_GAP_M,
+    leaves: np.ndarray | None = None, patch_scale_m: float = PATCH_SCALE_M,
 ) -> tuple[list[Patch], dict]:
     """Trace connected stretches of canopy running hot, with the field's own stats.
 
     Only canopy is measured. Sunlit soil between the rows runs far hotter than
     any leaf, so a mask taken on temperature alone would trace the furrows.
+
+    ``leaves`` is a mask made another way - by contrast on the thermal frames
+    themselves, for a flight that carried no colour camera and so has no canopy
+    height model. Given one, ``canopy_m`` and ``canopy_min_m`` are not used.
     """
     from rasterio.features import shapes
     from scipy import ndimage
 
-    canopy = canopy_mask(celsius, canopy_m, canopy_min_m)
+    canopy = leaves if leaves is not None else canopy_mask(celsius, canopy_m, canopy_min_m)
     if not canopy.any():
         raise ThermalError(
-            f"no canopy at least {canopy_min_m:g} m tall under the thermal mosaic; with the "
-            "field bare there is nothing transpiring to measure"
+            "nothing under the thermal mosaic is crop: " + (
+                "no cell holds enough leaf to measure" if leaves is not None else
+                f"no canopy at least {canopy_min_m:g} m tall") + ". With the field bare "
+            "there is nothing transpiring to measure."
         )
     values = np.where(canopy, celsius, np.nan)
+    if patch_scale_m > cell_m:
+        values = over(values, canopy, radius_cells=0.5 * patch_scale_m / cell_m)
     median, spread = robust_stats(values)
     if spread <= 0:
         raise ThermalError("every canopy pixel reads the same temperature; "
@@ -488,9 +553,18 @@ def frame_of(surface: Surface, outline: BaseGeometry | None) -> BaseGeometry:
 def build_report(
     flight_id: str, field_id: str | None, *, unit: str, cell_m: float, patches: list[Patch],
     stats: dict, evidence: Evidence = Evidence(), notes: list[str] | None = None,
+    leaves_from: str = "height", scan: dict | None = None,
 ) -> ThermalReport:
     """Score every patch and gather the flight's thermal findings."""
     notes = list(notes or [])
+    if leaves_from == "heat":
+        notes.append(
+            "this flight carried no colour camera, so there is no canopy height model and "
+            "leaves were told from soil by temperature alone: anything several degrees cooler "
+            "than the ground around it. A plant so far gone that it no longer cools itself "
+            "reads as soil and is left out, which is the one plant worth finding, so treat a "
+            "quiet map here as less reassuring than a quiet map with a height model behind it."
+        )
     if stats["warm_share"] > MAX_WARM_SHARE:
         notes.append(
             f"{stats['warm_share']:.0%} of the canopy is running hot, which is too much of the "
@@ -505,6 +579,7 @@ def build_report(
         score(patch, evidence)
     return ThermalReport(
         flight_id=flight_id, field_id=field_id, unit=unit, cell_m=round(cell_m, 3),
+        leaves_from=leaves_from, scan=scan,
         canopy_m2=round(stats["canopy_m2"], 1), canopy_median_c=stats["canopy_median_c"],
         canopy_spread_c=stats["canopy_spread_c"], warm_share=round(stats["warm_share"], 4),
         patches=patches, notes=notes,

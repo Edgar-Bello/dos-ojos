@@ -290,10 +290,14 @@ def save_thermal_png(
     finite = celsius[np.isfinite(celsius)]
     low, high = (np.percentile(finite, (2, 98)) if finite.size else (0.0, 1.0))
 
-    figure, axes = plt.subplots(figsize=(10.0, 8.6), dpi=DPI)
+    height, width = celsius.shape
+    # A thermal camera flown on its own often covers a long thin strip rather
+    # than a square field, and on a fixed square figure that lands as a sliver
+    # up one side with nothing readable in it.
+    shape = min(2.2, max(0.45, (height / width) if width else 1.0))
+    figure, axes = plt.subplots(figsize=(10.0, min(13.0, max(6.0, 2.0 + 7.5 * shape))), dpi=DPI)
     colormap = plt.get_cmap("inferno").copy()
     colormap.set_bad("#d9d8d2")
-    height, width = celsius.shape
     left, top = transform * (0, 0)
     right, bottom = transform * (width, height)
     image = axes.imshow(

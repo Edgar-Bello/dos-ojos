@@ -58,6 +58,14 @@ SATELLITE_FIGURES: tuple[tuple[str, str, str], ...] = (
 )
 
 #: Said plainly wherever the satellite half is missing, so a gap is never silent.
+#: What ``terrain``'s ground_source means, in words a reader can use.
+GROUND_SOURCES = {
+    "3dep": "the USGS 3DEP airborne laser, a public survey, not a flight of yours",
+    "lidar": "this flight's own laser scan",
+    "imported": "maps made outside this pipeline and imported",
+    "photogrammetry": "this flight's own photographs",
+}
+
 NO_SATELLITE = (
     "There is no satellite record for this field, so this page is the drone's word "
     "alone. That is not a failure: a field can be too small for a Sentinel-2 pixel "
@@ -272,7 +280,7 @@ def _ground_html(terrain: dict) -> str:
         todo = html.escape(str(item.get("advice") or ""))
         items.append(f"<li>{said}" + (f" <em>{todo}</em>" if todo else "") + "</li>")
 
-    source = terrain.get("ground_source")
+    source = GROUND_SOURCES.get(terrain.get("ground_source"), terrain.get("ground_source"))
     tail = (f"<p class=\"sources\">Ground measured from {html.escape(str(source))}.</p>"
             if source else "")
     return "<h2>The ground</h2><ul>" + "".join(items) + "</ul>" + tail
@@ -316,7 +324,9 @@ def render(data: PageData) -> str:
     """The whole page as one string, pictures and all."""
     public = "public" in data.source.lower() or "cc0" in data.source.lower() \
         or "cc-by" in data.source.lower() or "public domain" in data.source.lower()
-    title = f"{data.field_name} - drone flight {data.flown_on}".strip(" -")
+    # "Flight", not "drone flight": the same page carries a drone's photos, maps
+    # bought from a service, government lidar, and a camera on a gantry.
+    title = f"{data.field_name} - flight {data.flown_on}".strip(" -")
 
     parts = [
         "<title>", html.escape(title), "</title>",

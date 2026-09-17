@@ -107,7 +107,7 @@ def test_a_lidar_raster_is_named_lidar_not_imported(tmp_path: Path) -> None:
     (tmp_path / "imported.json").write_text(json.dumps({
         "lidar": True, "products": [{"name": "dtm", "how": "copied unchanged"}]}),
         encoding="utf-8")
-    assert terrain.ground_source(tmp_path) == "lidar"
+    assert terrain.ground_source(tmp_path) == "3dep"
 
 
 def test_the_lidar_command_imports_the_ground_for_the_terrain_step(tmp_path: Path,
@@ -133,14 +133,15 @@ def test_the_lidar_command_imports_the_ground_for_the_terrain_step(tmp_path: Pat
     assert result.exit_code == 0, result.output
     manifest = json.loads((workspace / "flights.json").read_text())["flights"]["L1"]
     assert manifest["field_id"] == "PUBLIC-f1" and "USGS 3DEP lidar" in manifest["source"]
-    assert terrain.ground_source(workspace / "data" / "odm" / "L1") == "lidar"
+    assert terrain.ground_source(workspace / "data" / "odm" / "L1") == "3dep"
 
     judged = runner.invoke(cli, ["--workspace", str(workspace), "terrain", "L1"])
     assert judged.exit_code == 0, judged.output
-    assert "ground measured every 2 m" in judged.output and "lidar, 2 m grid" in judged.output
+    assert "ground measured every 2 m" in judged.output
+    assert "the public 3DEP laser survey, 2 m grid" in judged.output
     assert "Falls" in judged.output or "slope" in judged.output
     report = json.loads((workspace / "out" / "L1" / "terrain.json").read_text())
-    assert report["ground_source"] == "lidar"
+    assert report["ground_source"] == "3dep"
     assert (workspace / "out" / "L1" / "terrain.png").stat().st_size > 20_000
 
 

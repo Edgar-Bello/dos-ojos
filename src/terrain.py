@@ -813,9 +813,25 @@ def _for_unirrigated(item: Advice, method: str | None) -> Advice:
 # --------------------------------------------------------------------------- #
 
 
+#: The same four, in words, for anything a person reads.
+GROUND_WORDS = {
+    "3dep": "the public 3DEP laser survey",
+    "lidar": "this flight's laser",
+    "imported": "imported maps",
+    "photogrammetry": "this flight's photographs",
+}
+
+
 def ground_source(project_dir: Path) -> str:
-    """``lidar`` for imported point clouds, ``imported`` for other imported maps,
-    ``photogrammetry`` for ODM's own."""
+    """Where the ground under this flight came from.
+
+    ``3dep`` for the government's airborne laser, which we fetch ourselves and
+    nobody flew for us; ``lidar`` for a point cloud the flight brought with it,
+    which somebody did; ``imported`` for other maps made elsewhere;
+    ``photogrammetry`` for ODM's own. The first two are both lasers and are
+    still worth telling apart: a grower reading the page should know whether
+    the ground map is of their own flight or of a public survey from years ago.
+    """
     provenance = Path(project_dir) / "imported.json"
     if not provenance.exists():
         return "photogrammetry"
@@ -823,8 +839,10 @@ def ground_source(project_dir: Path) -> str:
         record = json.loads(provenance.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         return "imported"
+    if record.get("lidar"):
+        return "3dep"
     dtm = next((p for p in record.get("products", []) if p.get("name") == "dtm"), {})
-    return "lidar" if record.get("lidar") or "points" in str(dtm.get("how", "")) else "imported"
+    return "lidar" if "points" in str(dtm.get("how", "")) else "imported"
 
 
 def write_relief(ground: Ground, path: Path) -> Path:

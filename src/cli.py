@@ -18,6 +18,7 @@ from . import crowns
 from . import flags as flags_mod
 from . import report as report_mod
 from . import metrics as metrics_mod
+from . import mosaic as mosaic_mod
 from . import odm_runner, video, viz
 from . import page as page_mod
 from . import terrain as terrain_mod
@@ -1427,7 +1428,8 @@ def terrain_cmd(settings: Settings, flight_id: str, method: str, water_enters: s
 def _format_terrain(report) -> str:
     """The ground in numbers: grade, evenness, and where the flagged pieces bunch."""
     rows = [
-        ("ground from", f"{report.ground_source}, {report.cell_m:g} m grid, "
+        ("ground from", f"{terrain_mod.GROUND_WORDS.get(report.ground_source, report.ground_source)}"
+                        f", {report.cell_m:g} m grid, "
                         f"{report.area_m2 / 4046.86:.1f} acres"),
         ("irrigation", report.method or "not set on the field"),
         ("overall slope", f"{report.slope_pct:.2f}% toward the {report.downhill}"),
@@ -1457,10 +1459,25 @@ def _format_terrain(report) -> str:
 
 @cli.command("thermal")
 @click.argument("flight_id")
-@click.option("--thermal", "thermal_path", required=True,
+@click.option("--thermal", "thermal_path", default=None,
               type=click.Path(dir_okay=False, exists=True, path_type=Path),
               help="Radiometric thermal orthophoto (GeoTIFF), in Celsius, Kelvin or "
                    "hundredths of a Kelvin.")
+@click.option("--frames", "frames_dir", default=None,
+              type=click.Path(file_okay=False, exists=True, path_type=Path),
+              help="...or the folder of georeferenced thermal frames the camera wrote, "
+                   "which are stitched into that mosaic first.")
+@click.option("--leaves", "leaves_path", default=None,
+              type=click.Path(dir_okay=False, exists=True, path_type=Path),
+              help="Leaf share per cell, in place of a canopy height model  [default: "
+                   "leaves.tif beside the mosaic, when the frames were stitched here]")
+@click.option("--cell", type=float, default=mosaic_mod.DEFAULT_CELL_M, show_default=True,
+              help="Cell size of the stitched mosaic, metres.")
+@click.option("--trim", type=float, default=mosaic_mod.TRIM_EDGE, show_default=True,
+              help="Share of each thermal frame's edge to throw away before placing it.")
+@click.option("--leaf-colder", type=float, default=mosaic_mod.LEAF_COLDER_C, show_default=True,
+              help="How much cooler than the ground around it a pixel must be to be a leaf, "
+                   "when there is no canopy height model.")
 @click.option("--method", type=click.Choice(list(crowns.METHODS)), default="rows",
               show_default=True, help="Whose flags to cross-check the warm patches against.")
 @click.option("--water-days", type=int, default=None,
@@ -1471,11 +1488,19 @@ def _format_terrain(report) -> str:
               help="Robust standard deviations above the canopy median to count as warm.")
 @click.option("--min-patch", type=float, default=thermal_mod.MIN_PATCH_M2, show_default=True,
               help="Smallest warm patch worth reporting, square metres.")
+@click.option("--group-gap", type=float, default=thermal_mod.GROUP_GAP_M, show_default=True,
+              help="Warm canopy within this distance counts as one patch. Set it to about "
+                   "one plant spacing: the default suits an orchard, and a row crop mapped "
+                   "at centimetres wants far less.")
 @click.pass_obj
-def thermal_cmd(settings: Settings, flight_id: str, thermal_path: Path, method: str,
-                water_days: int | None, canopy_min: float, warm_z: float,
-                min_patch: float) -> None:
+def thermal_cmd(settings: Settings, flight_id: str, thermal_path: Path | None,
+                frames_dir: Path | None, leaves_path: Path | None, cell: float,
+                trim: float, leaf_colder: float, method: str, water_days: int | None,
+                canopy_min: float, warm_z: float, min_patch: float, group_gap: float) -> None:
     """Optional: find canopy running hot on a thermal mosaic and score it for pests.
+
+    Takes either a finished thermal orthophoto (--thermal) or the frames the
+    camera wrote (--frames), which are stitched here.
 
     Thermal cannot tell a bitten plant from a thirsty one on its own, so each
     warm patch is scored against the ground model, the colour camera's flags and
@@ -1486,12 +1511,10 @@ def thermal_cmd(settings: Settings, flight_id: str, thermal_path: Path, method: 
 
     out_dir = settings.flight_out(flight_id)
     settings.ensure_dirs(flight_id)
-    chm_path = out_dir / "chm.tif"
-    if not chm_path.exists():
+    if (thermal_path is None) == (frames_dir is None):
         raise click.ClickException(
-            f"no canopy model at {chm_path}. Run 'dosojos-drone chm {flight_id}' first: "
-            "without it there is no way to measure leaves only, and sunlit soil runs far "
-            "hotter than any crop."
+            "give either --thermal <mosaic.tif>, a finished radiometric orthophoto, or "
+            "--frames <folder>, the georeferenced frames the camera wrote. Not both."
         )
     flight = None
     try:
@@ -1500,11 +1523,43 @@ def thermal_cmd(settings: Settings, flight_id: str, thermal_path: Path, method: 
         pass
     field_id = flight.field_id if flight else None
 
+    scan = None
+    if frames_dir is not None:
+        try:
+            found = mosaic_mod.find_frames(frames_dir)
+            click.echo(f"Stitching {len(found)} thermal frames from {frames_dir}...")
+            scan, thermal_path, built = mosaic_mod.build(
+                found, out_dir, cell_m=cell, colder_c=leaf_colder, trim=trim)
+        except (mosaic_mod.MosaicError, thermal_mod.ThermalError) as exc:
+            raise click.ClickException(str(exc)) from exc
+        leaves_path = leaves_path or built
+        (out_dir / "scan.json").write_text(json.dumps(scan.to_dict(), indent=2), encoding="utf-8")
+        click.echo(_format_scan(scan))
+
+    chm_path = out_dir / "chm.tif"
+    if leaves_path is None and (out_dir / "leaves.tif").exists():
+        leaves_path = out_dir / "leaves.tif"
+    if not chm_path.exists() and leaves_path is None:
+        raise click.ClickException(
+            f"no canopy model at {chm_path}, and no leaf map either. Sunlit soil runs far "
+            f"hotter than any crop, so something has to say which pixels are leaves: run "
+            f"'dosojos-drone chm {flight_id}' when the same flight carried a colour camera, "
+            "or pass --frames so the leaves can be told from the thermal frames themselves."
+        )
+
     try:
         heat, unit = thermal_mod.load_thermal(thermal_path)
     except (chm_mod.ChmError, thermal_mod.ThermalError) as exc:
         raise click.ClickException(str(exc)) from exc
-    canopy = thermal_mod.align(chm_mod.load_surface(chm_path), heat)
+
+    # A canopy height model wins whenever the flight has one: it knows a leaf
+    # that has stopped cooling itself, and a mask made on temperature cannot.
+    leaves = None
+    if chm_path.exists():
+        canopy = thermal_mod.align(chm_mod.load_surface(chm_path), heat)
+    else:
+        canopy = thermal_mod.align(chm_mod.load_surface(leaves_path), heat)
+        leaves = thermal_mod.leaf_mask(heat.data, canopy)
 
     field = _field_settings(settings, field_id)
     outline = None
@@ -1517,6 +1572,7 @@ def thermal_cmd(settings: Settings, flight_id: str, thermal_path: Path, method: 
         patches, stats = thermal_mod.find_patches(
             heat.data, canopy, heat.transform, cell_m=cell_m, frame=frame,
             canopy_min_m=canopy_min, warm_z=warm_z, min_patch_m2=min_patch,
+            group_gap_m=group_gap, leaves=leaves,
         )
     except thermal_mod.ThermalError as exc:
         raise click.ClickException(str(exc)) from exc
@@ -1545,10 +1601,12 @@ def thermal_cmd(settings: Settings, flight_id: str, thermal_path: Path, method: 
     )
     report = thermal_mod.build_report(
         flight_id, field_id, unit=unit, cell_m=cell_m, patches=patches, stats=stats,
-        evidence=evidence,
-        notes=[] if flags_path.exists() else
-        [f"no flags_{method}.geojson, so nobody checked whether the colour camera sees "
-         "damage in these patches too; run 'flag' first for a better score."],
+        evidence=evidence, leaves_from="heat" if leaves is not None else "height",
+        scan=scan.to_dict() if scan is not None else None,
+        notes=(list(scan.notes) if scan is not None else []) +
+        ([] if flags_path.exists() else
+         [f"no flags_{method}.geojson, so nobody checked whether the colour camera sees "
+          "damage in these patches too; run 'flag' first for a better score."]),
     )
 
     json_path = out_dir / "thermal.json"
@@ -1559,9 +1617,11 @@ def thermal_cmd(settings: Settings, flight_id: str, thermal_path: Path, method: 
                          geometry=[p.geometry for p in patches],
                          crs=heat.crs).to_file(patches_path, driver="GeoJSON")
     # The figure shows leaves only, for the same reason the statistics do.
-    leaves = np.where(thermal_mod.canopy_mask(heat.data, canopy, canopy_min), heat.data, np.nan)
+    shown = np.where(leaves if leaves is not None
+                     else thermal_mod.canopy_mask(heat.data, canopy, canopy_min),
+                     heat.data, np.nan)
     map_path = viz.save_thermal_png(
-        leaves, patches, out_dir / "thermal.png", transform=heat.transform,
+        shown, patches, out_dir / "thermal.png", transform=heat.transform,
         title=f"{field_id or flight_id} - canopy temperature",
         subtitle=f"canopy median {report.canopy_median_c:.1f} C, "
                  f"{len(patches)} warm patch(es); the percentage is our own score, not a test",
@@ -1577,10 +1637,29 @@ def thermal_cmd(settings: Settings, flight_id: str, thermal_path: Path, method: 
             click.echo(f"  {path}")
 
 
+def _format_scan(scan) -> str:
+    """What stitching the frames came to, before anything is read off the map."""
+    rows = [
+        ("frames used", f"{scan.frames:,}" + (f" ({scan.frames_skipped} unreadable)"
+                                              if scan.frames_skipped else "")),
+        ("the scan took", f"{scan.minutes:g} minutes" if scan.minutes else "an unknown time"),
+        ("ground covered", f"{scan.ground_m2:,.0f} m2, {scan.leaf_m2:,.0f} m2 of it leaf"),
+        ("crop warmed", f"{scan.drift_c:.1f} C while it ran" if scan.drift_c is not None
+                        else "unknown: the frames carry no times"),
+        ("frames lined up", f"{scan.levelled_c:.1f} C for the middling frame, "
+                            f"{scan.levelled_worst_c:.1f} C for the worst"
+                            if scan.levelled_c is not None else "not needed"),
+    ]
+    width = max(len(label) for label, _ in rows)
+    return "\n".join(f"  {label:<{width}}  {value}" for label, value in rows)
+
+
 def _format_thermal(report) -> str:
     """The canopy's temperature, then every warm patch with the signs behind its score."""
     rows = [
         ("thermal read as", f"{report.unit}, {report.cell_m:g} m pixels"),
+        ("leaves told by", "how tall the canopy is" if report.leaves_from == "height"
+                           else "how much cooler than the ground they are"),
         ("canopy measured", f"{report.canopy_m2 / 4046.86:.1f} acres"),
         ("canopy temperature", f"{report.canopy_median_c:.1f} C, spread {report.canopy_spread_c:.1f} C"),
         ("running hot", f"{report.warm_share:.1%} of the canopy"),

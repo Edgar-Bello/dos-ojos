@@ -32,6 +32,7 @@ from rasterio.errors import WindowError
 from rasterio.windows import Window, from_bounds
 
 from .flags import structure_column
+from .terrain import GROUND_WORDS
 
 log = logging.getLogger(__name__)
 
@@ -505,7 +506,7 @@ def save_terrain_map(
     width = 125 if has_flags else 100
     lines = [(title, 19, INK, down(0.6)),
              (f"Ground {along}  -  {report.within_tolerance:.0%} within 3 cm of a smooth "
-              f"plane  -  from {report.ground_source}", 12, INK_SECONDARY, down(0.92))]
+              f"plane  -  from {GROUND_WORDS.get(report.ground_source, report.ground_source)}", 12, INK_SECONDARY, down(0.92))]
     top = report.advice[0] if report.advice else None
     if top is not None:
         wrapped = textwrap.fill(f"{top.finding} {top.advice}", width, max_lines=2,

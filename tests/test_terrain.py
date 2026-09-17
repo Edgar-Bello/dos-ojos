@@ -217,6 +217,9 @@ def test_the_cropped_area_leaves_out_borders() -> None:
     (None, "photogrammetry"),
     ({"products": [{"name": "dtm", "how": "p5 of all points per 0.5 m cell"}]}, "lidar"),
     ({"products": [{"name": "dtm", "how": "copied unchanged"}]}, "imported"),
+    # The government's own survey, which nobody flew for us, is told apart from
+    # a point cloud the flight brought with it: the page says so to the grower.
+    ({"lidar": True, "products": [{"name": "dtm", "how": "p5 of all points"}]}, "3dep"),
 ])
 def test_where_the_ground_model_came_from(tmp_path: Path, payload, expected) -> None:
     if payload is not None:

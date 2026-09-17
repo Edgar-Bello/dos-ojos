@@ -496,6 +496,7 @@ dosojos-drone flag    f1 --method rows
 dosojos-drone report  f1 --method rows
 dosojos-drone terrain f1                      # is the ground level; does the stress follow it?
 dosojos-drone thermal f1 --thermal t.tif      # optional: warm patches, scored for pests
+dosojos-drone thermal f1 --frames raw/f1      # ...or stitch the camera's own frames first
 dosojos-drone join                            # merge with the satellite ranking and water
 ```
 
@@ -672,6 +673,42 @@ so every statistic and the figure itself are taken over canopy above 0.3 m from
 the CHM. Measured on temperature alone, a row crop's furrows would be every
 "patch" on the field.
 
+### A thermal camera flown on its own (`--frames`)
+
+A thermal camera does not write a map; it writes thousands of small pictures,
+each already carrying its own corner coordinates. Give the folder instead of a
+mosaic and they are stitched here, with no canopy model and no colour photos:
+
+```bash
+dosojos-drone thermal f1 --frames data/raw/f1 --group-gap 1.5 --min-patch 8
+```
+
+It writes `thermal.tif` (canopy temperature), `leaves.tif` (how much of each cell
+was leaf) and `scan.json` beside the usual outputs. Four things happen on the way,
+each of which would otherwise read as crop stress — `src/mosaic.py` has the
+reasoning and the measurements behind every setting:
+
+- **Leaves, by contrast.** With no canopy height model, a leaf is a pixel at
+  least 3 °C cooler than the ground immediately around it. Shade is 1 to 2 °C
+  cooler; a drinking leaf is 4 to 12 °C cooler. **The cost:** a plant so far gone
+  that it no longer cools itself reads as soil and is left out — the one plant
+  worth finding. The report says so on its face, and a CHM wins whenever a flight
+  has one.
+- **The camera's own uneven view.** A lens falls off at the rim, and whatever
+  carries the camera throws a bar of shade that sits still in the picture and
+  creeps across it as the sun climbs — worth up to 2.5 °C. Measured from the scan
+  itself in five-minute slices and taken out.
+- **The sun climbing.** A scan takes minutes from a drone and hours from a
+  gantry. Every frame is lined up with the frames it overlaps, and the set is
+  held to the warming trend read from the scan. **The cost:** a hot stretch wider
+  than the camera's own view is levelled away with it, so a whole field running
+  hot has to come from the checkbook.
+- **Scale.** At centimetre pixels a single leaf is not a thing anybody acts on,
+  so temperature is averaged over half a metre before patches are traced, and a
+  cell must be at least 30% leaf to be a canopy temperature at all. Thin canopy
+  genuinely runs hot: the bare alleys of a research field came out as the hottest
+  "patches" on it before that rule existed.
+
 **Whatever the camera wrote.** Celsius, Kelvin, and the hundredths of a Kelvin
 FLIR-derived cameras store in a 16-bit integer, told apart by where the numbers
 sit. A picture that only *looks* like heat — a grey or orange JPEG off a
@@ -731,10 +768,17 @@ everywhere, or the flight had weather in it, and not to read the patches hard.
 
 ### Seeing it work
 
-`../public_demo/thermal-synthetic/` runs it end to end on a **generated** mosaic
-— no camera took those pictures, and every figure from it carries a SYNTHETIC
-band. It plants one 30 m warm patch and checks the step finds that one and
-nothing else. Replace it the day a real radiometric camera can be borrowed.
+`../public_demo/terraref-sorghum-2018/` runs it end to end on **real** thermal
+imagery of sorghum: 2,719 frames from the TERRA-REF field scanner at Maricopa,
+Arizona, 84 minutes of it on 20 May 2018, public domain. Half an acre, 2.7 mm
+pixels, 30 days after sowing. Its SOURCE.md has what the scan came to, and why a
+warm patch in a field of hundreds of varieties is as likely to be a different
+variety as a sick plant.
+
+`../public_demo/thermal-synthetic/` is still there as a test pattern with a known
+answer: a **generated** mosaic with one 30 m warm patch planted in it, to check
+the step finds that one and nothing else. No camera took those pictures, and
+every figure from it carries a SYNTHETIC band.
 
 ## Real data: a USDA citrus grove, scored against a tape measure
 
@@ -946,6 +990,7 @@ src/
   flags.py            classification, planting grid, missing plants, gaps
   terrain.py          ground grade and evenness, spots, stress links, irrigation advice
   thermal.py          optional: canopy temperature, warm patches, the pest scorecard
+  mosaic.py           optional: thousands of thermal frames into one map
   report.py           flag overlay, histogram, terrain map, block summary, satellite join
   odm_runner.py       docker invocation, staging, verification, diagnosis
   lidar.py            public USGS 3DEP lidar under a field, in place of a flight

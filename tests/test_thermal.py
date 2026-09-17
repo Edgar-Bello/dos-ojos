@@ -256,3 +256,56 @@ def test_the_command_refuses_a_flight_with_no_canopy_model(tmp_path: Path):
                                       "F001-20250520", "--thermal", str(heat_path)])
     assert result.exit_code != 0
     assert "chm" in result.output
+    assert "--frames" in result.output          # ...and says the other way out
+
+
+# --------------------------------------------------------------------------- #
+# Leaves without a canopy model, for a thermal camera flown on its own
+# --------------------------------------------------------------------------- #
+
+
+def test_a_leaf_map_stands_in_for_a_canopy_model():
+    """A cell mostly full of leaf is canopy; a cell with a stray leaf in it is not."""
+    heat = _field()
+    share = np.full((SIZE, SIZE), 0.6)
+    share[:20] = 0.05                             # thin: stragglers in a bare alley
+    mask = thermal.leaf_mask(heat, share)
+    assert mask[30:].all() and not mask[:20].any()
+
+
+def test_thin_canopy_is_left_out_rather_than_called_hot():
+    """The alleys of a research field read hot and are not a crop temperature."""
+    heat = _field()
+    heat[:20] += 6.0                              # bare alley with a few hot stragglers
+    share = np.full((SIZE, SIZE), 0.6)
+    share[:20] = 0.05
+    patches, stats = _find(heat, _canopy(), leaves=thermal.leaf_mask(heat, share))
+    assert not patches
+    assert stats["canopy_median_c"] == pytest.approx(28.0, abs=0.3)
+
+
+def test_one_leaf_is_not_a_patch_but_half_a_metre_of_them_is():
+    """At centimetre cells a single hot leaf is noise; the step works at walking scale."""
+    rng = np.random.default_rng(7)
+    speckle = _field(noise_c=0.2)
+    speckle[rng.random(speckle.shape) < 0.02] += 8.0      # hot single cells everywhere
+    patches, _ = _find(speckle, _canopy(), patch_scale_m=2.0)
+    assert not patches
+
+
+def test_the_command_can_be_told_leaves_instead_of_heights(tmp_path: Path):
+    workspace = tmp_path / "workspace"
+    out_dir = workspace / "out" / "F001-20250520"
+    heat_path = _write(tmp_path / "thermal.tif", _field(hot_c=3.5))
+    leaves_path = _write(tmp_path / "leaves.tif", np.full((SIZE, SIZE), 0.6))
+
+    result = CliRunner().invoke(cli, ["--workspace", str(workspace), "thermal",
+                                      "F001-20250520", "--thermal", str(heat_path),
+                                      "--leaves", str(leaves_path)])
+    assert result.exit_code == 0, result.output
+    payload = json.loads((out_dir / "thermal.json").read_text(encoding="utf-8"))
+    assert payload["leaves_from"] == "heat"
+    assert len(payload["patches"]) == 1
+    # ...and the page and the print-out both say the weaker way was used.
+    assert "how much cooler than the ground" in result.output
+    assert any("no colour camera" in note for note in payload["notes"])
