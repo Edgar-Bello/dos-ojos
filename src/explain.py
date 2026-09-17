@@ -20,11 +20,13 @@ from __future__ import annotations
 
 import base64
 import html
+import json
 import logging
 from datetime import date
 from pathlib import Path
 
 from dosojos_sat import charts as sat_charts
+from dosojos_sat import stages as sat_stages
 from dosojos_sat import water as sat_water
 
 from . import text
@@ -52,6 +54,88 @@ S = {
         "The USDA soil map says {field} is {soil}. Under the crop the roots reach about "
         "{root} inches down today, and that layer holds {capacity} inches of usable water. "
         "The crop starts to suffer before it runs out: below {stress} inches left."),
+    "reason_planted": ("la siembra", "the planting"),
+    "reason_irrigated": ("el primer riego que tenemos anotado", "the first watering on record"),
+    "reason_assumed": ("no hay siembra ni riego anotado, así que supusimos el suelo lleno",
+                       "no planting or watering on record, so we assumed the soil was full"),
+    "sorghum": ("La etapa del sorgo", "Where the sorghum is"),
+    "sorghum_body": (
+        "{field} va en {stage}: día {day} desde la siembra, con {gdu} grados-día de calor "
+        "acumulados. El sorgo avanza con el calor, no con el calendario: uno sembrado en un "
+        "febrero fresco va más atrasado, a los mismos días, que uno sembrado en abril. Sumamos "
+        "el calor de cada día con las temperaturas del gobierno (gridMET), como enseña Texas "
+        "A&M AgriLife.",
+        "{field} is at {stage}: day {day} after planting, with {gdu} heat units so far. "
+        "Sorghum moves with heat, not the calendar: one planted in a cool February is behind, "
+        "at the same day count, one planted in April. We add up each day's heat from "
+        "government temperatures (gridMET), the way Texas A&M AgriLife teaches."),
+    "sorghum_maturity": ("Lo calculamos como {maturity}, que es lo que usted nos dijo.",
+                         "Worked out as {maturity}, as you told us."),
+    "sorghum_maturity_assumed": (
+        "No sabemos el ciclo del híbrido, así que lo calculamos como ciclo mediano. Uno de ciclo "
+        "corto va unas semanas adelante y uno largo unas semanas atrás; si lo sabe, mande CICLO.",
+        "We don't know the hybrid's maturity, so it's worked out as medium season. A short "
+        "season hybrid runs weeks ahead and a long one weeks behind; if you know it, text "
+        "MATURITY."),
+    "sorghum_critical": (
+        "De inicio de panoja a floración cada panoja decide cuántos granos va a llenar, y de "
+        "eso sale el 70% de la cosecha. Es cuando menos le puede faltar agua o sobrarle plaga.",
+        "From panicle initiation to flowering each head decides how many grains it will fill, "
+        "and that is 70% of the yield. It's when it can least afford to run short of water or "
+        "long on pests."),
+    "sorghum_no_chart": ("Todavía no hay suficientes temperaturas para dibujar la etapa.",
+                         "There aren't enough temperatures yet to draw the stage."),
+    "stage_col": ("Etapa", "Stage"),
+    "date_col": ("Fecha", "Date"),
+    "watch_col": ("Qué revisar", "What to check"),
+    "reached": ("ya llegó", "reached"),
+    "expected": ("se espera", "expected"),
+    "chart_stage_title": ("{field}: calor acumulado desde la siembra",
+                          "{field}: heat since planting"),
+    "chart_stage_sub": ("sorgo de grano, {maturity}; grados-día (F, base 50), Texas A&M B-6137",
+                        "grain sorghum, {maturity}; growing degree units (F, base 50), "
+                        "Texas A&M B-6137"),
+    "chart_today": ("hoy", "today"),
+    "chart_critical": ("aquí se decide la cosecha", "this sets the yield"),
+    "chart_projected": ("si sigue el calor de estas dos semanas",
+                        "if the heat stays like the last two weeks"),
+    "chart_axis": ("grados-día acumulados", "heat units so far"),
+    "pests": ("Plagas del sorgo: cuándo revisar", "Sorghum pests: when to check"),
+    "pest_aphid": (
+        "Pulgón amarillo: revise cada semana desde que nace, y dos veces por semana cuando ya "
+        "encontró. Vea 4 partes del campo y 20 plantas en cada una, una hoja de abajo y una de "
+        "arriba; lo primero que se nota es la mielecilla brillosa en las hojas bajas. Se trata "
+        "cuando hay colonias con mielecilla en el 20% de las plantas antes del panojeo, o en el "
+        "30% de panojeo a grano duro. Ya maduro, sólo si la mielecilla va a atascar la "
+        "cosechadora.",
+        "Sugarcane aphid: scout weekly from emergence, twice a week once you've found it. Check "
+        "4 spots and 20 plants in each, one lower and one upper leaf; shiny honeydew on the "
+        "lower leaves is usually the first sign. Treat when colonies with honeydew are on 20% of "
+        "plants before heading, or 30% from heading to hard dough. Once mature, only if honeydew "
+        "would gum up the combine."),
+    "pest_midge": (
+        "Mosquita del sorgo: mientras florea, revise cada 3 días entre las 10 y las 2. Busque "
+        "una mosca chiquita anaranjada en las flores amarillas. El umbral es 1 por panoja.",
+        "Sorghum midge: while it flowers, check every 3 days between 10 and 2. Look for a tiny "
+        "orange fly on the yellow flowers. The threshold is 1 per head."),
+    "pest_heads": (
+        "Gusano de la panoja y chinche: vigílelos de la floración al grano duro.",
+        "Headworms and stink bugs: watch for them from flowering to hard dough."),
+    "pest_advice": (
+        "Estos umbrales son guías generales de Texas A&M AgriLife y del Sorghum Checkoff. Un "
+        "híbrido tolerante al pulgón aguanta más. Antes de aplicar, confirme con su técnico o "
+        "con AgriLife en Weslaco, y lea la etiqueta.",
+        "These thresholds are general guides from Texas A&M AgriLife and the Sorghum Checkoff. "
+        "An aphid-tolerant hybrid holds out longer. Before spraying, check with your crop "
+        "advisor or AgriLife in Weslaco, and read the label."),
+    "counts": ("Sus conteos de pulgón", "Your aphid counts"),
+    "counts_empty": ("Todavía no ha mandado conteos. Mande PULGON para anotar uno.",
+                     "No counts yet. Text APHID to log one."),
+    "verdict_above": ("pasó el umbral", "past the threshold"),
+    "verdict_near": ("cerca del umbral", "close to the threshold"),
+    "verdict_below": ("abajo del umbral", "below the threshold"),
+    "verdict_harvest": ("maduro: sólo por la cosecha", "mature: harvest only"),
+    "verdict_none": ("sin etapa", "no stage"),
     "step_in": ("2. Lo que entró", "2. What went in"),
     "step_in_body": (
         "Contamos desde {start} ({start_reason}). Desde entonces entraron {irrigation} "
@@ -254,6 +338,24 @@ SOURCES = [
     ("USGS 3DEP", ("láser aéreo para el terreno", "airborne laser for the ground")),
 ]
 
+
+#: What a farmer checks for at each stage, in their words.
+WATCH_WORDS = {
+    "sugarcane_aphid": ("pulgón amarillo", "sugarcane aphid"),
+    "midge": ("mosquita", "midge"),
+    "headworm": ("gusano de la panoja", "headworms"),
+    "harvest": ("preparar la cosecha", "plan the harvest"),
+}
+
+SORGHUM_SOURCES = [
+    ("Texas A&M AgriLife B-6137",
+     ("etapas del sorgo por calor acumulado", "sorghum stages from accumulated heat")),
+    ("Sorghum Checkoff, Sugarcane Aphid (2021)",
+     ("umbrales de pulgón amarillo por etapa", "sugarcane aphid thresholds by stage")),
+    ("AgriLife PestCast, Weslaco",
+     ("mosquita y pulgón en el Valle", "midge and aphid in the Valley")),
+]
+
 STYLE = """
 :root { color-scheme: light; }
 * { box-sizing: border-box; }
@@ -270,6 +372,7 @@ p { margin: 10px 0; }
 .answer { background: #fff; border-left: 6px solid #199e70; border-radius: 10px;
           padding: 18px 20px; font-size: 20px; font-weight: 600; margin: 18px 0; }
 .answer.now { border-left-color: #d03b3b; }
+tr.now td { background: #eef3ea; font-weight: 600; }
 figure { margin: 14px 0; }
 img { max-width: 100%; height: auto; border-radius: 10px; background: #fff; display: block; }
 table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 16px; }
@@ -368,6 +471,108 @@ def draw_charts(item: FieldWater, out_dir: Path, *, banner: str | None = None) -
     return images
 
 
+
+
+def _start_reason(status, lang: str) -> str:
+    """Why the checkbook starts where it does, in the farmer's language.
+
+    The checkbook names it in English for the team ("planted 2025-02-21"); the page
+    already gives the date, so it only needs the kind of start.
+    """
+    reason = status.start_reason or ""
+    key = ("reason_planted" if reason.startswith("planted") else
+           "reason_irrigated" if reason.startswith("first irrigation") else "reason_assumed")
+    return _(key, lang)
+
+
+def draw_stage_chart(item: FieldWater, out_dir: Path, lang: str, *,
+                     banner: str | None = None) -> str | None:
+    """The sorghum heat chart as a data URI, or None when there is nothing to draw."""
+    status = item.status
+    if status is None or not status.stage or item.heat is None:
+        return None
+    stage = status.stage
+    names = {key: text.pick(pair, lang) for key, pair in text.SORGHUM_STAGES.items()}
+    maturity = text.pick(text.MATURITIES[stage["maturity"]], lang)
+    try:
+        path = sat_charts.plot_sorghum_stages(
+            stage=stage, heat=item.heat, out_path=Path(out_dir) / f"stage_{lang}.png",
+            names=names, title=_("chart_stage_title", lang, field=item.field.name),
+            subtitle=_("chart_stage_sub", lang, maturity=maturity),
+            today_label=_("chart_today", lang), critical_label=_("chart_critical", lang),
+            projected_label=_("chart_projected", lang), axis_label=_("chart_axis", lang),
+            banner=banner,
+        )
+    except Exception:            # a chart is never worth failing the page over
+        log.exception("could not draw the stage chart for %s", item.field.id)
+        return None
+    return _inline(path)
+
+
+def _sorghum(item: FieldWater, events: list[Event], image: str | None, lang: str,
+             today: date) -> list[str]:
+    """Where a sorghum field is, what comes next, what to check, and the counts sent in."""
+    status = item.status
+    if status is None or not status.stage:
+        return []
+    stage = status.stage
+    name = lambda key: text.pick(text.SORGHUM_STAGES[key], lang)  # noqa: E731
+    parts = [f"<h2>{_esc(_('sorghum', lang))}</h2>",
+             f"<p>{_esc(_('sorghum_body', lang, field=item.field.name, stage=name(stage['stage']), day=stage['days_after_planting'], gdu=stage['gdu']))}</p>"]
+    if stage["maturity_assumed"]:
+        parts.append(f"<p>{_esc(_('sorghum_maturity_assumed', lang))}</p>")
+    else:
+        maturity = text.pick(text.MATURITIES[stage["maturity"]], lang)
+        parts.append(f"<p>{_esc(_('sorghum_maturity', lang, maturity=maturity))}</p>")
+    parts.append(f"<p>{_esc(_('sorghum_critical', lang))}</p>")
+    parts.append(f'<figure><img src="{image}" alt=""></figure>' if image else
+                 f'<p class="note">{_esc(_("sorghum_no_chart", lang))}</p>')
+
+    rows = []
+    shown = ("emergence", "five_leaf", "panicle_initiation", "boot", "heading", "flowering",
+             "soft_dough", "hard_dough", "black_layer")
+    for milestone in stage["milestones"]:
+        key = milestone["stage"]
+        if key not in shown or not milestone["date"]:
+            continue
+        day = date.fromisoformat(milestone["date"])
+        when = _("reached", lang) if milestone["gdu"] <= stage["gdu"] else _("expected", lang)
+        watch = ", ".join(text.pick(WATCH_WORDS[w], lang) for w in sat_stages.watch_for(key))
+        current = ' class="now"' if key == stage["stage"] else ""
+        rows.append(f"<tr{current}><td>{_esc(name(key))}</td>"
+                    f"<td>{_esc(when)} {_esc(text.day(day, lang, today))}</td>"
+                    f"<td>{_esc(watch)}</td></tr>")
+    parts.append(f"<table><tr><th>{_esc(_('stage_col', lang))}</th>"
+                 f"<th>{_esc(_('date_col', lang))}</th><th>{_esc(_('watch_col', lang))}</th></tr>"
+                 + "".join(rows) + "</table>")
+
+    parts.append(f"<h2>{_esc(_('pests', lang))}</h2>")
+    for key in ("pest_aphid", "pest_midge", "pest_heads", "pest_advice"):
+        parts.append(f"<p>{_esc(_(key, lang))}</p>")
+
+    parts.append(f"<h2>{_esc(_('counts', lang))}</h2>")
+    counts = [e for e in events if e.kind == "scouting" and e.voided_at is None]
+    if not counts:
+        parts.append(f"<p>{_esc(_('counts_empty', lang))}</p>")
+        return parts
+    rows = []
+    for event in sorted(counts, key=lambda e: e.day, reverse=True)[:12]:
+        try:
+            note = json.loads(event.note or "{}")
+        except ValueError:
+            note = {}
+        seen = (f"{note['infested']} / {note['checked']}"
+                if note.get("infested") is not None and note.get("checked") else "")
+        verdict = _("verdict_" + note.get("verdict", "none"), lang)
+        threshold = f" ({note['threshold']}%)" if note.get("threshold") else ""
+        rows.append(f"<tr><td>{_esc(text.day(event.day, lang, today))}</td>"
+                    f"<td class='n'>{_esc(round(note.get('percent', 0)))}%</td>"
+                    f"<td class='n'>{_esc(seen)}</td>"
+                    f"<td>{_esc(verdict + threshold)}</td></tr>")
+    parts.append("<table>" + "".join(rows) + "</table>")
+    return parts
+
+
 def _drone_image(settings: Settings, report: dict | None, name: str) -> str | None:
     """A figure the drone half wrote beside its report, as a data URI."""
     if not report or not report.get("flight_id"):
@@ -404,11 +609,14 @@ def build(settings: Settings, farmer: Farmer, item: FieldWater, events: list[Eve
     parts += _answer(item, lang, today)
     parts += _arithmetic(item, events, lang)
     parts += _charts(item, images, lang)
+    stage_image = draw_stage_chart(item, settings.sms_dir / "explain" / record.id, lang,
+                                   banner=settings.banner)
+    parts += _sorghum(item, events, stage_image, lang, today)
     parts += _log(events, lang, today)
     parts += _ground(settings, record, terrain, lang)
     parts += _flight(settings, thermal or terrain, lang)
     parts += _thermal(settings, thermal, lang)
-    parts += _sources(lang)
+    parts += _sources(lang, sorghum=bool(status is not None and status.stage))
 
     parts.append(f"<footer>{_esc(_('footer', lang))}</footer>")
     parts.append("</main>")
@@ -455,7 +663,7 @@ def _arithmetic(item: FieldWater, events: list[Event], lang: str) -> list[str]:
             # stays out of the sum and shows in the table of dates below.
             went_in[event.kind] += event.inches or 0.0
     step("step_in", "step_in_body", start=text.day(start, lang),
-         start_reason=s.start_reason, irrigation=_inches(went_in["irrigated"]),
+         start_reason=_start_reason(s, lang), irrigation=_inches(went_in["irrigated"]),
          rain=_inches(went_in["rain"]))
 
     step("step_out", "step_out_body", eto=_inches(s.eto_in_day, 2),
@@ -604,8 +812,9 @@ def _signs(patch: dict, lang: str) -> list[str]:
     return lines
 
 
-def _sources(lang: str) -> list[str]:
+def _sources(lang: str, *, sorghum: bool = False) -> list[str]:
+    listed = SOURCES + (SORGHUM_SOURCES if sorghum else [])
     rows = "".join(f"<tr><td>{_esc(name)}</td><td>{_esc(text.pick(what, lang))}</td></tr>"
-                   for name, what in SOURCES)
+                   for name, what in listed)
     return [f"<h2>{_esc(_('sources', lang))}</h2>", f"<table>{rows}</table>",
             f"<h2>{_esc(_('limits', lang))}</h2>", f"<p>{_esc(_('limits_body', lang))}</p>"]

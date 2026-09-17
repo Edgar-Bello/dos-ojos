@@ -114,6 +114,30 @@ STAGES: dict[str, tuple[str, str]] = {
     "citrus": ("floración y amarre", "bloom and fruit set"),
 }
 
+#: Grain sorghum growth stages as a Valley grower says them, from the heat-unit
+#: model in dosojos_sat.stages (Texas A&M AgriLife B-6137).
+SORGHUM_STAGES: dict[str, tuple[str, str]] = {
+    "planted": ("sembrado, sin nacer", "planted, not up yet"),
+    "emergence": ("recién nacido", "just emerged"),
+    "three_leaf": ("3 hojas", "three-leaf"),
+    "four_leaf": ("4 hojas", "four-leaf"),
+    "five_leaf": ("5 hojas", "five-leaf"),
+    "panicle_initiation": ("inicio de panoja", "panicle initiation"),
+    "flag_leaf": ("hoja bandera", "flag leaf"),
+    "boot": ("embuche", "boot"),
+    "heading": ("panojeo", "heading"),
+    "flowering": ("floración", "flowering"),
+    "soft_dough": ("grano masoso", "soft dough"),
+    "hard_dough": ("grano duro", "hard dough"),
+    "black_layer": ("madurez (capa negra)", "black layer, mature"),
+}
+
+MATURITIES: dict[str, tuple[str, str]] = {
+    "short": ("ciclo corto", "short season"),
+    "medium": ("ciclo mediano", "medium season"),
+    "long": ("ciclo largo", "long season"),
+}
+
 #: Where the drone's terrain step places a spot, in words, with the word before it
 #: ("on the west side" but "in the middle").
 PLACES: dict[str, tuple[str, str]] = {
@@ -138,6 +162,7 @@ MISSING: dict[str, tuple[str, str]] = {
     "method": ("tipo de riego", "how it's watered"),
     "side": ("lado del agua", "water side"),
     "last_irrigation": ("último riego", "last watering"),
+    "maturity": ("ciclo del sorgo", "sorghum maturity"),
 }
 
 _DAYS = {"es": ("lun", "mar", "mié", "jue", "vie", "sáb", "dom"),
@@ -392,13 +417,14 @@ T: dict[str, tuple[str, str]] = {
                    "Thanks. By our numbers {field} needs water now; water it as soon as you "
                    "can."),
     "help": ("Dos Ojos. Mande: AGUA (cómo van), PORQUE (archivo con gráficas), REGUE fecha "
-             "pulgadas, LLUVIA pulgadas, SEMBRE, COSECHA, DRON (fotos del dron), PLAN (qué "
-             "usa), CAMPOS, NUEVO (otro campo), MAPA, BORRAR (quitar lo último), ALTO (no "
-             "recibir más).{contact}",
+             "pulgadas, LLUVIA pulgadas, SEMBRE, COSECHA, ETAPA (cómo va el sorgo), PULGON "
+             "(anotar pulgón amarillo), DRON (fotos del dron), PLAN (qué usa), CAMPOS, NUEVO "
+             "(otro campo), MAPA, BORRAR (quitar lo último), ALTO (no recibir más).{contact}",
              "Dos Ojos. Text: WATER (how they're doing), WHY (file with the charts), WATERED "
-             "date inches, RAIN inches, PLANTED, HARVESTED, DRONE (drone photos), PLAN (what "
-             "you use), FIELDS, NEW (another field), MAP, UNDO (remove the last entry), STOP "
-             "(no more texts).{contact}"),
+             "date inches, RAIN inches, PLANTED, HARVESTED, STAGE (how the sorghum is doing), "
+             "APHID (log sugarcane aphid), DRONE (drone photos), PLAN (what you use), FIELDS, "
+             "NEW (another field), MAP, UNDO (remove the last entry), STOP (no more "
+             "texts).{contact}"),
     "contact": (" Dudas: {contact}", " Questions: {contact}"),
     "not_understood": ("No entendí; se lo pasé al equipo. Mande AYUDA para ver las opciones.",
                        "I didn't get that; I passed it to the team. Text HELP for the options."),
@@ -543,6 +569,89 @@ T: dict[str, tuple[str, str]] = {
                     "({area} m2). Go and look; the camera can't name it."),
     "pest_more": (" Hay {n} manchas más; vienen en el archivo de PORQUE.",
                   " There are {n} more patches; they're in the WHY file."),
+    # --- sorghum -------------------------------------------------------------------
+    "maturity": ("¿El sorgo de {field} es de ciclo corto, mediano o largo? Lo dice la bolsa de "
+                 "la semilla. 1 Corto (temprano) 2 Mediano 3 Largo (tardío) 4 No sé",
+                 "Is the sorghum in {field} a short, medium or long season hybrid? The seed "
+                 "bag says. 1 Short (early) 2 Medium 3 Long (late) 4 Not sure"),
+    "maturity_saved": ("Anotado: {field} es de {maturity}.", "Saved: {field} is {maturity}."),
+    "maturity_unknown": ("Está bien: lo calculo como ciclo mediano. Si lo averigua, mande CICLO.",
+                         "That's fine: I'll work it out as medium season. If you find out, "
+                         "text MATURITY."),
+    "sorghum_none": ("Esto es para sorgo, y no tiene campos de sorgo registrados. Para agregar "
+                     "uno: NUEVO.",
+                     "This is for sorghum, and you have no sorghum fields. To add one: NEW."),
+    "pick_sorghum": ("¿Cuál campo de sorgo? {options}", "Which sorghum field? {options}"),
+    "stage_report": ("{field}: va en {stage}, día {day} desde la siembra.{rest}",
+                     "{field}: at {stage}, day {day} after planting.{rest}"),
+    "stage_next": (" Sigue {stage} hacia el {date}.", " Next: {stage} around {date}."),
+    "stage_critical": (" Esta etapa decide la cosecha.", " This stretch sets the yield."),
+    "stage_assumed": (" (Lo calculé como ciclo mediano; mande CICLO para cambiarlo.)",
+                      " (Worked out as medium season; text MATURITY to change it.)"),
+    "watch_midge": (" Revise mosquita cada 3 días, de 10 a 2: el umbral es 1 por panoja.",
+                    " Check for midge every 3 days, 10 to 2: the threshold is 1 per head."),
+    "watch_aphid": (" Revise pulgón amarillo cada semana y mande PULGON.",
+                    " Scout for sugarcane aphid weekly and text APHID."),
+    "watch_headworm": (" Vea también gusano de la panoja.", " Look for headworms too."),
+    "watch_harvest": (" Se acerca la cosecha.", " Harvest is coming."),
+    "stage_no_planting": ("{field}: para calcular la etapa necesito la fecha de siembra. Mande "
+                          "SEMBRE y la fecha.",
+                          "{field}: to work out the stage I need the planting date. Text "
+                          "PLANTED and the date."),
+    "stage_no_weather": ("{field}: todavía no tengo las temperaturas para calcular la etapa; "
+                         "le aviso pronto.",
+                         "{field}: I don't have the temperatures to work out the stage yet; "
+                         "I'll let you know soon."),
+    "status_sorghum_stage": (" Va en {stage} (día {day}).", " At {stage} (day {day})."),
+    "aphid_howto": ("Pulgón amarillo en {field} ({stage}): revise 4 partes del campo, 20 "
+                    "plantas en cada una, una hoja de abajo y una de arriba. El umbral ahora es "
+                    "{threshold}% de plantas con colonias y mielecilla. Mande cuántas tenían, "
+                    "ej. 12 de 80.",
+                    "Sugarcane aphid in {field} ({stage}): check 4 spots in the field, 20 plants "
+                    "in each, one lower and one upper leaf. The threshold now is {threshold}% of "
+                    "plants with colonies and honeydew. Send how many had them, e.g. 12 of 80."),
+    "aphid_howto_mature": ("{field} ya está maduro: el pulgón amarillo sólo se trata si la "
+                           "mielecilla va a atascar la cosechadora. Si quiere anotarlo, mande "
+                           "cuántas plantas tenían, ej. 12 de 80.",
+                           "{field} is mature: sugarcane aphid is only treated if honeydew would "
+                           "gum up the combine. To log it anyway, send how many plants had them, "
+                           "e.g. 12 of 80."),
+    "aphid_howto_nostage": ("Pulgón amarillo en {field}: revise 4 partes del campo, 20 plantas "
+                            "en cada una, una hoja de abajo y una de arriba. Mande cuántas "
+                            "tenían, ej. 12 de 80.",
+                            "Sugarcane aphid in {field}: check 4 spots in the field, 20 plants "
+                            "in each, one lower and one upper leaf. Send how many had them, "
+                            "e.g. 12 of 80."),
+    "aphid_above": ("{field}: {pct}% de plantas con pulgón. En {stage} el umbral es "
+                    "{threshold}%, y ya lo pasó. Hable hoy con su técnico o con AgriLife sobre "
+                    "aplicar: cada día cuenta.",
+                    "{field}: {pct}% of plants with aphids. At {stage} the threshold is "
+                    "{threshold}%, and it's past it. Talk to your crop advisor or AgriLife "
+                    "today about spraying: every day counts."),
+    "aphid_near": ("{field}: {pct}% de plantas con pulgón, cerca del umbral de {threshold}% en "
+                   "{stage}. Revise otra vez en 3 o 4 días.",
+                   "{field}: {pct}% of plants with aphids, close to the {threshold}% threshold "
+                   "at {stage}. Check again in 3 or 4 days."),
+    "aphid_below": ("{field}: {pct}% de plantas con pulgón, abajo del umbral de {threshold}% en "
+                    "{stage}. Revise cada semana; si ya hay pulgón, dos veces por semana.",
+                    "{field}: {pct}% of plants with aphids, below the {threshold}% threshold at "
+                    "{stage}. Check weekly; twice a week once aphids are there."),
+    "aphid_none": ("{field}: sin pulgón esta vez. Revise otra vez en una semana.",
+                   "{field}: no aphids this time. Check again in a week."),
+    "aphid_harvest": ("{field}: {pct}% con pulgón, pero ya está maduro: sólo se trata si la "
+                      "mielecilla va a atascar la cosechadora. Pregunte a su técnico.",
+                      "{field}: {pct}% with aphids, but it's mature: only treat if honeydew "
+                      "would gum up the combine. Ask your crop advisor."),
+    "aphid_saved_nostage": ("{field}: anoté {pct}% de plantas con pulgón. Para decirle si pasó "
+                            "el umbral necesito la fecha de siembra: mande SEMBRE y la fecha.",
+                            "{field}: saved {pct}% of plants with aphids. To tell you if it's "
+                            "past the threshold I need the planting date: text PLANTED and the "
+                            "date."),
+    "aphid_count_again": ("No entendí la cuenta. Mande cuántas plantas tenían pulgón de cuántas "
+                          "revisó (ej. 12 de 80) o el porcentaje (ej. 15%). Si no encontró: 0.",
+                          "I didn't get the count. Send how many plants had aphids out of how "
+                          "many you checked (e.g. 12 of 80) or the percent (e.g. 15%). If none: "
+                          "0."),
     # --- texts nobody asked for -------------------------------------------------
     "alert_now": ("Aviso Dos Ojos: {field} necesita agua ya. Ponga unas {gross} pulgadas por "
                   "{method}. Si ya regó, mande REGUE y la fecha.",
@@ -560,6 +669,12 @@ T: dict[str, tuple[str, str]] = {
                        "Dos Ojos: to work out {field}'s water we need one more thing. "),
     "remind_map": ("Dos Ojos: falta marcar el mapa de {field}: {link}",
                    "Dos Ojos: {field}'s map still needs its corners: {link}"),
+    "alert_scout": ("Dos Ojos: {field} va en {stage}. Esta semana revise pulgón amarillo{midge} "
+                    "y mande PULGON con lo que encuentre.",
+                    "Dos Ojos: {field} is at {stage}. This week scout for sugarcane aphid"
+                    "{midge} and text APHID with what you find."),
+    "alert_scout_midge": (" y mosquita (el umbral es 1 por panoja)",
+                          " and midge (the threshold is 1 per head)"),
 }
 
 

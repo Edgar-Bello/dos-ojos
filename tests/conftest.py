@@ -51,6 +51,7 @@ class FakeStatus:
     refill_gross_in: float | None = 5.26
     crop_model: str = "sorghum"
     sensitive: str | None = None
+    stage: dict | None = None
     confidence: str = "high"
     last_irrigation: str | None = "2026-08-18"
     start: str = "2026-07-20"
@@ -148,8 +149,11 @@ def onboard(phone: Phone, *, lang: str = "1", plan: str = "1") -> None:
 
 def register_field(phone: Phone, name: str = "Campo Norte", *, pin: str = "26.1484, -97.9940",
                    crop: str = "1", planted: str = "7/20", method: str = "1", side: str = "N",
-                   last: str = "8/18 4") -> None:
-    """A whole field, answered and confirmed, from its name on."""
+                   last: str = "8/18 4", maturity: str = "2") -> None:
+    """A whole field, answered and confirmed, from its name on.
+
+    Sorghum (crop 1) is asked its hybrid's maturity after the planting date.
+    """
     phone(name)
     phone("40")
     phone(pin)
@@ -157,6 +161,8 @@ def register_field(phone: Phone, name: str = "Campo Norte", *, pin: str = "26.14
     if planted:
         phone(planted)
         phone("si")
+    if crop in ("1", "sorgo", "sorghum", "milo") and maturity:
+        phone(maturity)
     if method:
         phone(method)
     if side:

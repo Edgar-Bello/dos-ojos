@@ -541,6 +541,18 @@ def plan_reminders(conn, settings: Settings, bot: Bot, today: date) -> list[Plan
                       and not store.alert_sent(conn, record.id, "checkin", cycle)):
                     options.append(Planned(farmer, record.id, "checkin", cycle,
                                            text.say("checkin", lang, field=record.name)))
+            # Sorghum, watered or not: once a week while sugarcane aphid is worth scouting.
+            stage = s.stage if (s is not None and s.status != STATUS_HARVESTED
+                                and record.crop == "sorghum") else None
+            if stage and "sugarcane_aphid" in (stage.get("watch") or []):
+                year, week, _ = today.isocalendar()
+                key = f"{year}-W{week:02d}"
+                if not store.alert_sent(conn, record.id, "scout", key):
+                    midge = (text.say("alert_scout_midge", lang)
+                             if "midge" in stage["watch"] else "")
+                    options.append(Planned(farmer, record.id, "scout", key, text.say(
+                        "alert_scout", lang, field=record.name, midge=midge,
+                        stage=text.pick(text.SORGHUM_STAGES[stage["stage"]], lang))))
             if farmer.state != "idle":
                 continue
             last = store.last_alert(conn, record.id, "missing")
@@ -556,7 +568,7 @@ def plan_reminders(conn, settings: Settings, bot: Bot, today: date) -> list[Plan
                 options.append(Planned(farmer, record.id, "missing", f"{question}:{today}",
                                        text.say("remind_missing", lang, field=record.name),
                                        ask=question))
-        order = ("water_now", "water_soon", "checkin", "missing")
+        order = ("water_now", "water_soon", "checkin", "scout", "missing")
         if options:
             planned.append(min(options, key=lambda p: order.index(p.kind)))
     return planned

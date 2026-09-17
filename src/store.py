@@ -81,7 +81,7 @@ CREATE TABLE IF NOT EXISTS events (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     field_id   TEXT NOT NULL REFERENCES fields(id),
     day        TEXT NOT NULL,
-    kind       TEXT NOT NULL,                  -- planted | irrigated | rain | harvested | photo
+    kind       TEXT NOT NULL,                  -- planted | irrigated | rain | harvested | photo | scouting
     inches     REAL,
     note       TEXT NOT NULL DEFAULT '',
     source     TEXT NOT NULL,                  -- sms | ticket | team
@@ -122,7 +122,8 @@ CREATE TABLE IF NOT EXISTS alerts (
 );
 """
 
-EVENT_KINDS = ("planted", "irrigated", "rain", "harvested", "photo")
+#: ``scouting`` is a pest count; its ``note`` holds the count as JSON.
+EVENT_KINDS = ("planted", "irrigated", "rain", "harvested", "photo", "scouting")
 
 #: Columns added after the first databases were made. SQLite cannot bring an
 #: existing table forward through CREATE TABLE IF NOT EXISTS, so each one is

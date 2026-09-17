@@ -19,11 +19,14 @@ it is stored. That read-back is what lets the numbers be trusted.
 from __future__ import annotations
 
 import copy
+import json
 import logging
 import re
 import sqlite3
 from dataclasses import dataclass, field as dc_field
 from datetime import date, datetime, timedelta
+
+from dosojos_sat import stages as sat_stages
 
 from . import parse, store, text
 from . import status as status_mod
@@ -176,7 +179,8 @@ class Turn:
 
     def _to_idle(self) -> None:
         self.f.state = "idle"
-        for key in ("action", "pick", "photos", "checkin", "field", "first"):
+        for key in ("action", "pick", "photos", "checkin", "field", "first", "aphid",
+                    "sorghum", "maturity_only"):
             self.ctx.pop(key, None)
 
     def _flag_for_team(self) -> None:
@@ -340,6 +344,9 @@ class Turn:
         if (growing and record.crop != "citrus" and "planted" not in answers
                 and self._planted(record) is None):
             todo.append("planted")
+        # How long a sorghum hybrid runs moves black layer by weeks: worth one question.
+        if record.crop == "sorghum" and "maturity" not in answers:
+            todo.append("maturity")
         if growing and not record.irrigation:
             todo.append("method")
         if (record.irrigation in text.SURFACE and not record.water_enters
@@ -482,6 +489,29 @@ class Turn:
             return
         record.crop_name = name
         self._save(record)
+        self._next_question()
+
+    def _on_f_maturity(self) -> None:
+        record = self._field()
+        command = parse.command(self.body)
+        value = parse.maturity(self.body)
+        if value is None:
+            if command and command != "maturity":
+                self._interrupt(command)
+                return
+            self._retry("menu_number")
+            return
+        record.answers["maturity"] = "unknown" if value == "?" else value
+        self._save(record)
+        only = self.ctx.pop("maturity_only", False)
+        if value == "?":
+            self.say("maturity_unknown")
+        elif only:
+            self.say("maturity_saved", field=record.name,
+                     maturity=text.pick(text.MATURITIES[value], self.lang))
+        if only:
+            self._to_idle()
+            return
         self._next_question()
 
     def _on_f_method(self) -> None:
@@ -930,6 +960,13 @@ class Turn:
             self._start("map")
         elif command == "undo":
             self._undo()
+        elif command == "stage":
+            self._stage_report()
+        elif command == "aphid":
+            count = parse.aphid_count(self.norm)
+            self._for_sorghum("aphid", count=count.__dict__ if count else None)
+        elif command == "maturity":
+            self._for_sorghum("maturity")
         else:
             self._help()
 
@@ -996,6 +1033,145 @@ class Turn:
                             if missing else ""))
         self.out.append("\n".join(lines))
 
+    # ---- sorghum ----------------------------------------------------------------
+
+    def _sorghum_fields(self) -> list[FieldRow]:
+        return [r for r in self.fields() if r.crop == "sorghum"]
+
+    def _sorghum_stage(self, record: FieldRow) -> tuple[dict | None, str]:
+        """The field's heat-unit stage, or None and why: ``no_planting`` or ``no_weather``."""
+        events = store.events_for(self.conn, record.id)
+        item = self.bot.water.field(record, events, self.today)
+        if item.status is not None and item.status.stage:
+            return item.status.stage, ""
+        planted = any(e.kind == "planted" and e.voided_at is None for e in events)
+        return None, "no_weather" if planted else "no_planting"
+
+    def _stage_name(self, key: str) -> str:
+        return text.pick(text.SORGHUM_STAGES[key], self.lang)
+
+    def _stage_report(self) -> None:
+        records = self._sorghum_fields()
+        if not records:
+            self.say("sorghum_none")
+            return
+        watch = {"midge": "watch_midge", "sugarcane_aphid": "watch_aphid",
+                 "headworm": "watch_headworm", "harvest": "watch_harvest"}
+        for record in records:
+            stage, why = self._sorghum_stage(record)
+            if stage is None:
+                self.say("stage_" + why, field=record.name)
+                continue
+            rest = ""
+            if stage["next_stage"] and stage["next_date"]:
+                rest += say("stage_next", self.lang, stage=self._stage_name(stage["next_stage"]),
+                            date=self._day(stage["next_date"]))
+            if stage["critical"]:
+                rest += say("stage_critical", self.lang)
+            # Two things to look for fit a text; the WHY file lists them all.
+            for item in stage["watch"][:2]:
+                rest += say(watch[item], self.lang)
+            if stage["maturity_assumed"]:
+                rest += say("stage_assumed", self.lang)
+            self.say("stage_report", field=record.name,
+                     stage=self._stage_name(stage["stage"]),
+                     day=stage["days_after_planting"], rest=rest)
+
+    def _for_sorghum(self, then: str, **data: object) -> None:
+        """Run ``then`` on the sorghum field the message names, the only one, or a chosen one."""
+        records = self._sorghum_fields()
+        if not records:
+            self.say("sorghum_none")
+            return
+        ids, _ = self._named_fields(self.norm, multi=False)
+        chosen = next((r for r in records if r.id in ids), None)
+        if chosen is None and len(records) == 1:
+            chosen = records[0]
+        if chosen is None:
+            self.ctx["sorghum"] = {"then": then, **data}
+            self.f.state = "sorghum:field"
+            self._reask()
+            return
+        self._sorghum_then(then, chosen, data)
+
+    def _on_sorghum_field(self) -> None:
+        pending = self.ctx.get("sorghum") or {}
+        records = self._sorghum_fields()
+        choice = parse.menu_choice(self.body, len(records))
+        chosen = records[choice - 1] if choice else None
+        if chosen is None:
+            ids, _ = self._named_fields(self.norm, multi=False)
+            chosen = next((r for r in records if r.id in ids), None)
+        if chosen is None:
+            self._retry("menu_number")
+            return
+        self.ctx.pop("sorghum", None)
+        self.f.state = "idle"
+        self._sorghum_then(pending.get("then", "aphid"), chosen, pending)
+
+    def _sorghum_then(self, then: str, record: FieldRow, data: dict) -> None:
+        if then == "maturity":
+            self.ctx["field"] = record.id
+            self.ctx["maturity_only"] = True
+            self._ask("f:maturity")
+            return
+        count = data.get("count")
+        if count is None:
+            self.ctx["aphid"] = {"field": record.id}
+            self.f.state = "aphid:count"
+            self._reask()
+            return
+        self._aphid_answer(record, parse.AphidCount(**count))
+
+    def _aphid_howto(self, record: FieldRow) -> str:
+        stage, _ = self._sorghum_stage(record)
+        if stage is None:
+            return say("aphid_howto_nostage", self.lang, field=record.name)
+        if stage["aphid_threshold_pct"] is None:
+            return say("aphid_howto_mature", self.lang, field=record.name)
+        return say("aphid_howto", self.lang, field=record.name,
+                   stage=self._stage_name(stage["stage"]),
+                   threshold=stage["aphid_threshold_pct"])
+
+    def _on_aphid_count(self) -> None:
+        count = parse.aphid_count(self.body)
+        if count is None:
+            command = parse.command(self.body)
+            if command and command != "aphid":
+                self._interrupt(command)
+                return
+            self.say("aphid_count_again")
+            return
+        record = self._field((self.ctx.get("aphid") or {}).get("field"))
+        self._to_idle()
+        if record is not None:
+            self._aphid_answer(record, count)
+
+    def _aphid_answer(self, record: FieldRow, count: parse.AphidCount) -> None:
+        """Store a sugarcane aphid count and say where it stands against this stage's threshold."""
+        stage, _ = self._sorghum_stage(record)
+        pct = int(count.percent + 0.5)          # 32.5% is 33, the way a farmer rounds
+        note = {"pest": "sugarcane_aphid", "percent": round(count.percent, 1),
+                "infested": count.infested, "checked": count.checked}
+        if stage is None:
+            store.add_event(self.conn, record.id, self.today, "scouting", note=json.dumps(note),
+                            message_id=self.msg.message_id)
+            self.say("aphid_saved_nostage", field=record.name, pct=pct)
+            return
+        verdict = sat_stages.aphid_verdict(count.percent, stage["stage"])
+        note.update(stage=stage["stage"], threshold=stage["aphid_threshold_pct"],
+                    verdict=verdict)
+        store.add_event(self.conn, record.id, self.today, "scouting", note=json.dumps(note),
+                        message_id=self.msg.message_id)
+        if count.percent == 0 and verdict != "harvest":
+            self.say("aphid_none", field=record.name)
+            return
+        if verdict == "above":
+            self._flag_for_team()
+        self.say("aphid_" + verdict, field=record.name, pct=pct,
+                 threshold=stage["aphid_threshold_pct"],
+                 stage=self._stage_name(stage["stage"]))
+
     def _undo(self) -> None:
         event = store.last_event_of(self.conn, self.f.phone)
         if event is None:
@@ -1004,7 +1180,8 @@ class Turn:
         record = self._field(event.field_id)
         kind = {"irrigated": ("riego", "watering"), "rain": ("lluvia", "rain"),
                 "harvested": ("cosecha", "harvest"), "planted": ("siembra", "planting"),
-                "photo": ("foto", "photo")}[event.kind]
+                "photo": ("foto", "photo"),
+                "scouting": ("conteo de pulgón", "aphid count")}[event.kind]
         what = f"{text.pick(kind, self.lang)} {record.name} {self._day(event.day.isoformat())}"
         if event.inches is not None:
             what += f", {text.inches(event.inches)} {'pulg' if self.lang == 'es' else 'in'}"
@@ -1105,7 +1282,8 @@ class Turn:
             return say("plan", lang)
         if state == "field_name":
             return say("field_name_first" if self.ctx.get("first") else "field_name", lang)
-        if state in ("f:acres", "f:location", "f:crop", "f:crop_other", "f:method", "f:side"):
+        if state in ("f:acres", "f:location", "f:crop", "f:crop_other", "f:maturity",
+                     "f:method", "f:side"):
             return say(state[2:], lang, field=name)
         if state == "a:fields":
             options = [f"{i} {f.name}" for i, f in enumerate(self.fields(), start=1)]
@@ -1135,6 +1313,12 @@ class Turn:
             return self._readback(action)
         if state == "photo":
             return say("photo_kind", lang)
+        if state == "sorghum:field":
+            options = [f"{i} {f.name}" for i, f in enumerate(self._sorghum_fields(), start=1)]
+            return say("pick_sorghum", lang, options=", ".join(options))
+        if state == "aphid:count":
+            target = self._field((self.ctx.get("aphid") or {}).get("field"))
+            return self._aphid_howto(target) if target else None
         if state == "checkin":
             checked = self._field(self.ctx.get("checkin"))
             return say("checkin", lang, field=checked.name) if checked else None

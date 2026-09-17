@@ -135,6 +135,11 @@ COMMANDS: dict[str, tuple[str, ...]] = {
     "explain": ("porque", "por que", "detalle", "detalles", "explicacion", "explique",
                 "explicame", "grafica", "graficas", "why", "detail", "details", "explain",
                 "chart", "charts"),
+    # Sorghum: how far along it is, a sugarcane aphid count, and the hybrid's maturity.
+    "stage": ("etapa", "etapas", "fase", "stage", "stages", "growth stage"),
+    "aphid": ("pulgon", "pulgones", "pulgon amarillo", "aphid", "aphids", "sugarcane aphid",
+              "sca"),
+    "maturity": ("ciclo", "hibrido", "maturity", "hybrid"),
     "undo": ("borrar", "borra", "undo", "deshacer", "quitar", "quita", "delete"),
     "menu": ("menu", "salir", "exit", "inicio"),
     "lang_es": ("espanol", "spanish", "en espanol"),
@@ -173,6 +178,68 @@ def menu_choice(text: str | None, options: int) -> int | None:
         return None
     number = int(match.group(1))
     return number if 1 <= number <= options else None
+
+
+# --------------------------------------------------------------------------- #
+# Sorghum: hybrid maturity and sugarcane aphid counts
+# --------------------------------------------------------------------------- #
+
+_MATURITY_WORDS: dict[str, tuple[str, ...]] = {
+    "short": ("corto", "corta", "temprano", "temprana", "precoz", "short", "early"),
+    "medium": ("mediano", "mediana", "medio", "intermedio", "medium", "mid", "middle"),
+    "long": ("largo", "larga", "tardio", "tardia", "long", "late", "full"),
+}
+
+
+def maturity(text: str | None) -> str | None:
+    """``short``, ``medium``, ``long``, ``'?'`` when not known, or None."""
+    choice = menu_choice(text, 4)
+    if choice:
+        return {1: "short", 2: "medium", 3: "long", 4: "?"}[choice]
+    if dont_know(text):
+        return "?"
+    tokens = set(words(text))
+    for key, names in _MATURITY_WORDS.items():
+        if tokens & set(names):
+            return key
+    return None
+
+
+_OUT_OF = re.compile(r"(\d{1,4})\s*(?:de|of|out of|/|entre|en)\s*(\d{1,4})")
+_PERCENT = re.compile(r"(\d{1,3}(?:[.,]\d+)?)\s*(?:%|por ?ciento|percent|pct)")
+_NONE_FOUND = {"0", "cero", "ninguno", "ninguna", "nada", "none", "no hay", "no habia",
+               "no encontre", "zero", "no"}
+
+
+@dataclass(frozen=True)
+class AphidCount:
+    """A sugarcane aphid scouting result: percent of plants infested, and the counts."""
+
+    percent: float
+    infested: int | None = None
+    checked: int | None = None
+
+
+def aphid_count(text: str | None) -> AphidCount | None:
+    """'12 de 80', '12/80', '15%', a bare '15', or 'ninguno'; None if unreadable.
+
+    A bare number is a percent: a farmer who counted plants says out of how many.
+    """
+    norm = normalize(text)
+    rest = re.sub(r"^(?:pulgon(?:es)?(?: amarillo)?|aphids?|sca)\s*", "", norm).strip(" .,:")
+    if rest in _NONE_FOUND:
+        return AphidCount(0.0)
+    match = _OUT_OF.search(rest)
+    if match:
+        infested, checked = int(match.group(1)), int(match.group(2))
+        if checked == 0 or infested > checked:
+            return None
+        return AphidCount(100.0 * infested / checked, infested, checked)
+    match = _PERCENT.search(rest) or re.fullmatch(r"(\d{1,3}(?:[.,]\d+)?)", rest)
+    if match:
+        value = float(match.group(1).replace(",", "."))
+        return AphidCount(value) if 0 <= value <= 100 else None
+    return None
 
 
 # --------------------------------------------------------------------------- #

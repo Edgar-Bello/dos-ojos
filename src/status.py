@@ -18,6 +18,7 @@ from typing import Callable, Sequence
 
 from dosojos_sat import cache as sat_cache
 from dosojos_sat import soils as sat_soils
+from dosojos_sat import stages as sat_stages
 from dosojos_sat import water as sat_water
 
 from . import text
@@ -72,6 +73,7 @@ class FieldWater:
     ndvi: object | None = None           # this season's satellite readings
     baseline: object | None = None       # what this field usually does, by day of year
     baseline_years: tuple[int, int] | None = None   # the years that normal was built from
+    heat: object | None = None           # sorghum: heat units day by day since planting
 
 
 class Water:
@@ -112,16 +114,21 @@ class Water:
                 field_id=record.id, name=record.name, crop_text=crop_text(record),
                 soil=profile, soil_note={"name": profile.name, "intake": profile.intake},
                 weather=weather, ndvi=ndvi, events=log_events(events), as_of=as_of,
-                method=record.irrigation,
+                method=record.irrigation, maturity=record.answers.get("maturity"),
             )
         except sat_water.WaterError as exc:
             log.info("%s: no checkbook yet: %s", record.id, exc)
             return FieldWater(record, reason="no_data")
         if not full:
             return FieldWater(record, status=status, intake=profile.intake)
+        heat = None
+        if status.stage:
+            heat = sat_stages.gdu_series(weather, date.fromisoformat(status.stage["planted"]),
+                                         as_of)
         return FieldWater(record, status=status, intake=profile.intake,
                           soil=cached.get("profile"), daily=daily, projection=projection,
-                          ndvi=ndvi, baseline=baseline, baseline_years=baseline_years)
+                          ndvi=ndvi, baseline=baseline, baseline_years=baseline_years,
+                          heat=heat)
 
 
 def urgency(item: FieldWater) -> tuple:
@@ -165,11 +172,21 @@ def message(item: FieldWater, lang: str, today: date, *,
         body = say("status_days_rainfed" if rainfed else "status_days", lang,
                    about=text.about_days(s.days_left, lang), low=low, high=high,
                    date=text.day(date.fromisoformat(s.water_by), lang, today), **values)
+    sorghum = s.stage if s.crop_model == "sorghum" else None
     if s.sensitive and s.crop_model in text.STAGES:
         stage = text.pick(text.STAGES[s.crop_model], lang)
-        key = "status_stage_soon" if "in about" in s.sensitive else "status_stage"
+        soon = "in about" in s.sensitive
+        if sorghum:
+            # The stage it is really at, or the one it is about to reach.
+            key = "panicle_initiation" if soon else sorghum["stage"]
+            stage = text.pick(text.SORGHUM_STAGES[key], lang)
+        key = "status_stage_soon" if soon else "status_stage"
         # "Don't let it dry out" is no advice to someone who cannot water.
         body += say(key + ("_rainfed" if rainfed else ""), lang, stage=stage)
+    elif sorghum:
+        body += say("status_sorghum_stage", lang,
+                    stage=text.pick(text.SORGHUM_STAGES[sorghum["stage"]], lang),
+                    day=sorghum["days_after_planting"])
     if s.confidence == "low":
         body += say("status_rough", lang)
     return body

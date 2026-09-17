@@ -36,7 +36,8 @@ def test_the_whole_first_field_in_spanish(phone: Phone, conn) -> None:
     readback = phone("7/20")
     assert readback == ["Anoté: sorgo sembrado en Campo Norte el lun 20 jul. ¿Correcto? SI o NO"]
     assert events(conn) == []                       # nothing stored before the yes
-    assert "riega" in phone("si")[0]
+    assert "ciclo corto, mediano o largo" in phone("si")[0]
+    assert "riega" in phone("2")[0]
     assert "lado" in phone("1")[0]
     assert "último".replace("ú", "u") in phone("N")[0]
     readback = phone("8/18 4")
@@ -49,6 +50,7 @@ def test_the_whole_first_field_in_spanish(phone: Phone, conn) -> None:
     record = store.get_field(conn, "F001")
     assert (record.name, record.acres_said, record.crop, record.irrigation, record.water_enters) \
         == ("Campo Norte", 40.0, "sorghum", "furrow", "N")
+    assert record.answers["maturity"] == "medium"
     assert (record.lat, record.lon) == (26.1484, -97.994)
     planted, watered = events(conn, kind="planted"), events(conn, kind="irrigated")
     assert [(e.day, e.inches) for e in planted] == [(date(2026, 7, 20), None)]
@@ -145,6 +147,7 @@ def test_rainfed_skips_the_water_side_and_the_last_irrigation(phone: Phone, conn
     phone("1")
     phone("5/15")
     phone("si")
+    phone("4")                   # not sure of the hybrid: worked out as medium
     done = phone("6")
     assert "quedo registrado" in done[0]
     assert store.get_field(conn, "F001").irrigation == "none"

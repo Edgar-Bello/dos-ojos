@@ -312,3 +312,82 @@ def test_an_expired_link_is_refused(settings, phone: Phone, conn, water) -> None
     app.now = NOW.replace(year=NOW.year + 1)
     with pytest.raises(HttpError):
         app.explain_page(token)
+
+
+# --------------------------------------------------------------------------- #
+# Sorghum
+# --------------------------------------------------------------------------- #
+
+
+def _sorghum_item(conn, *, stage_key: str = "flowering", assumed: bool = False,
+                  heat: bool = True) -> FieldWater:
+    """A sorghum field with the stage the checkbook hands back, and the heat behind it."""
+    from dosojos_sat import stages
+
+    planted = TODAY - timedelta(days=69)
+    weather = pd.DataFrame({"date": [planted + timedelta(days=n) for n in range(70)],
+                            "tmax_c": [35.0] * 70, "tmin_c": [21.1] * 70})
+    estimate = stages.estimate(weather, planted, TODAY, None if assumed else "medium")
+    data = estimate.to_dict()
+    data["stage"] = stage_key
+    item = _item(conn, stage=data)
+    if heat:
+        item.heat = stages.gdu_series(weather, planted, TODAY)
+    return item
+
+
+def test_a_sorghum_page_says_where_the_crop_is_and_why_by_heat(settings, farm) -> None:
+    page = _built(settings, farm, item=_sorghum_item(farm))
+    assert "La etapa del sorgo" in page and "va en floración" in page
+    assert "grados-día" in page and "no con el calendario" in page
+    assert "Lo calculamos como ciclo mediano, que es lo que usted nos dijo" in page
+
+
+def test_the_stage_chart_is_inlined(settings, farm) -> None:
+    page = _built(settings, farm, item=_sorghum_item(farm))
+    section = page.split("La etapa del sorgo")[1].split("Plagas del sorgo")[0]
+    assert section.count('src="data:image/png;base64,') == 1
+
+
+def test_no_heat_series_says_so_instead_of_a_blank(settings, farm) -> None:
+    page = _built(settings, farm, item=_sorghum_item(farm, heat=False))
+    assert "Todavía no hay suficientes temperaturas" in page
+
+
+def test_an_assumed_maturity_is_explained_on_the_page(settings, farm) -> None:
+    page = _built(settings, farm, item=_sorghum_item(farm, assumed=True))
+    assert "No sabemos el ciclo del híbrido" in page and "mande CICLO" in page
+
+
+def test_the_stage_table_marks_where_the_crop_is_now(settings, farm) -> None:
+    page = _built(settings, farm, item=_sorghum_item(farm, stage_key="flowering"))
+    assert '<tr class="now"><td>floración</td>' in page
+    assert "mosquita" in page and "pulgón amarillo" in page
+
+
+def test_the_pest_guidance_names_its_thresholds_and_who_to_ask(settings, farm) -> None:
+    page = _built(settings, farm, item=_sorghum_item(farm))
+    assert "20% de las plantas antes del panojeo" in page and "30% de panojeo a grano duro" in page
+    assert "1 por panoja" in page and "AgriLife en Weslaco" in page
+    assert "Texas A&amp;M AgriLife B-6137" in page and "Sorghum Checkoff" in page
+
+
+def test_aphid_counts_sent_in_are_listed(settings, farm, phone: Phone) -> None:
+    store.add_event(farm, "F001", TODAY, "scouting", note=json.dumps(
+        {"pest": "sugarcane_aphid", "percent": 32.5, "infested": 26, "checked": 80,
+         "stage": "flowering", "threshold": 30, "verdict": "above"}))
+    page = _built(settings, farm, item=_sorghum_item(farm))
+    counts = page.split("Sus conteos de pulgón")[1]
+    assert "33%" in counts or "32%" in counts
+    assert "26 / 80" in counts and "pasó el umbral (30%)" in counts
+
+
+def test_other_crops_have_no_sorghum_section(settings, farm) -> None:
+    page = _built(settings, farm, item=_item(farm, crop_model="corn"))
+    assert "La etapa del sorgo" not in page and "B-6137" not in page
+
+
+def test_the_start_of_the_count_is_said_in_the_farmer_s_language(settings, farm) -> None:
+    """The checkbook says 'planted 2026-07-20' for the team; the page says it in Spanish."""
+    page = _built(settings, farm, item=_item(farm, start_reason="planted 2026-07-20"))
+    assert "(la siembra)" in page and "planted 2026" not in page

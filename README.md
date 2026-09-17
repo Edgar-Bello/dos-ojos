@@ -21,7 +21,9 @@ services they want**. Then, for each field, skipping whatever is already known:
 3. A link to a map page. The farmer taps the field's corners on aerial imagery,
    sees the acres, and saves. The acres are checked against what they said.
 4. The crop (a numbered menu), then the planting date. For cane it asks for the
-   planting or the last cut; citrus has none.
+   planting or the last cut; citrus has none. **Grain sorghum** is also asked
+   whether the hybrid is short, medium or long season ("no sé" is fine, and is
+   worked out as medium), because that moves black layer by weeks.
 5. How it is watered (furrows, flood or borders, drip, sprinklers, pivot, or
    not irrigated), and for surface water, which side it comes in from.
 6. The last irrigation, with inches if known, then any earlier ones since
@@ -38,6 +40,9 @@ After that a farmer texts when something happens:
 | `SEMBRE sorgo` / `PLANTED` | A new crop and its planting date |
 | `DRON` / `DRONE` | A link to upload a flight's photos (satellite-only farmers are told how to switch) |
 | `PORQUE` / `WHY` | A link to a page showing how that answer was worked out, charts and all |
+| `ETAPA` / `STAGE` | Sorghum: its growth stage from heat units, the next stage and when, what to scout for |
+| `PULGON 12 de 80` / `APHID 12 of 80` | Sorghum: a sugarcane aphid count, answered against this stage's threshold |
+| `CICLO` / `MATURITY` | Sorghum: change the hybrid's maturity |
 | `PLAN` | What they signed up for, and the menu to change it |
 | a photo | A water ticket (read as an irrigation) or a problem for the team |
 | `MAPA`, `CAMPOS`, `NUEVO` | The map link, the list of fields, another field |
@@ -46,6 +51,54 @@ After that a farmer texts when something happens:
 
 Anything the bot does not understand is passed to the team (`todo`), and the
 farmer is told so.
+
+## Sorghum
+
+The Valley grows a lot of grain sorghum (the 2025 USDA crop map shows about 410
+sorghum fields in the Hidalgo, Cameron and Willacy search box alone) and the
+growers have few tools built for it. So sorghum gets more than the water
+checkbook, **all of it with the satellite alone, no drone**:
+
+**Its growth stage, from heat, not the calendar.** Modern hybrids ignore day
+length; how far along a crop is depends on the heat it has had. The checkbook
+adds up each day's growing degree units from gridMET's highs and lows, the way
+Texas A&M AgriLife bulletin B-6137 (*Sorghum Growth and Development*) teaches:
+`(high + low) / 2 - 50` in Fahrenheit, both ends held between 50 and 100 F, and
+the bulletin's Table 1 gives the total to reach each stage for short- and
+long-season hybrids (a medium hybrid is taken halfway). On the demo's pinned day
+this puts Maria's dryland field, planted 12 March, at flowering, which is just
+what AgriLife's Weslaco IPM newsletter was reporting across the Valley that week.
+
+- The water warning follows the real stage. **Panicle initiation to flowering**
+  is when each head sets its grain number, 70% of the yield (B-6137), so that
+  stretch, not a fixed day 50-80, is when "don't let it dry out" is said. A cool
+  February planting is weeks behind a warm April one at the same day count.
+- `AGUA` names the stage. `ETAPA` answers with the stage, the day count, the next
+  stage and its projected date (from the last two weeks' heat), and the two things
+  most worth scouting for now.
+
+**Sugarcane aphid, counted against the right threshold.** `PULGON` on its own
+explains how to scout (4 spots, 20 plants each, a lower and an upper leaf) and
+gives the threshold for today's stage; the farmer replies with a count (`12 de
+80`, `15%`, `ninguno`). Thresholds follow the Sorghum Checkoff's *Sugarcane Aphid*
+guide (2021): 20% of plants with colonies and honeydew before heading, 30% from
+heading through hard dough, and at black layer only if honeydew would stop the
+combine. The Valley's own AgriLife PestCast (Weslaco, 20 May 2023) applies the
+same 30% in grain fill. Past the threshold the reply says to talk to their crop
+advisor or AgriLife today, and the message is flagged for the team; near it,
+look again in 3 or 4 days; below it, keep the weekly habit. **No product is ever
+named**: the label and the advisor decide that.
+
+**A weekly reminder**, one a week per sorghum field while aphid is worth scouting,
+watered or not, and it adds sorghum midge (1 per head, AgriLife PestCast) while
+the crop heads and flowers. It ranks below any water alert, so a farmer still gets
+at most one text a day.
+
+**The `PORQUE` page** gains a sorghum section: heat piling up since planting with
+each stage's line and the critical stretch shaded, today's point and the projected
+path; a table of every stage with the date reached or expected and what to check
+then; the scouting guidance with its sources; and every aphid count the farmer
+has sent.
 
 ## What a farmer signs up for
 
