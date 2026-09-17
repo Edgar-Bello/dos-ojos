@@ -177,8 +177,8 @@ The notes say what the answer rests on:
 - a start assumed for lack of records
 - gridMET's one- or two-day lag, filled with the week before it
 - a stale satellite image
-- a crop at the stage that can least afford stress (sorghum boot to flowering,
-  cotton first bloom, ...)
+- a crop at the stage that can least afford stress (cotton first bloom, corn
+  silking, ...; grain sorghum by heat units, below)
 - a field that reads as bare ground where the log or the label says a crop
   stands
 
@@ -196,6 +196,36 @@ Limits worth knowing:
 - NDVI-to-coefficient scaling is linear and FAO values are tabled for standard
   climates; tune both with AgriLife data.
 - Nothing is known about an irrigation that is not logged.
+
+### Grain sorghum: its stage from heat, not the calendar
+
+`weather` also keeps gridMET's daily high and low (`tmax_c`, `tmin_c`; a cache
+filled before they were kept fetches them on its next run). For grain sorghum with
+a planting date, the checkbook turns them into a growth stage with
+`dosojos_sat.stages`, following Texas A&M AgriLife bulletin B-6137 (Gerik, Bean and
+Vanderlip, *Sorghum Growth and Development*):
+
+- a day's growing degree units are `(high + low) / 2 - 50` in Fahrenheit, both
+  ends held between 50 and 100 F;
+- the bulletin's Table 1 gives the total from planting to each stage, emergence to
+  black layer, for short- and long-season hybrids; a medium hybrid is taken
+  halfway, and so is one whose maturity nobody knows (the stage says it assumed);
+- the next stage's date is projected from the last two weeks' heat;
+- with fewer than 90% of the days since planting covered, no stage is claimed.
+
+Hybrids ignore day length today, so this matters: a cool-February planting runs
+weeks behind a warm-April one at the same day count, and 2025's hot spring put a
+12 March Valley planting at flowering by 20 May. The sensitive-stage note follows
+it: panicle initiation to flowering, when each head sets its grain number (70% of
+yield, per B-6137), instead of a fixed day 50 to 80.
+
+`water.json` carries it per field as `stage`: the stage, heat units, day count,
+next stage and date, every milestone with its date reached or projected, whether
+it is in the critical stretch, and what is worth scouting for now. That last part
+and the sugarcane aphid threshold per stage (20% of plants before heading, 30%
+heading to hard dough, harvest-only at black layer) follow the Sorghum Checkoff's
+*Sugarcane Aphid* guide (2021), as the Valley's AgriLife PestCast applies it.
+`charts.plot_sorghum_stages` draws it; the SMS side puts it on the WHY page.
 
 ## How it works
 

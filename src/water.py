@@ -31,6 +31,7 @@ from typing import Iterable, Sequence
 import numpy as np
 import pandas as pd
 
+from . import stages as stages_mod
 from .soils import SoilProfile
 
 log = logging.getLogger(__name__)
@@ -304,6 +305,8 @@ class WaterStatus:
     confidence: str
     notes: list[str] = field(default_factory=list)
     rank: int | None = None
+    #: Grain sorghum only: its growth stage from heat units (see :mod:`stages`).
+    stage: dict | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -439,9 +442,24 @@ def _status_for(days_left: int | None) -> str:
 
 
 def _sensitive_note(crop: Crop, planted: date | None, as_of: date,
-                    days_left: int | None) -> str | None:
-    """Say so when the crop is at, or about to reach, the stage it can least afford."""
+                    days_left: int | None,
+                    stage: "stages_mod.StageEstimate | None" = None) -> str | None:
+    """Say so when the crop is at, or about to reach, the stage it can least afford.
+
+    Grain sorghum with a heat-unit stage uses it: panicle initiation to flowering
+    moves by weeks between a cool and a warm spring, which a fixed day count misses.
+    """
     horizon = (days_left or 0) + 7
+    if stage is not None:
+        if stage.critical:
+            return (f"{crop.label} is at {stage.label} (day {stage.days_after_planting}, "
+                    f"{stage.gdu:.0f} heat units): panicle initiation to flowering sets "
+                    "most of the yield, so it can least afford to run dry")
+        if stage.critical_in_days is not None and stage.critical_in_days <= horizon:
+            return (f"{crop.label} reaches panicle initiation in about "
+                    f"{max(stage.critical_in_days, 1)} days ({stage.gdu:.0f} heat units so "
+                    "far): the stretch that sets most of the yield")
+        return None
     if crop.sensitive_dap and planted:
         dap = (as_of - planted).days
         low, high = crop.sensitive_dap
@@ -466,6 +484,7 @@ def checkbook(
     events: Sequence[LogEvent],
     as_of: date,
     method: str | None,
+    maturity: str | None = None,
 ) -> tuple[WaterStatus, pd.DataFrame, pd.DataFrame]:
     """Run one field's checkbook up to ``as_of`` and project it forward.
 
@@ -474,6 +493,8 @@ def checkbook(
         ndvi: this season's satellite observations with ``date`` and ``median``.
         events: the field log for this field.
         method: irrigation method from the field settings; ``none`` for rainfed.
+        maturity: grain sorghum only, the hybrid's maturity (``short``, ``medium``
+            or ``long``); unknown is taken as medium, and the stage says so.
 
     Returns:
         ``(status, daily, projection)``: the verdict, one row per day of the
@@ -573,6 +594,9 @@ def checkbook(
 
     projection = pd.DataFrame(columns=["date", "dr_mm"])
     planted = start if start_kind == "planted" else None
+    stage = None
+    if crop.key == "sorghum" and planted is not None:
+        stage = stages_mod.estimate(weather, planted, end, maturity)
     last_irr = max(irrigations) if irrigations else None
     rains = daily[daily["rain_effective_mm"] > 0]
     last_rain = (f"{rains.iloc[-1]['date'].isoformat()} "
@@ -603,7 +627,7 @@ def checkbook(
         # Water now refills today's deficit; water later refills what will be
         # gone by then, which is the stress point.
         refill = float(last["dr_mm"]) if days_left == 0 else float(last["raw_mm"])
-        sensitive = _sensitive_note(crop, planted, as_of, days_left)
+        sensitive = _sensitive_note(crop, planted, as_of, days_left, stage)
         if days_left is None:
             notes.append(f"more than {MAX_PROJECTION_DAYS} days of water at the current rate")
 
@@ -633,6 +657,7 @@ def checkbook(
         weather_through=through.isoformat() if through else None,
         last_image=last_image.isoformat(),
         soil=soil_note, sensitive=sensitive, confidence=confidence, notes=notes,
+        stage=stage.to_dict() if stage is not None else None,
     )
     return status, daily, projection
 

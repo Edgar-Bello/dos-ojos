@@ -271,13 +271,47 @@ def test_a_station_reading_beats_gridmet_on_the_same_day(conn: sqlite3.Connectio
 
     days = [date(2026, 7, 1), date(2026, 7, 2)]
     cache.upsert_weather(conn, "f1", pd.DataFrame({"date": days, "eto_mm": [7.0, 7.5],
-                                                   "rain_mm": [0.0, 0.0]}), "gridmet")
+                                                   "rain_mm": [0.0, 0.0],
+                                                   "tmax_c": [36.0, 37.0],
+                                                   "tmin_c": [24.0, 25.0]}), "gridmet")
     cache.upsert_weather(conn, "f1", pd.DataFrame({"date": days[:1], "eto_mm": [6.2],
                                                    "rain_mm": [3.0]}), "station:mcallen.csv")
     frame = cache.get_weather(conn, "f1", days[0], days[1])
     assert frame["eto_mm"].tolist() == [6.2, 7.5]
     assert frame["source"].tolist() == ["station:mcallen.csv", "gridmet"]
     assert cache.weather_dates(conn, "f1", "gridmet") == set(days)
+    # The station file has no temperatures, so its day borrows gridMET's.
+    assert frame["tmax_c"].tolist() == [36.0, 37.0]
+
+
+def test_gridmet_days_without_temperatures_are_fetched_again(conn: sqlite3.Connection) -> None:
+    """A cache filled before highs and lows were kept must fill them in, not skip the days."""
+    import pandas as pd
+
+    days = [date(2026, 7, 1), date(2026, 7, 2)]
+    cache.upsert_weather(conn, "f1", pd.DataFrame({"date": days, "eto_mm": [7.0, 7.5],
+                                                   "rain_mm": [0.0, 0.0]}), "gridmet")
+    assert cache.weather_dates(conn, "f1", "gridmet") == set()
+    cache.upsert_weather(conn, "f1", pd.DataFrame({"date": days, "eto_mm": [7.0, 7.5],
+                                                   "rain_mm": [0.0, 0.0],
+                                                   "tmax_c": [36.0, 37.0],
+                                                   "tmin_c": [24.0, 25.0]}), "gridmet")
+    assert cache.weather_dates(conn, "f1", "gridmet") == set(days)
+
+
+def test_a_refetch_without_temperatures_keeps_the_ones_stored(conn: sqlite3.Connection) -> None:
+    """If gridMET's temperature service is down one day, yesterday's highs survive."""
+    import pandas as pd
+
+    day = [date(2026, 7, 1)]
+    cache.upsert_weather(conn, "f1", pd.DataFrame({"date": day, "eto_mm": [7.0], "rain_mm": [0.0],
+                                                   "tmax_c": [36.0], "tmin_c": [24.0]}),
+                         "gridmet")
+    cache.upsert_weather(conn, "f1", pd.DataFrame({"date": day, "eto_mm": [7.1], "rain_mm": [0.0],
+                                                   "tmax_c": [float("nan")],
+                                                   "tmin_c": [float("nan")]}), "gridmet")
+    frame = cache.get_weather(conn, "f1", day[0], day[0])
+    assert frame["eto_mm"].tolist() == [7.1] and frame["tmax_c"].tolist() == [36.0]
 
 
 def test_a_soil_profile_is_stored_with_its_outline(conn: sqlite3.Connection) -> None:

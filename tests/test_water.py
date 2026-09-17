@@ -253,6 +253,38 @@ def test_the_stage_that_can_least_afford_stress_is_named() -> None:
     assert status.sensitive and "boot to flowering now" in status.sensitive
 
 
+def _hot_weather(n: int, high_c: float, low_c: float) -> pd.DataFrame:
+    frame = _weather(n)
+    frame["tmax_c"], frame["tmin_c"] = high_c, low_c
+    return frame
+
+
+def test_sorghum_with_temperatures_is_staged_by_heat_not_the_calendar() -> None:
+    """Day 40 after a hot planting is already in the critical stretch; the calendar says not yet."""
+    events = [_event(DAY0, "planted"), _event(DAY0 + timedelta(days=38), "irrigated")]
+    # 35/18.3 C is 95/65 F, 30 heat units a day: 1200 by day 40, past panicle initiation.
+    status, _, _ = _checkbook(weather=_hot_weather(90, 35.0, 18.3333), events=events,
+                              as_of=DAY0 + timedelta(days=40), maturity="short")
+    assert status.stage["stage"] == "panicle_initiation"
+    assert status.sensitive and "heat units" in status.sensitive
+    assert status.stage["aphid_threshold_pct"] == 20
+
+
+def test_a_cool_spring_holds_the_warning_back() -> None:
+    """Day 63 would have warned by the calendar; at 10 heat units a day it is far too early."""
+    events = [_event(DAY0, "planted"), _event(DAY0 + timedelta(days=60), "irrigated")]
+    # 70/50 F: 10 heat units a day, 630 by day 63, still five-leaf-ish.
+    status, _, _ = _checkbook(weather=_hot_weather(90, 21.111, 10.0), events=events,
+                              as_of=DAY0 + timedelta(days=63), maturity="medium")
+    assert status.stage["stage"] in ("four_leaf", "five_leaf")
+    assert status.sensitive is None
+
+
+def test_other_crops_carry_no_sorghum_stage() -> None:
+    status, _, _ = _checkbook(crop_text="corn", weather=_hot_weather(90, 35.0, 18.3333))
+    assert status.stage is None
+
+
 def test_a_rainfed_field_has_no_delivered_amount() -> None:
     status, _, _ = _checkbook(method="none")
     assert status.refill_gross_in is None and status.efficiency is None

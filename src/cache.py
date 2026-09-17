@@ -31,13 +31,18 @@ if TYPE_CHECKING:  # type-only, so the offline path never imports odc-stac
 log = logging.getLogger(__name__)
 
 #: 2 added the field water settings and the weather and soils tables.
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 #: Columns version 2 added to ``fields``; older caches gain them in place.
 _FIELD_COLUMNS_V2 = (
     ("irrigation", "TEXT"),
     ("water_enters", "TEXT"),
     ("soil_awc_in_ft", "REAL"),
+)
+#: Daily highs and lows, added in version 3 for heat units and growth stages.
+_WEATHER_COLUMNS_V3 = (
+    ("tmax_c", "REAL"),
+    ("tmin_c", "REAL"),
 )
 
 FieldSyncStatus = Literal["inserted", "unchanged", "metadata-updated", "geometry-changed"]
@@ -151,6 +156,8 @@ CREATE TABLE IF NOT EXISTS weather (
     source     TEXT NOT NULL,                 -- gridmet | station:<file name>
     eto_mm     REAL,                          -- short-grass reference evapotranspiration
     rain_mm    REAL,
+    tmax_c     REAL,                          -- daily high, for heat units
+    tmin_c     REAL,                          -- daily low
     fetched_at TEXT NOT NULL,
     PRIMARY KEY (field_id, date, source)
 );
@@ -210,6 +217,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
         return
     conn.executescript(_SCHEMA)
     _add_missing_columns(conn, "fields", _FIELD_COLUMNS_V2)
+    _add_missing_columns(conn, "weather", _WEATHER_COLUMNS_V3)
     conn.execute(
         "INSERT INTO meta(key, value) VALUES('schema_version', ?) "
         "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -823,21 +831,30 @@ def fetch_log_summary(conn: sqlite3.Connection) -> pd.DataFrame:
 def upsert_weather(
     conn: sqlite3.Connection, field_id: str, frame: pd.DataFrame, source: str
 ) -> int:
-    """Store daily ``eto_mm`` and ``rain_mm`` for one field and source.
+    """Store daily ``eto_mm`` and ``rain_mm``, and highs and lows where given.
 
-    Re-fetched days overwrite, since gridMET revises its most recent week.
+    Re-fetched days overwrite, since gridMET revises its most recent week. A frame
+    without temperatures (most station files) leaves any stored ones alone.
     """
     now = _now()
+    empty = pd.Series([float("nan")] * len(frame), index=frame.index)
+    tmax = frame["tmax_c"] if "tmax_c" in frame else empty
+    tmin = frame["tmin_c"] if "tmin_c" in frame else empty
     rows = [
-        (field_id, day.isoformat(), source, _none_if_nan(eto), _none_if_nan(rain), now)
-        for day, eto, rain in zip(frame["date"], frame["eto_mm"], frame["rain_mm"])
+        (field_id, day.isoformat(), source, _none_if_nan(eto), _none_if_nan(rain),
+         _none_if_nan(high), _none_if_nan(low), now)
+        for day, eto, rain, high, low in zip(frame["date"], frame["eto_mm"],
+                                             frame["rain_mm"], tmax, tmin)
     ]
     conn.executemany(
         """
-        INSERT INTO weather (field_id, date, source, eto_mm, rain_mm, fetched_at)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO weather (field_id, date, source, eto_mm, rain_mm, tmax_c, tmin_c,
+                             fetched_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(field_id, date, source) DO UPDATE SET
             eto_mm = excluded.eto_mm, rain_mm = excluded.rain_mm,
+            tmax_c = COALESCE(excluded.tmax_c, weather.tmax_c),
+            tmin_c = COALESCE(excluded.tmin_c, weather.tmin_c),
             fetched_at = excluded.fetched_at
         """,
         rows,
@@ -846,9 +863,15 @@ def upsert_weather(
 
 
 def weather_dates(conn: sqlite3.Connection, field_id: str, source: str) -> set[date]:
-    """Days already stored for one field and source."""
+    """Days already stored for one field and source.
+
+    For gridMET a day counts only once it has its highs and lows too, so a cache
+    fetched before temperatures were kept fills them in on the next ``weather``.
+    """
+    temps = " AND tmax_c IS NOT NULL AND tmin_c IS NOT NULL" if source == "gridmet" else ""
     rows = conn.execute(
-        "SELECT date FROM weather WHERE field_id = ? AND source = ? AND eto_mm IS NOT NULL",
+        "SELECT date FROM weather WHERE field_id = ? AND source = ? AND eto_mm IS NOT NULL"
+        + temps,
         (field_id, source),
     ).fetchall()
     return {date.fromisoformat(row["date"]) for row in rows}
@@ -860,11 +883,12 @@ def get_weather(
     """One field's daily weather, oldest first, one row per day.
 
     Where a day has both a station reading and gridMET, the station wins: it
-    stands in the valley rather than averaging 4 km around it.
+    stands in the valley rather than averaging 4 km around it. A station file
+    without temperatures still borrows gridMET's high and low for that day.
     """
     frame = pd.read_sql_query(
         """
-        SELECT date, source, eto_mm, rain_mm FROM weather
+        SELECT date, source, eto_mm, rain_mm, tmax_c, tmin_c FROM weather
         WHERE field_id = ? AND date BETWEEN ? AND ?
         ORDER BY date, CASE WHEN source = 'gridmet' THEN 1 ELSE 0 END
         """,
@@ -872,7 +896,9 @@ def get_weather(
     )
     if frame.empty:
         return frame
+    temps = frame.groupby("date")[["tmax_c", "tmin_c"]].first()
     frame = frame.drop_duplicates("date", keep="first").reset_index(drop=True)
+    frame[["tmax_c", "tmin_c"]] = temps.loc[frame["date"]].to_numpy()
     frame["date"] = pd.to_datetime(frame["date"]).dt.date
     return frame
 

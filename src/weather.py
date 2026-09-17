@@ -41,7 +41,15 @@ GRIDMET_DAS = (
 GRIDMET_VARIABLES: dict[str, tuple[str, str]] = {
     "eto_mm": ("pet", "daily_mean_reference_evapotranspiration_grass"),
     "rain_mm": ("pr", "precipitation_amount"),
+    # Daily highs and lows, for heat units: sorghum's growth stages follow the
+    # temperature it has had, not the calendar. gridMET stores them in kelvin.
+    "tmax_c": ("tmmx", "daily_maximum_temperature"),
+    "tmin_c": ("tmmn", "daily_minimum_temperature"),
 }
+#: Columns the water checkbook cannot run without. Temperatures only add growth
+#: stages, so a failure fetching them leaves them empty instead of failing the day.
+REQUIRED_COLUMNS = ("eto_mm", "rain_mm")
+KELVIN_ZERO = 273.15
 GRIDMET_SOURCE = "gridmet"
 GRIDMET_FIRST_DAY = date(1979, 1, 1)
 #: gridMET covers the contiguous US and nothing else.
@@ -157,19 +165,31 @@ def fetch_gridmet(
 
     columns: dict[str, pd.Series] = {}
     for column, (dataset, variable) in GRIDMET_VARIABLES.items():
-        packing = parse_das(_request(get, GRIDMET_DAS.format(dataset=dataset), {}, retries),
-                            variable)
-        text = _request(get, GRIDMET_NCSS.format(dataset=dataset), {
-            "var": variable, "latitude": f"{lat:.5f}", "longitude": f"{lon:.5f}",
-            "time_start": f"{start.isoformat()}T00:00:00Z",
-            "time_end": f"{end.isoformat()}T00:00:00Z",
-            "accept": "csv",
-        }, retries)
-        raw = parse_ncss_csv(text)
-        columns[column] = pd.Series(packing.unpack(raw["value"].to_numpy()),
-                                    index=raw["date"])
+        try:
+            packing = parse_das(
+                _request(get, GRIDMET_DAS.format(dataset=dataset), {}, retries), variable)
+            text = _request(get, GRIDMET_NCSS.format(dataset=dataset), {
+                "var": variable, "latitude": f"{lat:.5f}", "longitude": f"{lon:.5f}",
+                "time_start": f"{start.isoformat()}T00:00:00Z",
+                "time_end": f"{end.isoformat()}T00:00:00Z",
+                "accept": "csv",
+            }, retries)
+            raw = parse_ncss_csv(text)
+        except WeatherError as exc:
+            if column in REQUIRED_COLUMNS:
+                raise
+            log.warning("gridMET %s unavailable, growth stages will wait for it: %s",
+                        dataset, exc)
+            continue
+        values = packing.unpack(raw["value"].to_numpy())
+        if column.endswith("_c"):
+            values = values - KELVIN_ZERO
+        columns[column] = pd.Series(values, index=raw["date"])
 
     frame = pd.DataFrame(columns).sort_index()
+    for column in GRIDMET_VARIABLES:
+        if column not in frame:
+            frame[column] = np.nan
     frame.index.name = "date"
     return frame.reset_index()
 

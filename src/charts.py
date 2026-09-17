@@ -407,6 +407,108 @@ def plot_water(
 
 
 # --------------------------------------------------------------------------- #
+# Sorghum growth stages
+# --------------------------------------------------------------------------- #
+
+STAGE_LINE_COLOR = "#2e6b45"
+CRITICAL_COLOR = "#b8472a"
+#: The stages worth a line on the chart; the three leaf counts would crowd it.
+CHART_STAGES = ("emergence", "five_leaf", "panicle_initiation", "boot", "flowering",
+                "soft_dough", "hard_dough", "black_layer")
+
+
+def plot_sorghum_stages(
+    *,
+    stage: dict,
+    heat: pd.DataFrame,
+    out_path: Path,
+    names: dict[str, str],
+    title: str,
+    subtitle: str,
+    today_label: str,
+    critical_label: str,
+    projected_label: str,
+    axis_label: str,
+    banner: str | None = None,
+) -> Path:
+    """Heat units piling up since planting, with the stage each total reaches.
+
+    ``stage`` is :meth:`dosojos_sat.stages.StageEstimate.to_dict`; ``heat`` the daily
+    ``date`` and ``cumulative`` from :func:`dosojos_sat.stages.gdu_series`. Every
+    word on the chart comes in through the arguments, so the farmer reads it in
+    their own language.
+    """
+    milestones = {m["stage"]: m for m in stage["milestones"]}
+    planted = date.fromisoformat(stage["planted"])
+    as_of = date.fromisoformat(stage["as_of"])
+    last = milestones.get("black_layer", {}).get("date")
+    end = max(date.fromisoformat(last) if last else as_of + timedelta(days=30),
+              as_of + timedelta(days=7))
+
+    figure, axes = plt.subplots(figsize=FIG_SIZE, dpi=DPI)
+    critical_low = milestones["panicle_initiation"]["gdu"]
+    critical_high = milestones["flowering"]["gdu"]
+    axes.axhspan(critical_low, critical_high, color=CRITICAL_COLOR, alpha=0.10, lw=0)
+    axes.annotate(critical_label, xy=(planted, (critical_low + critical_high) / 2),
+                  xytext=(6, 0), textcoords="offset points", va="center",
+                  fontsize=FONT_SIZES["annotation"], color=CRITICAL_COLOR, fontweight="bold")
+
+    for key in CHART_STAGES:
+        if key not in milestones:
+            continue
+        level = milestones[key]["gdu"]
+        axes.axhline(level, color="#d5dcd6", lw=1, zorder=1)
+        axes.annotate(names.get(key, key), xy=(1, level), xycoords=("axes fraction", "data"),
+                      xytext=(6, 0), textcoords="offset points", va="center",
+                      fontsize=FONT_SIZES["tick"], color="#3a4540")
+
+    if heat is not None and not heat.empty:
+        axes.plot([planted] + list(heat["date"]), [0.0] + list(heat["cumulative"]),
+                  color=STAGE_LINE_COLOR, lw=2.8, zorder=3)
+    rate = stage.get("gdu_per_day")
+    if rate:
+        days = (end - as_of).days
+        future = [as_of + timedelta(days=i) for i in range(days + 1)]
+        axes.plot(future, [stage["gdu"] + rate * i for i in range(days + 1)],
+                  color=STAGE_LINE_COLOR, lw=2, ls=(0, (4, 3)), zorder=3,
+                  label=projected_label)
+        axes.legend(loc="upper left", frameon=False, fontsize=FONT_SIZES["legend"])
+
+    axes.axvline(as_of, color="#6f6e69", lw=1.2, ls=":", zorder=2)
+    axes.plot([as_of], [stage["gdu"]], "o", color=STAGE_LINE_COLOR, ms=9, zorder=4)
+    axes.annotate(today_label, xy=(as_of, stage["gdu"]), xytext=(-10, 12),
+                  textcoords="offset points", ha="right", fontsize=FONT_SIZES["annotation"],
+                  color="#1e2b24", fontweight="bold")
+
+    top = max(milestones.get("black_layer", {}).get("gdu", 0), stage["gdu"]) * 1.06
+    axes.set_ylim(0, top)
+    axes.set_xlim(planted, end)
+    axes.set_ylabel(axis_label, fontsize=FONT_SIZES["axis"])
+    axes.tick_params(labelsize=FONT_SIZES["tick"])
+    axes.xaxis.set_major_formatter(mdates.DateFormatter("%d %b"))
+    for side in ("top", "right"):
+        axes.spines[side].set_visible(False)
+
+    axes.annotate(title, xy=(0, 1), xycoords="axes fraction", xytext=(0, 48),
+                  textcoords="offset points", fontsize=FONT_SIZES["title"], color="#1e2b24")
+    axes.annotate(subtitle, xy=(0, 1), xycoords="axes fraction", xytext=(0, 26),
+                  textcoords="offset points", fontsize=FONT_SIZES["subtitle"], color="#6f6e69")
+    if banner:
+        axes.annotate(
+            banner, xy=(0, 1), xycoords="axes fraction", xytext=(0, 84),
+            textcoords="offset points", fontsize=FONT_SIZES["legend"], color="white",
+            fontweight="bold",
+            bbox={"boxstyle": "square,pad=0.45", "facecolor": BANNER_COLOR, "edgecolor": "none"},
+        )
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    figure.savefig(out_path, bbox_inches="tight", facecolor="white")
+    plt.close(figure)
+    log.info("wrote %s", out_path)
+    return out_path
+
+
+# --------------------------------------------------------------------------- #
 # The crop map
 # --------------------------------------------------------------------------- #
 

@@ -100,3 +100,50 @@ def test_a_station_file_must_name_its_units(tmp_path: Path) -> None:
     path.write_text("date,ETo,rain_mm\n2026-07-01,7.1,0\n", encoding="utf-8")
     with pytest.raises(weather.WeatherError, match="does not say its unit"):
         weather.read_station_csv(path)
+
+
+TEMP_DAS = """Attributes {
+    daily_maximum_temperature {
+        Int16 _FillValue 32767;
+        Int16 missing_value 32767;
+        Float64 scale_factor 0.1;
+        Float64 add_offset 220.0;
+    }
+    daily_minimum_temperature {
+        Int16 _FillValue 32767;
+        Int16 missing_value 32767;
+        Float64 scale_factor 0.1;
+        Float64 add_offset 210.0;
+    }
+}"""
+
+
+def test_highs_and_lows_arrive_in_celsius() -> None:
+    """gridMET packs temperatures as kelvin; the checkbook's heat units want Celsius."""
+    tmax = HEADER.format(var="daily_maximum_temperature") + "2018-05-01T00:00:00Z,40.4784,-86.9897,882.0\n"
+    tmin = HEADER.format(var="daily_minimum_temperature") + "2018-05-01T00:00:00Z,40.4784,-86.9897,835.0\n"
+
+    def get(url: str, params=None, timeout=None) -> _Response:
+        if url.endswith(".das"):
+            return _Response(TEMP_DAS if ("_tmmx_" in url or "_tmmn_" in url) else DAS)
+        if "_tmmx_" in url:
+            return _Response(tmax)
+        if "_tmmn_" in url:
+            return _Response(tmin)
+        return _Response(ETO_CSV if "_pet_" in url else RAIN_CSV)
+
+    frame = weather.fetch_gridmet(40.4784, -86.9897, date(2018, 5, 1), date(2018, 5, 1), get=get)
+    assert frame.loc[0, "tmax_c"] == pytest.approx(308.2 - 273.15)     # 882 * 0.1 + 220
+    assert frame.loc[0, "tmin_c"] == pytest.approx(293.5 - 273.15)
+
+
+def test_the_water_checkbook_does_not_wait_on_temperatures() -> None:
+    """If the temperature service fails, ETo and rain still arrive; stages simply wait."""
+    def get(url: str, params=None, timeout=None) -> _Response:
+        if "_tmmx_" in url or "_tmmn_" in url:
+            return _Response("server exploded", 404)
+        return _fake_get(url, params, timeout)
+
+    frame = weather.fetch_gridmet(40.4784, -86.9897, date(2018, 5, 1), date(2018, 5, 2), get=get)
+    assert frame["eto_mm"].notna().any()
+    assert frame["tmax_c"].isna().all() and frame["tmin_c"].isna().all()
