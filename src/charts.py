@@ -430,6 +430,7 @@ def plot_sorghum_stages(
     projected_label: str,
     axis_label: str,
     banner: str | None = None,
+    month_names: list[str] | None = None,
 ) -> Path:
     """Heat units piling up since planting, with the stage each total reaches.
 
@@ -485,7 +486,13 @@ def plot_sorghum_stages(
     axes.set_xlim(planted, end)
     axes.set_ylabel(axis_label, fontsize=FONT_SIZES["axis"])
     axes.tick_params(labelsize=FONT_SIZES["tick"])
-    axes.xaxis.set_major_formatter(mdates.DateFormatter("%d %b"))
+    if month_names:
+        # The farmer's own month names, not the machine's locale.
+        axes.xaxis.set_major_formatter(plt.FuncFormatter(
+            lambda value, _: (lambda d: f"{d.day} {month_names[d.month - 1]}")(
+                mdates.num2date(value))))
+    else:
+        axes.xaxis.set_major_formatter(mdates.DateFormatter("%d %b"))
     for side in ("top", "right"):
         axes.spines[side].set_visible(False)
 
