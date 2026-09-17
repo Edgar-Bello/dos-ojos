@@ -10,3 +10,5 @@ __pycache__/
 sms.env
 examples/demo_data/
 examples/demo_data_clean/
+examples/demo_data_drone/
+examples/demo_data_thermal/

@@ -1,0 +1,21 @@
+# EXAMPLE: a made-up grower on a pretend 555 number (956-555-0178), texting in English.
+# The field is REAL and PUBLIC but it is not a farm: it is Purdue University's field 54 at
+# the Agronomy Center for Research and Education in Indiana, sown with 18 sorghum hybrids
+# on 2018-05-08 and flown by their own drone on 2018-07-10 (CC0; see
+# public_demo/purdue-sorghum-2018/SOURCE.md). Used by setup_drone_demo.cmd, which pins that
+# demo to the day after the flight, Wednesday 11 July 2018.
+# He picks option 2, since that flight is the one real set of drone photos we have of
+# sorghum. The dataset records no irrigation, so rainfed is our assumption, not Purdue's.
+hello
+2
+Dan Example
+yes
+2
+Field 54
+13
+40.47744, -86.98959
+sorghum
+May 8
+yes
+4
+rainfed

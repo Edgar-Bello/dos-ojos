@@ -80,6 +80,10 @@ PAGE_TEXT = {
                  "on WiFi: there are many. If it stops, choose them again; what is already up "
                  "is skipped."),
         "choose": ("Elegir fotos", "Choose photos"), "done": ("Terminé", "I'm done"),
+        # A camera writes its own folder, and a thermal scan writes thousands of
+        # files in folders inside it. Picking those one by one is not a thing to
+        # ask of anybody.
+        "folder": ("Elegir una carpeta", "Choose a folder"),
         "progress": ("{done} de {total} archivos, {mb} MB", "{done} of {total} files, {mb} MB"),
         "finished": ("¡Listo! Recibimos {n} archivos. Ya puede cerrar esta página.",
                      "Done! We got {n} files. You can close this page."),

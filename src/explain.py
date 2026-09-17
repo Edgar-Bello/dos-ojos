@@ -207,6 +207,8 @@ S = {
         "can't see it."),
     "ground_drone": ("El suelo bajo {field} salió de las fotos de su propio vuelo del {year}.",
                      "The ground under {field} came from your own flight's photos, {year}."),
+    "ground_cloud": ("El suelo bajo {field} salió del láser de su propio vuelo del {year}.",
+                     "The ground under {field} came from your own flight's laser, {year}."),
     "ground_why": (
         "Importa porque el agua corre cuesta abajo: una parte alta se queda seca aunque el "
         "campo entero lleve el riego completo, y una parte baja se encharca. Los colores son "
@@ -252,6 +254,38 @@ S = {
                      "The thermal camera found no warm patch worth reporting."),
     "thermal_go": ("Vaya a verlo. La cámara no sabe qué es.",
                    "Go and look. The camera can't name what it is."),
+    # What the camera could not do, in the farmer's own words. The drone half
+    # writes the same things in English for whoever runs it; these are the ones
+    # that change how much weight to put on the answer, so they go on the page.
+    "thermal_by_heat": (
+        "En este vuelo no venían fotos de color, así que no hay modelo de altura: las hojas se "
+        "reconocieron solo por temperatura, por estar varios grados más frescas que el suelo de "
+        "junto. Una planta tan dañada que ya ni se enfría se lee como suelo y se queda fuera - "
+        "y esa es justo la que uno quiere encontrar. Un mapa tranquilo aquí tranquiliza menos "
+        "que uno hecho con fotos de color al lado.",
+        "This flight carried no colour photos, so there is no height model: leaves were told "
+        "only by temperature, by being several degrees cooler than the soil beside them. A "
+        "plant so far gone that it no longer cools itself reads as soil and is left out - and "
+        "that is exactly the plant worth finding. A quiet map here is less reassuring than one "
+        "made with colour photos beside it."),
+    "thermal_scan": (
+        "El vuelo tardó {minutes} minutos y el sol siguió subiendo: el cultivo se calentó "
+        "{drift} C de la primera foto a la última. Eso se descuenta cuadro por cuadro, "
+        "comparando cada foto con las que la traslapan. Lo que cuesta: una franja caliente más "
+        "ancha que lo que ve la cámara de un jalón se va con la corrección, así que un campo "
+        "caliente entero se ve en la cuenta del agua, no aquí.",
+        "The flight took {minutes} minutes and the sun kept climbing: the crop warmed {drift} C "
+        "between the first picture and the last. That is taken out frame by frame, by comparing "
+        "each picture with the ones it overlaps. What it costs: a hot stretch wider than the "
+        "camera sees at once goes with the correction, so a whole field running hot shows up in "
+        "the water account, not here."),
+    "thermal_all_hot": (
+        "Ojo: {share}% de la mata está caliente, que es demasiado campo para ser manchas. O le "
+        "falta agua parejo, o el vuelo pasó con nubes o viento. Tome lo de abajo como lugares "
+        "para ir a ver, nada más.",
+        "Careful: {share}% of the canopy is running hot, which is too much of the field to be "
+        "patches. Either it is short of water all over, or the flight passed through cloud or "
+        "wind. Treat what follows as places to go and look, nothing more."),
     "sources": ("De dónde salen los números", "Where the numbers come from"),
     "limits": ("Lo que esto no es", "What this is not"),
     "limits_body": (
@@ -335,8 +369,13 @@ SOURCES = [
      ("clima diario en cuadros de 4 km", "daily weather on a 4 km grid")),
     ("USDA SSURGO", ("mapa de suelos", "soil map")),
     ("FAO-56", ("el método de la cuenta del agua", "the water accounting method")),
-    ("USGS 3DEP", ("láser aéreo para el terreno", "airborne laser for the ground")),
 ]
+
+#: Listed only when the ground on this page actually came from it. A farmer
+#: whose own flight measured the ground, or who has no ground map at all, should
+#: not read a list of things we used that we did not use.
+GROUND_3DEP_SOURCE = ("USGS 3DEP", ("láser aéreo del gobierno para el terreno",
+                                    "the government's airborne laser for the ground"))
 
 
 #: What a farmer checks for at each stage, in their words.
@@ -616,7 +655,8 @@ def build(settings: Settings, farmer: Farmer, item: FieldWater, events: list[Eve
     parts += _ground(settings, record, terrain, lang)
     parts += _flight(settings, thermal or terrain, lang)
     parts += _thermal(settings, thermal, lang)
-    parts += _sources(lang, sorghum=bool(status is not None and status.stage))
+    parts += _sources(lang, sorghum=bool(status is not None and status.stage),
+                      ground_3dep=(terrain or {}).get("ground_source") == "3dep")
 
     parts.append(f"<footer>{_esc(_('footer', lang))}</footer>")
     parts.append("</main>")
@@ -727,7 +767,10 @@ def _ground(settings: Settings, record: FieldRow, report: dict | None, lang: str
     if not report:
         return []
     year = str(report.get("flown_on") or "")[:4] or "?"
-    who = "ground_lidar" if report.get("ground_source") == "lidar" else "ground_drone"
+    # Three ways the ground gets measured, and a grower should know which: the
+    # government's public survey, their own flight's laser, or its photographs.
+    who = {"3dep": "ground_lidar", "lidar": "ground_cloud"}.get(
+        report.get("ground_source"), "ground_drone")
     parts = [f"<h2>{_esc(_('ground', lang))}</h2>",
              f"<p>{_esc(_(who, lang, field=record.name, year=year))}</p>",
              f"<p>{_esc(_('ground_why', lang))}</p>"]
@@ -767,10 +810,13 @@ def _thermal(settings: Settings, report: dict | None, lang: str) -> list[str]:
     image = _drone_image(settings, report, "thermal")
     if image:
         parts.append(f'<figure><img src="{image}" alt=""></figure>')
+    if (report.get("warm_share") or 0) > 0.35:
+        share = f"{report['warm_share'] * 100:.0f}"
+        parts.append(f'<p class="note">{_esc(_("thermal_all_hot", lang, share=share))}</p>')
     patches = sorted(report.get("patches") or [], key=lambda p: p.get("chance", 0), reverse=True)
     if not patches:
         parts.append(f"<p>{_esc(_('thermal_none', lang))}</p>")
-        return parts
+        return parts + _thermal_limits(report, lang)
     for patch in patches:
         where = text.pick(text.PLACES.get(patch.get("where") or "middle",
                                           ("en el centro", "in the middle")), lang)
@@ -781,9 +827,24 @@ def _thermal(settings: Settings, report: dict | None, lang: str) -> list[str]:
         parts.append(f'<div class="patch"><div class="chance">{_esc(head)}</div>'
                      f"<ul>{signs}</ul>"
                      f'<p class="note">{_esc(_("thermal_go", lang))}</p></div>')
-    for note in report.get("notes") or []:
-        parts.append(f'<p class="note">{_esc(note)}</p>')
-    return parts
+    return parts + _thermal_limits(report, lang)
+
+
+def _thermal_limits(report: dict, lang: str) -> list[str]:
+    """What the camera could not do, in the farmer's language.
+
+    The drone half writes its own notes in English for whoever runs it; these
+    are the two that change how much weight a grower should put on the answer,
+    so they are said here rather than pasted.
+    """
+    lines = []
+    if report.get("leaves_from") == "heat":
+        lines.append(_("thermal_by_heat", lang))
+    scan = report.get("scan") or {}
+    if scan.get("minutes") and scan.get("drift_c"):
+        lines.append(_("thermal_scan", lang, minutes=f"{scan['minutes']:.0f}",
+                       drift=f"{scan['drift_c']:.1f}"))
+    return [f'<p class="note">{_esc(line)}</p>' for line in lines]
 
 
 def _signs(patch: dict, lang: str) -> list[str]:
@@ -812,8 +873,9 @@ def _signs(patch: dict, lang: str) -> list[str]:
     return lines
 
 
-def _sources(lang: str, *, sorghum: bool = False) -> list[str]:
-    listed = SOURCES + (SORGHUM_SOURCES if sorghum else [])
+def _sources(lang: str, *, sorghum: bool = False, ground_3dep: bool = False) -> list[str]:
+    listed = (SOURCES + (SORGHUM_SOURCES if sorghum else [])
+              + ([GROUND_3DEP_SOURCE] if ground_3dep else []))
     rows = "".join(f"<tr><td>{_esc(name)}</td><td>{_esc(text.pick(what, lang))}</td></tr>"
                    for name, what in listed)
     return [f"<h2>{_esc(_('sources', lang))}</h2>", f"<table>{rows}</table>",

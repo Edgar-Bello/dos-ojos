@@ -30,6 +30,7 @@
   <p id="info"></p>
   <div class="buttons">
     <label class="button" id="chooseLabel"><span id="choose"></span><input type="file" id="files" multiple></label>
+    <label class="button" id="folderLabel"><span id="folder"></span><input type="file" id="folderFiles" webkitdirectory multiple></label>
     <button id="finish" disabled></button>
   </div>
   <div class="bar"><div id="bar"></div></div>
@@ -45,6 +46,7 @@ if (DATA.banner) { $("band").textContent = DATA.banner; $("band").hidden = false
 $("title").textContent = S.title;
 $("info").textContent = S.info;
 $("choose").textContent = S.choose;
+$("folder").textContent = S.folder;
 $("finish").textContent = S.done;
 $("files").accept = DATA.extensions.join(",") + ",image/*,video/*";
 let uploaded = DATA.files;
@@ -73,8 +75,12 @@ function put(file) {
 
 let onProgress = () => {};
 
-$("files").onchange = async () => {
-  const chosen = [...$("files").files];
+async function send(input) {
+  // A folder carries whatever else lives in it - readmes, thumbnails, a stray
+  // spreadsheet - and the server refuses those one by one; drop them here so a
+  // folder of ten thousand files does not stop on the first of them.
+  const chosen = [...input.files].filter(f =>
+    DATA.extensions.some(ext => f.name.toLowerCase().endsWith(ext)));
   if (!chosen.length) return;
   $("error").textContent = "";
   $("chooseLabel").style.opacity = .5;
@@ -102,8 +108,11 @@ $("files").onchange = async () => {
     }
   }
   $("chooseLabel").style.opacity = 1;
-  $("files").value = "";
-};
+  input.value = "";
+}
+
+$("files").onchange = () => send($("files"));
+$("folderFiles").onchange = () => send($("folderFiles"));
 
 $("finish").onclick = async () => {
   $("finish").disabled = true;

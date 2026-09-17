@@ -171,7 +171,7 @@ def _terrain(settings, **extra) -> dict:
     (drone / "flights.json").write_text(json.dumps({"flights": {
         "F001-20190401": {"field_id": "F001", "flown_on": "2019-04-01"}}}), encoding="utf-8")
     (drone / "out" / "F001-20190401").mkdir(parents=True, exist_ok=True)
-    payload = {"ground_source": "lidar", "advice": [
+    payload = {"ground_source": "3dep", "advice": [
         {"topic": "high spot", "priority": 1, "finding": "High spot H1 in the west side",
          "advice": "knock it down"}], **extra}
     (drone / "out" / "F001-20190401" / "terrain.json").write_text(
@@ -184,6 +184,13 @@ def test_the_ground_section_says_who_measured_it_and_when(settings, farm) -> Non
     page = _built(settings, farm, terrain=_terrain(settings))
     assert "USGS 3DEP" in page and "2019" in page
     assert "Nadie vol" in page                 # nobody flew anything of theirs
+
+
+def test_a_flight_s_own_laser_is_not_credited_to_the_government(settings, farm) -> None:
+    """A grower who paid for the flight should not read that nobody flew theirs."""
+    page = _built(settings, farm, terrain=_terrain(settings, ground_source="lidar"))
+    assert "USGS" not in page
+    assert "de su propio vuelo" in page
 
 
 def _thermal_report(chance: float = 0.62, **patch) -> dict:

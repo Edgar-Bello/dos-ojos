@@ -326,6 +326,42 @@ reset, or press "+ nuevo" to sign up another pretend farmer live, map page
 included. Everything lives in `examples\demo_data`, with an EXAMPLE band on every
 page, apart from real farmers.
 
+## Two more demos, for the two services the Valley one cannot show
+
+The Valley demo shows option 1 on real Valley fields. Options 2 and 3 need a real
+flight, and the only free ones of sorghum are elsewhere and in 2018 — so they get
+a demo each, on their own port, pinned to their own day. Same bot, same texts,
+same pages; different field, and the banner says so on every screen.
+
+| | Port | Pinned to | Farmer | The field, and whose it is |
+|---|---|---|---|---|
+| `setup_sms_demo.cmd` → `run_sms_demo.cmd` | 8080 | Tue 20 May 2025 | Juan, Maria, Mary, Pedro | five real Valley fields, USDA crop map |
+| `setup_drone_demo.cmd` → `run_drone_demo.cmd` | 8081 | Wed 11 Jul 2018 | Dan Example, option **2** | Purdue field 54, Indiana: 72 plots of 18 sorghum hybrids, flown by their own drone and laser 10 Jul 2018 (CC0) |
+| `setup_thermal_demo.cmd` → `run_thermal_demo.cmd` | 8082 | Sun 20 May 2018 | Ana Example, option **3** | the TERRA-REF field scanner's strip at Maricopa, Arizona: sorghum sown 20 Apr 2018, 2,719 thermal frames taken over it that morning (public domain) |
+
+Both take about ten to fifteen minutes of set-up, mostly satellite images, and
+run at the same time as the Valley one. The farmers are made up; their watering
+dates are invented; the fields, crops, sowing dates and flights are real and
+public. See `public_demo\purdue-sorghum-2018\SOURCE.md` and
+`public_demo\terraref-sorghum-2018\SOURCE.md`.
+
+**The flight itself is a team step, as it is in the real product.** The farmer
+texts `DRONE`, opens the link and sends the files — a folder at a time, which is
+what a thermal scan arrives as. Then somebody runs the drone half on what
+arrived:
+
+```powershell
+C:\Users\edgar\Projects\Dos_Ojos\dosojos_sms\examples\process_drone_demo.cmd
+C:\Users\edgar\Projects\Dos_Ojos\dosojos_sms\examples\process_thermal_demo.cmd
+```
+
+Each looks at what was uploaded, says what it decided it is, and runs the same
+commands a person would type (`examples\process_flight.py`). With nothing
+uploaded yet, each runs on the public files its demo stands on, so the answer can
+be seen without waiting on a 3 GB upload. Then `WHY` comes back with the flight
+on the page: plant by plant and the lie of the land for Dan, canopy temperature
+and warm patches for Ana.
+
 ## Going live with Twilio
 
 These steps are yours to do. They need an account, a card and your own
