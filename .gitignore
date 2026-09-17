@@ -9,3 +9,4 @@ __pycache__/
 *.sqlite-shm
 sms.env
 examples/demo_data/
+examples/demo_data_clean/

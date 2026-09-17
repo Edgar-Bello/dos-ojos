@@ -1,0 +1,5 @@
+# EXAMPLE, after the daily run: Maria asks how her dryland sorghum is doing, then
+# sends a sugarcane aphid count from her field. Used by setup_sms_demo.cmd.
+ETAPA
+PULGON
+6 de 80

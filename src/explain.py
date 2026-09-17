@@ -501,7 +501,7 @@ def draw_stage_chart(item: FieldWater, out_dir: Path, lang: str, *,
             subtitle=_("chart_stage_sub", lang, maturity=maturity),
             today_label=_("chart_today", lang), critical_label=_("chart_critical", lang),
             projected_label=_("chart_projected", lang), axis_label=_("chart_axis", lang),
-            banner=banner,
+            banner=banner, month_names=list(text.MONTH_NAMES[lang]),
         )
     except Exception:            # a chart is never worth failing the page over
         log.exception("could not draw the stage chart for %s", item.field.id)

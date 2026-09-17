@@ -2,7 +2,8 @@
 # Her field is a real grain sorghum field near Elsa from public USDA data
 # (demo_fields.geojson), planted Mar 12 and never irrigated (rainfed, "temporal").
 # Used by setup_sms_demo.cmd.
-# She has no drone, so she picks satellite only (option 1).
+# She has no drone, so she picks satellite only (option 1), and she doesn't know her
+# hybrid's maturity (4, not sure), so her growth stage is worked out as medium season.
 hola
 1
 Maria Ejemplo
@@ -14,4 +15,5 @@ Sorgo Elsa
 sorgo
 12 marzo
 si
+4
 temporal

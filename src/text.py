@@ -171,6 +171,8 @@ _MONTHS = {"es": ("ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep",
                   "nov", "dic"),
            "en": ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct",
                   "Nov", "Dec")}
+#: Month abbreviations by language, for charts that print dates.
+MONTH_NAMES = _MONTHS
 
 
 def pick(pair: tuple[str, str], lang: str) -> str:

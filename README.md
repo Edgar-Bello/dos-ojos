@@ -244,15 +244,15 @@ C:\Users\edgar\Projects\Dos_Ojos\dosojos_sms\examples\setup_sms_demo.cmd
 C:\Users\edgar\Projects\Dos_Ojos\dosojos_sms\examples\run_sms_demo.cmd
 ```
 
-**Real fields, made-up farmers.** The four fields are real Rio Grande Valley
+**Real fields, made-up farmers.** The five fields are real Rio Grande Valley
 fields, picked from the USDA's public 2025 crop map (`examples\demo_fields.geojson`;
 see `public_demo\rgv-crops-2025\SOURCE.md`):
 
 - cotton and corn side by side near Lyford;
-- grain sorghum near Elsa;
+- grain sorghum near Elsa, and another near Primera;
 - citrus near Monte Alto.
 
-Three MADE-UP farmers on pretend 555 numbers register them by text. Their
+Four MADE-UP farmers on pretend 555 numbers register them by text. Their
 planting and watering dates are invented to match what the satellite saw.
 
 They also pick a different service each, so the demo shows all three.
@@ -263,16 +263,20 @@ They also pick a different service each, so the demo shows all three.
 | | | | F002 Maiz Lyford (corn, planted 21 Feb, watered "ayer") | furrows, from the west |
 | Maria Ejemplo, 956-555-0142 | Spanish | 1 satellite only | F003 Sorgo Elsa (grain sorghum, planted 12 Mar) | rainfed (temporal) |
 | Mary Example, 956-555-0187 | English | 2 satellite and drone | F004 Monte Alto Grove (citrus) | flooding, from the north |
+| Pedro Ejemplo, 956-555-0165 | Spanish | 1 satellite only | F005 Sorgo Primera (grain sorghum, planted 18 Feb, medium season) | furrows, from the west |
 
 The demo is pinned to Tuesday 20 May 2025, so its answers never drift. The pin
 is `DOSOJOS_AS_OF` in `examples\demo_data\sms\sms.env`, and the map links in the
 texts keep working under it.
 
 **Set-up.** The first script runs once. It needs the internet and takes about 30
-minutes, mostly satellite images:
+minutes on an empty folder, mostly satellite images. A field whose five years of
+images are not cached yet adds about 30 minutes on its own. `setup_sms_demo.cmd <folder>` builds
+it somewhere else first:
 
-1. It replays the three conversations (`demo_juan.txt`, `demo_maria.txt`, `demo_mary.txt`).
-2. It draws the four outlines, which texts each farmer the acres and a link to
+1. It replays the four sign-ups (`demo_juan.txt`, `demo_maria.txt`, `demo_mary.txt`,
+   `demo_pedro.txt`).
+2. It draws the five outlines, which texts each farmer the acres and a link to
    see the field on the map.
 3. It runs `daily --send`: satellite, gridMET weather, SSURGO soil, the checkbook,
    and the alerts. The alerts stay in the simulator.
@@ -282,6 +286,8 @@ minutes, mostly satellite images:
    `public_demo\thermal-synthetic\make_thermal.py`, and every figure from it
    carries a SYNTHETIC band. Delete that block from `setup_sms_demo.cmd` for a
    demo with no made-up pictures in it at all; everything else keeps working.
+6. It replays a week of sorghum texts (`demo_maria_week.txt`, `demo_pedro_week.txt`)
+   and leaves a clean copy of the whole demo in `examples\demo_data_clean`.
 
 **What each field answers to AGUA** (Juan and Mary also get an alert at set-up):
 
@@ -291,8 +297,23 @@ minutes, mostly satellite images:
   low corner.
 - **Citrus:** water now, about 4.7 inches by flooding, at bloom and fruit set.
   Answer "WATERED today 5", then "yes", and it comes back with about 16 days.
-- **Sorghum:** it needs rain now, at boot to flowering "when drought hurts most".
-  It is rainfed, so the bot talks about rain, not watering.
+- **Sorgo Elsa (Maria, dryland):** it needs rain now, at flowering "when drought
+  hurts most", day 69 and 1,930 heat units. She doesn't know her hybrid, so it is
+  worked out as medium and says so. Her week: `ETAPA` (next, soft dough about 31
+  May; scout midge and sugarcane aphid) and a count of 6 of 80 plants, 8%, below
+  the 30% threshold.
+- **Sorgo Primera (Pedro, furrows):** water now, about 5.9 inches, at soft dough,
+  day 91. His week: `AGUA` and a count of 21 of 80, 26%, close to the 30%
+  threshold, so look again in 3 or 4 days. Maria also got the weekly scouting
+  reminder; Pedro's water alert outranked his that day.
+
+**Between farmers, and a farmer's own field.** `reset_sms_demo.cmd` puts the demo
+back where set-up left it in seconds; what was there moves to `old_demos`, never
+deleted. A farmer can sign up their own field live with "+ nuevo" and tap its
+corners on the map link; `refresh_sms_demo.cmd` then fetches this season's
+pictures, weather and soil for it in about 5 minutes, and AGUA, ETAPA and PULGON
+answer for their field too. Its chart has no "normal" band until the full history
+is fetched.
 
 Then every AGUA ends with *"¿Quiere saber por qué? Responda PORQUE"*. Answer
 `PORQUE` and each field comes back with a link to its own page of charts and
