@@ -58,18 +58,41 @@ function showDone(n) {
   $("status").textContent = S.finished.replace("{n}", n);
 }
 
-function put(file) {
+// The tunnel in front of the server takes at most 100 MB per request, so big
+// files go in pieces; a piece that fails is tried again a few times.
+const PIECE = 32 * 1024 * 1024;
+const TRIES = 3;
+
+async function put(file) {
+  if (file.size <= PIECE) return putPiece(file, file, null);
+  let result = {};
+  for (let start = 0; start < file.size; start += PIECE) {
+    const piece = file.slice(start, Math.min(start + PIECE, file.size));
+    for (let attempt = 1; ; attempt++) {
+      try {
+        result = await putPiece(file, piece, start);
+        break;
+      } catch (error) {
+        if (attempt >= TRIES) throw error;
+      }
+    }
+  }
+  return result;
+}
+
+function putPiece(file, body, start) {
   return new Promise((resolve, reject) => {
     const request = new XMLHttpRequest();
-    request.open("PUT", `${location.pathname}/file/${encodeURIComponent(file.name)}`);
-    request.upload.onprogress = e => onProgress(e.loaded);
+    const where = start === null ? "" : `?offset=${start}&total=${file.size}`;
+    request.open("PUT", `${location.pathname}/file/${encodeURIComponent(file.name)}${where}`);
+    request.upload.onprogress = e => onProgress((start || 0) + e.loaded);
     request.onload = () => {
       let result = {};
       try { result = JSON.parse(request.responseText); } catch (e) {}
       request.status === 200 ? resolve(result) : reject(new Error(result.error || request.status));
     };
     request.onerror = () => reject(new Error("network"));
-    request.send(file);
+    request.send(body);
   });
 }
 

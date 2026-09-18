@@ -327,35 +327,51 @@ class App:
                  if p.is_file() and not p.name.endswith(".part")} if folder.exists() else {}
         return {"files": files}
 
-    def upload_file(self, token: str, raw_name: str, length: int, stream) -> dict:
+    def upload_file(self, token: str, raw_name: str, length: int, stream, *,
+                    offset: int | None = None, total: int | None = None) -> dict:
+        """Save one file, or one piece of it: a tunnel caps each request (Cloudflare's
+        quick tunnel at 100 MB), so the page sends big files in pieces, each at
+        ``offset`` of a file ``total`` bytes long, and the last piece finishes it."""
         name = re.sub(r"[^A-Za-z0-9._-]", "_", Path(urllib.parse.unquote(raw_name)).name)
         if not name or name.startswith(".") or Path(name).suffix.lower() not in UPLOAD_EXTENSIONS:
             raise HttpError(415, f"{raw_name}: only photos, videos (with .srt), maps, "
                                  "laser point clouds or a zip")
-        if not 0 < length <= MAX_FILE_BYTES:
+        whole = length if total is None else total
+        start = offset or 0
+        if not 0 < whole <= MAX_FILE_BYTES:
             raise HttpError(413, f"{name}: too big or empty")
+        if not (0 < length and 0 <= start and start + length <= whole):
+            raise HttpError(400, f"{name}: this piece does not fit the file")
         with self.db() as conn:
             upload, _, _ = self._upload(conn, token)
         folder = Path(upload["folder"])
         folder.mkdir(parents=True, exist_ok=True)
-        if shutil.disk_usage(folder).free < length + DISK_RESERVE_BYTES:
+        if start == 0 and shutil.disk_usage(folder).free < whole + DISK_RESERVE_BYTES:
             raise HttpError(507, "the server's disk is full; tell the Dos Ojos team")
         target = folder / name
         existed = target.exists()
         partial = folder / (name + ".part")
+        have = partial.stat().st_size if start and partial.exists() else 0
+        if have < start:
+            raise HttpError(409, f"{name}: a piece before byte {start} is missing")
         remaining = length
-        with partial.open("wb") as handle:
+        with partial.open("r+b" if start else "wb") as handle:
+            # A piece sent again after being cut off overwrites what arrived of it.
+            handle.seek(start)
+            handle.truncate()
             while remaining:
                 chunk = stream.read(min(1 << 20, remaining))
                 if not chunk:
                     raise HttpError(400, f"{name}: the upload was cut off")
                 handle.write(chunk)
                 remaining -= len(chunk)
+        if start + length < whole:
+            return {"ok": True, "name": name, "received": start + length}
         partial.replace(target)
         if not existed:
             with self.lock, self.db() as conn:
-                store.count_upload(conn, token, length)
-        return {"ok": True, "name": name, "bytes": length}
+                store.count_upload(conn, token, whole)
+        return {"ok": True, "name": name, "bytes": whole}
 
     def upload_done(self, token: str) -> dict:
         with self.lock, self.db() as conn:
@@ -708,7 +724,11 @@ class Handler(BaseHTTPRequestHandler):
             elif method == "PUT":
                 if len(parts) == 4 and parts[0] == "u" and parts[2] == "file":
                     length = int(self.headers.get("Content-Length") or 0)
-                    self._json(app.upload_file(parts[1], parts[3], length, self.rfile))
+                    try:
+                        piece = {k: int(query[k]) for k in ("offset", "total") if k in query}
+                    except ValueError as exc:
+                        raise HttpError(400, "offset and total must be numbers") from exc
+                    self._json(app.upload_file(parts[1], parts[3], length, self.rfile, **piece))
                 else:
                     raise HttpError(404, "not found")
         except HttpError as exc:
@@ -732,7 +752,12 @@ class Handler(BaseHTTPRequestHandler):
         self._dispatch("POST")
 
     def do_PUT(self) -> None:
-        self._dispatch("PUT")
+        try:
+            self._dispatch("PUT")
+        except ConnectionError:
+            # The browser or tunnel hung up mid-upload; the page tries that piece again.
+            log.info("an upload to %s was cut off by the other side", self.path.split("?")[0])
+            self.close_connection = True
 
 
 def make_server(app: App, host: str, port: int) -> ThreadingHTTPServer:

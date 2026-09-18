@@ -260,6 +260,27 @@ def an_upload(app: App) -> str:
     return token
 
 
+def test_a_big_file_arrives_in_pieces(base: str, app: App, sent: list) -> None:
+    token = an_upload(app)
+    whole = bytes(range(256)) * 40                              # 10,240 bytes
+    url = f"{base}/u/{token}/file/map.tif"
+    piece = lambda start, end: call(f"{url}?offset={start}&total={len(whole)}", method="PUT",
+                                    data=whole[start:end])
+    assert piece(0, 4000)[0] == 200
+    assert piece(8000, len(whole))[0] == 409                    # the middle is missing
+    assert piece(4000, 6000)[0] == 200                          # cut off on the way...
+    status, body = piece(4000, 8000)                            # ...so sent again whole
+    assert status == 200 and json.loads(body)["received"] == 8000
+    listed = json.loads(call(f"{base}/u/{token}/files")[1])["files"]
+    assert "map.tif" not in listed                              # not finished yet
+    status, body = piece(8000, len(whole))
+    assert status == 200 and json.loads(body)["bytes"] == len(whole)
+    folder = app.settings.drone_workspace / "data" / "raw" / "F001-20260912"
+    assert (folder / "map.tif").read_bytes() == whole
+    assert call(f"{url}?offset=9000&total={len(whole)}", method="PUT",
+                data=b"x" * 2000)[0] == 400                     # past the end
+
+
 def test_uploading_a_flight(base: str, app: App, sent: list) -> None:
     token = an_upload(app)
     assert call(f"{base}/u/{token}")[0] == 200
