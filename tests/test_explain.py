@@ -230,6 +230,12 @@ def test_the_thermal_section_refuses_to_sound_like_a_diagnosis(settings, farm) -
     assert "Vaya a verlo" in page
 
 
+def _summary(report: dict, **values) -> dict:
+    """A flight's flag summary, as the drone half's 'report' or 'colour' writes it."""
+    return {"flight_id": report["flight_id"], "flown_on": "2026-09-10", "unit_type": "row_segment",
+            "n_judged": 9040, "n_stressed": 33, "n_dead": 0, "n_missing": 2907, **values}
+
+
 def test_a_farmer_s_own_flight_adds_its_height_and_flag_pictures(settings, farm) -> None:
     """Only a drone can give these, so a satellite-only field has no such section."""
     report = _terrain(settings)
@@ -237,10 +243,29 @@ def test_a_farmer_s_own_flight_adds_its_height_and_flag_pictures(settings, farm)
     for name in ("chm", "flag_overlay"):
         (folder / f"{name}.png").write_bytes(PNG)
 
-    page = _built(settings, farm, terrain=report)
+    page = _built(settings, farm, terrain=report, flags=_summary(report))
     assert "la altura del cultivo" in page
-    assert "planta por planta" in page
+    assert "Lo que encontró su vuelo" in page
+    assert "2,940 de 9,040 tramos de surco" in page and "amarillo = con estrés" in page
     assert page.count('<img src="data:image/png;base64,') == 2      # no terrain.png written
+
+
+def test_the_flight_s_flags_come_right_after_the_answer(settings, farm) -> None:
+    report = _terrain(settings)
+    (settings.drone_workspace / "out" / report["flight_id"] / "flag_overlay.png").write_bytes(PNG)
+    page = _built(settings, farm, terrain=report, flags=_summary(report))
+    answer, found = page.index("La respuesta"), page.index("Lo que encontró su vuelo")
+    assert answer < found < page.index("Cómo salió ese número")
+
+
+def test_stitched_photos_are_judged_by_squares_and_say_so(settings, farm) -> None:
+    report = _terrain(settings)
+    (settings.drone_workspace / "out" / report["flight_id"] / "flag_overlay.png").write_bytes(PNG)
+    flags = _summary(report, unit_type="cell", cell_m=1.0, n_judged=6265, n_stressed=854,
+                     n_missing=1066)
+    page = _built(settings, farm, flags=flags)
+    assert "1,920 de 6,265 cuadros de 1 m" in page
+    assert "sale solo del color" in page
 
 
 def test_without_a_flight_there_are_no_flight_pictures(settings, farm) -> None:

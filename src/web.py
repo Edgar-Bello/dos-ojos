@@ -38,7 +38,7 @@ from . import explain, export, outbox, parse, store, text, twilio
 from .bot import Bot, Inbound, Media, map_token
 from .config import LINK_DAYS, Settings
 from .jobs import Jobs
-from .status import Water, latest_terrain, latest_thermal, pest_line
+from .status import Water, latest_flags, latest_terrain, latest_thermal, pest_line
 from .status import message as status_message
 
 log = logging.getLogger(__name__)
@@ -380,6 +380,7 @@ class App:
             settings, farmer, item, events, today=today,
             terrain=latest_terrain(settings, record.id),
             thermal=latest_thermal(settings, record.id) if farmer.plan == "thermal" else None,
+            flags=latest_flags(settings, record.id) if farmer.plan in text.FLYING_PLANS else None,
             download=None if download else f"{token}/file",
         )
         return page.encode("utf-8")
@@ -530,7 +531,8 @@ class App:
                 s = json.loads((out / "block_summary.json").read_text(encoding="utf-8"))
                 stressed = (s.get("n_stressed") or 0) + (s.get("n_dead") or 0)
                 missing = s.get("n_missing") or 0
-                body = text.say("flight_ready_rows", lang, field=record.name,
+                key = "flight_ready_cells" if s.get("unit_type") == "cell" else "flight_ready_rows"
+                body = text.say(key, lang, field=record.name,
                                 problem=f"{stressed + missing:,}",
                                 total=f"{s.get('n_judged') or 0:,}",
                                 stressed=f"{stressed:,}", missing=f"{missing:,}")

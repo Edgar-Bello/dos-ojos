@@ -20,6 +20,7 @@ on, so the drone half can be seen working without waiting on a 3 GB upload.
 from __future__ import annotations
 
 import argparse
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -85,6 +86,14 @@ def a_field(data: Path) -> tuple[str, str]:
     return row[0], row[1] or "sorghum"
 
 
+def _placed(path: Path) -> tuple[bool, int]:
+    """Whether a TIFF already knows where it lies on the ground, and its band count."""
+    import rasterio
+
+    with rasterio.open(path) as dataset:
+        return dataset.crs is not None and not dataset.transform.is_identity, dataset.count
+
+
 def what_is_it(folder: Path) -> tuple[str, dict]:
     """Recognise an upload by what is in it, the way a person would."""
     files = [p for p in folder.rglob("*") if p.is_file()]
@@ -93,14 +102,25 @@ def what_is_it(folder: Path) -> tuple[str, dict]:
         kinds.setdefault(path.suffix.lower(), []).append(path)
     tiffs = kinds.get(".tif", []) + kinds.get(".tiff", [])
     clouds = kinds.get(".las", []) + kinds.get(".laz", [])
-    photos = kinds.get(".jpg", []) + kinds.get(".jpeg", []) + kinds.get(".dng", [])
-    if len(tiffs) > 50 and not clouds:
-        return "thermal", {"frames": folder, "n": len(tiffs)}
+    photos = kinds.get(".jpg", []) + kinds.get(".jpeg", [])
     if clouds:
         return "products", {"ortho": max(tiffs, key=lambda p: p.stat().st_size) if tiffs else None,
                             "clouds": sorted(clouds, key=lambda p: p.name)}
-    if photos:
+    if len(tiffs) > 1:
+        placed, bands = _placed(tiffs[0])
+        if bands == 1:
+            # Many one-band pictures are a thermal camera's. Frames that already
+            # know where they lie go straight to the mosaic; a drone's own
+            # thermal photos, with only a GPS tag each, are placed first.
+            return ("thermal" if placed else "thermal_photos"), {"n": len(tiffs)}
+        if not placed:
+            photos += tiffs
+    if len(photos) > 1:
         return "photos", {"n": len(photos)}
+    if len(tiffs) == 1:
+        placed, bands = _placed(tiffs[0])
+        if placed and bands >= 3:
+            return "ortho", {"ortho": tiffs[0]}
     return "unknown", {"n": len(files)}
 
 
@@ -111,6 +131,16 @@ def thermal(workspace: Path, flight: str, field: str, frames: Path, *, source: s
         run(workspace, "register", flight, "--field", field, "--date", date, "--crop", crop,
             "--force", "--source", source)
     run(workspace, "thermal", flight, "--frames", frames, *THERMAL_ARGS)
+
+
+def stitched(workspace: Path, flight: str, folder: Path) -> None:
+    """Loose colour photos: join them into one map and judge it by colour.
+
+    No Docker and no height model: the quick way, done in minutes. With Docker
+    running, 'dosojos-drone odm' makes the full height model instead, in hours.
+    """
+    run(workspace, "stitch", flight, "--photos", folder)
+    run(workspace, "colour", flight)
 
 
 def products(workspace: Path, flight: str, ortho: Path, clouds: list[Path]) -> None:
@@ -151,7 +181,8 @@ def main() -> None:
     waiting = [u for u in uploads(data)
                if arguments.flight in (None, u["flight_id"])
                and not (workspace / "out" / u["flight_id"] / "thermal.json").exists()
-               and not (workspace / "out" / u["flight_id"] / "chm.tif").exists()]
+               and not (workspace / "out" / u["flight_id"] / "chm.tif").exists()
+               and not (workspace / "out" / u["flight_id"] / "flags_colour.geojson").exists()]
     if not waiting and arguments.uploads_only:
         say("No finished upload is waiting. When the farmer texts DRONE, sends the files "
             "and presses I'm done, run this again.")
@@ -189,12 +220,21 @@ def main() -> None:
         elif kind == "products":
             say("  a point cloud and an orthophoto: finished maps from a drone service.")
             products(workspace, upload["flight_id"], detail["ortho"], detail["clouds"])
+        elif kind == "ortho":
+            say("  one colour map that already knows where it lies, and no point cloud: a "
+                "finished orthophoto from a drone service. Judged by colour; no heights.")
+            target = workspace / "data" / "odm" / upload["flight_id"] / "odm_orthophoto"
+            target.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(detail["ortho"], target / "odm_orthophoto.tif")
+            run(workspace, "colour", upload["flight_id"])
+        elif kind == "thermal_photos":
+            say(f"  {detail['n']} one-band pictures with no place on the map: a drone's "
+                "thermal photos. Each is placed from its GPS and its neighbours first.")
+            run(workspace, "thermal", upload["flight_id"], "--photos", folder, *THERMAL_ARGS)
         elif kind == "photos":
-            say(f"  {detail['n']} photos: this one needs photogrammetry first, which is a "
-                f"team job with Docker running:\n"
-                f"    dosojos-drone --workspace {workspace} odm {upload['flight_id']}\n"
-                "  then chm, detect, metrics, flag, report, terrain.")
-            continue
+            say(f"  {detail['n']} colour photos: joined into one map from their GPS and "
+                "where they overlap, then judged square by square by how green they are.")
+            stitched(workspace, upload["flight_id"], folder)
         else:
             say(f"  {detail['n']} files this script does not recognise; left alone.")
             continue

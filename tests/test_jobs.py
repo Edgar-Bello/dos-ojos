@@ -208,3 +208,15 @@ def test_a_job_that_cannot_start_is_a_failed_job() -> None:
 
     Jobs(run=missing).run_one(Job("x", ["nope"], lambda ok, attempt: answered.append(ok)))
     assert answered == [False]
+
+
+def test_stitched_photos_come_back_as_squares_of_the_field(app: App) -> None:
+    field_id = farmer_with_field(app, plan="drone")
+    summary = {"unit_type": "cell", "n_judged": 6265, "n_stressed": 854, "n_dead": 0,
+               "n_missing": 1066}
+    flight(app, field_id, "F001-20260910", {"block_summary.json": json.dumps(summary),
+                                             "flag_overlay.png": "PNG"})
+    app.jobs.finish()
+    last = texts(app)[-1]
+    assert "Your photos of North Field are joined into one map" in last
+    assert "1,920 of 6,265 squares" in last

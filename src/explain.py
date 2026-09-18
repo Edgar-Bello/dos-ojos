@@ -44,6 +44,38 @@ S = {
     "made": ("Hecho el {day} para {name}", "Made on {day} for {name}"),
     "save": ("Guardar este archivo", "Save this file"),
     "answer": ("La respuesta", "The answer"),
+    "found": ("Lo que encontró su vuelo", "What your flight found"),
+    "found_rows": (
+        "{problem} de {total} tramos de surco necesitan una revisada: {stressed} con estrés "
+        "y {missing} con plantas faltantes. Vuelo del {day}.",
+        "{problem} of {total} stretches of row need a look: {stressed} stressed and "
+        "{missing} with plants missing. Flown {day}."),
+    "found_trees": (
+        "{problem} de {total} árboles necesitan una revisada: {stressed} con estrés y "
+        "{missing} faltantes o muertos. Vuelo del {day}.",
+        "{problem} of {total} trees need a look: {stressed} stressed and {missing} missing "
+        "or dead. Flown {day}."),
+    "found_cells": (
+        "{problem} de {total} cuadros de {cell} m del campo necesitan una revisada: "
+        "{stressed} ralos o pálidos y {missing} casi sin plantas. Vuelo del {day}.",
+        "{problem} of {total} squares of {cell} m need a look: {stressed} thin or pale and "
+        "{missing} with almost no plants. Flown {day}."),
+    "found_key": (
+        "En la foto: amarillo = con estrés, vaya a verlo primero; rayado = faltan plantas; "
+        "lo que no está pintado se ve sano. Cada parte se compara con el resto de SU campo "
+        "ese mismo día, no con un número fijo.",
+        "In the picture: yellow = stressed, go and look there first; hatched = plants "
+        "missing; anything not painted looks healthy. Every part is compared with the rest "
+        "of YOUR field on the same day, not with a fixed number."),
+    "found_colour": (
+        "Sus fotos se unieron en un solo mapa por su GPS y por lo que se ve repetido de una "
+        "foto a otra. Sin alturas: esto sale solo del color, de qué tanto de cada cuadro "
+        "está verde y qué tan verde. Si en su cultivo quedan calles peladas a propósito, "
+        "esas también salen rayadas.",
+        "Your photos were joined into one map by their GPS and by what repeats from one "
+        "photo to the next. There are no heights: this comes from colour alone, how much "
+        "of each square is green and how green. Where a crop leaves bare alleys on purpose, "
+        "those show hatched too."),
     "how": ("Cómo salió ese número", "How that number came out"),
     "step_soil": ("1. Cuánta agua cabe en su suelo", "1. How much water your soil holds"),
     "step_soil_body": (
@@ -224,14 +256,6 @@ S = {
         "Your own flight's photos give two maps: one of the bare ground and one of the top of "
         "the plants. Subtracting one from the other is the crop's height, plant by plant. The "
         "colours run from short to tall."),
-    "flags": ("Su vuelo: planta por planta", "Your flight: plant by plant"),
-    "flags_body": (
-        "Cada planta o tramo de surco se compara con el resto de SU campo, no con un número "
-        "fijo: sana, con estrés (de las más chicas o menos verdes), muerta o faltante. Así una "
-        "variedad chica no sale marcada por ser chica.",
-        "Every plant or stretch of row is compared with the rest of YOUR field, not with a "
-        "fixed number: healthy, stressed (among the smallest or least green), dead or missing. "
-        "That way a naturally small variety isn't flagged for being small."),
     "thermal": ("La cámara térmica: posibles plagas", "The thermal camera: possible pests"),
     "thermal_body": (
         "Una planta sana se enfría sola: saca agua por las hojas, como sudar. Una planta que "
@@ -627,7 +651,7 @@ def _drone_image(settings: Settings, report: dict | None, name: str) -> str | No
 
 def build(settings: Settings, farmer: Farmer, item: FieldWater, events: list[Event], *,
           today: date, terrain: dict | None = None, thermal: dict | None = None,
-          download: str | None = None) -> str:
+          flags: dict | None = None, download: str | None = None) -> str:
     """One field's explanation as a single HTML page."""
     lang = farmer.language
     record, status = item.field, item.status
@@ -646,6 +670,9 @@ def build(settings: Settings, farmer: Farmer, item: FieldWater, events: list[Eve
                      f"{_esc(_('save', lang))}</a>")
 
     parts += _answer(item, lang, today)
+    # A flight's picture of where to walk sits right under the answer: of
+    # everything on this page it is the one a farmer acts on first.
+    parts += _found(settings, flags, lang, today)
     parts += _arithmetic(item, events, lang)
     parts += _charts(item, images, lang)
     stage_image = draw_stage_chart(item, settings.sms_dir / "explain" / record.id, lang,
@@ -792,13 +819,34 @@ def _flight(settings: Settings, report: dict | None, lang: str) -> list[str]:
     depends on it.
     """
     parts: list[str] = []
-    for name, heading, body in (("chm", "canopy", "canopy_body"),
-                                ("flag_overlay", "flags", "flags_body")):
+    for name, heading, body in (("chm", "canopy", "canopy_body"),):
         image = _drone_image(settings, report, name)
         if image:
             parts.append(f"<h2>{_esc(_(heading, lang))}</h2>")
             parts.append(f"<p>{_esc(_(body, lang))}</p>")
             parts.append(f'<figure><img src="{image}" alt=""></figure>')
+    return parts
+
+
+def _found(settings: Settings, summary: dict | None, lang: str, today: date) -> list[str]:
+    """What the latest flight flagged, with its picture, right under the answer."""
+    image = _drone_image(settings, summary, "flag_overlay")
+    if not summary or not image:
+        return []
+    stressed = (summary.get("n_stressed") or 0) + (summary.get("n_dead") or 0)
+    missing = summary.get("n_missing") or 0
+    unit = summary.get("unit_type")
+    key = {"cell": "found_cells", "crown": "found_trees"}.get(unit, "found_rows")
+    flown = summary.get("flown_on")
+    day = text.day(date.fromisoformat(flown), lang, today) if flown else "?"
+    line = _(key, lang, problem=f"{stressed + missing:,}", total=f"{summary.get('n_judged') or 0:,}",
+             stressed=f"{stressed:,}", missing=f"{missing:,}",
+             cell=f"{summary.get('cell_m') or 1:g}", day=day)
+    parts = [f"<h2>{_esc(_('found', lang))}</h2>", f"<p>{_esc(line)}</p>",
+             f'<figure><img src="{image}" alt=""></figure>',
+             f"<p>{_esc(_('found_key', lang))}</p>"]
+    if unit == "cell":
+        parts.append(f'<p class="note">{_esc(_("found_colour", lang))}</p>')
     return parts
 
 

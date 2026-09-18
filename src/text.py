@@ -424,6 +424,14 @@ T: dict[str, tuple[str, str]] = {
                           "row need a look ({stressed} stressed, {missing} with plants "
                           "missing). In the picture: yellow = stressed, hatched = missing "
                           "plants. The whole story: WHY."),
+    "flight_ready_cells": ("Sus fotos de {field} ya están unidas en un mapa: {problem} de {total} "
+                           "cuadros del campo necesitan una revisada ({stressed} ralos o pálidos, "
+                           "{missing} casi sin plantas). En la foto: amarillo = ralo, rayado = "
+                           "faltan plantas. Todo el detalle: PORQUE.",
+                           "Your photos of {field} are joined into one map: {problem} of "
+                           "{total} squares of the field need a look ({stressed} thin or pale, "
+                           "{missing} with almost no plants). In the picture: yellow = thin, "
+                           "hatched = plants missing. The whole story: WHY."),
     "flight_ready_heat": ("La cámara térmica de {field} está lista. En la foto, lo rojo es lo más "
                           "caliente. Todo el detalle: PORQUE.",
                           "The thermal scan of {field} is ready. In the picture, red is "

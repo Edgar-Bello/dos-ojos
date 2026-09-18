@@ -230,6 +230,11 @@ def latest_terrain(settings: Settings, field_id: str) -> dict | None:
     return latest_report(settings, field_id, "terrain")
 
 
+def latest_flags(settings: Settings, field_id: str) -> dict | None:
+    """The most recent flight's flag summary (rows, trees or squares), if one was flagged."""
+    return latest_report(settings, field_id, "block_summary")
+
+
 def latest_thermal(settings: Settings, field_id: str) -> dict | None:
     """The most recent flight's thermal.json, for farmers who flew a thermal camera."""
     return latest_report(settings, field_id, "thermal")
