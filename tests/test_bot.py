@@ -504,3 +504,17 @@ def test_a_described_place_still_gets_the_map(phone: Phone) -> None:
     phone("40")
     replies = phone("mile 9 north and Western road, by the canal")
     assert "Find it on this map" in replies[0] and "/f/" in replies[0]
+
+
+def test_a_location_sent_later_places_the_field_that_had_none(phone: Phone) -> None:
+    onboard(phone, lang="2")
+    phone("North Field")
+    phone("40")
+    phone("40.47744, -8698959")
+    phone("mile 9 north by the canal")                  # described: no pin
+    phone.all("1", "5/8", "1", "yes", "4", "6")          # finish the field
+    assert phone.state == "idle"
+    replies = phone("40.47744, -86.98959")
+    assert "tap the corners" in replies[0]
+    record = store.fields_of(phone.bot.conn, PHONE)[0]
+    assert (record.lat, record.lon) == (40.47744, -86.98959)

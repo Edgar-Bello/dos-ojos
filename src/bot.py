@@ -925,6 +925,16 @@ class Turn:
             self._command(command)
             return
         place = parse.find_place(self.body, lat=self.msg.lat, lon=self.msg.lon)
+        if isinstance(place, parse.Place) and place.in_conus:
+            unplaced = [r for r in store.fields_of(self.conn, self.f.phone) if r.lat is None]
+            if len(unplaced) == 1:
+                # The field whose location never came through: this is it.
+                record = unplaced[0]
+                record.lat, record.lon = place.lat, place.lon
+                self._save(record)
+                self.say("location_pin", lat=f"{place.lat:.5f}", lon=f"{place.lon:.5f}",
+                         link=self._map_link(record))
+                return
         if place == "unresolved" or (isinstance(place, parse.Place) and place.in_conus):
             self.say("location_idle")
             return
