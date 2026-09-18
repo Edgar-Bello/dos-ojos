@@ -58,10 +58,12 @@ function showDone(n) {
   $("status").textContent = S.finished.replace("{n}", n);
 }
 
-// The tunnel in front of the server takes at most 100 MB per request, so big
-// files go in pieces; a piece that fails is tried again a few times.
-const PIECE = 32 * 1024 * 1024;
-const TRIES = 3;
+// The tunnel in front of the server takes at most 100 MB per request and gives
+// up on one after about 100 s, so big files go in small pieces that finish in
+// time even on a slow connection; a piece that fails is tried again.
+const PIECE = 4 * 1024 * 1024;
+const TRIES = 6;
+const PIECE_TIMEOUT_MS = 90 * 1000;
 
 async function put(file) {
   if (file.size <= PIECE) return putPiece(file, file, null);
@@ -74,6 +76,7 @@ async function put(file) {
         break;
       } catch (error) {
         if (attempt >= TRIES) throw error;
+        await new Promise(wait => setTimeout(wait, 3000 * attempt));
       }
     }
   }
@@ -92,6 +95,8 @@ function putPiece(file, body, start) {
       request.status === 200 ? resolve(result) : reject(new Error(result.error || request.status));
     };
     request.onerror = () => reject(new Error("network"));
+    request.timeout = PIECE_TIMEOUT_MS;
+    request.ontimeout = () => reject(new Error("too slow"));
     request.send(body);
   });
 }

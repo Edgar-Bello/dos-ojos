@@ -143,6 +143,9 @@ class App:
         #: What each field looked like when it was last sent to be read, so a
         #: corrected map or planting date reads it again and nothing else does.
         self._read_as: dict[str, str] = {}
+        #: The newest request writing each partly uploaded file: a piece the page
+        #: gave up on can still be arriving when its retry starts, and must stop.
+        self._writer: dict[str, object] = {}
 
     def db(self):
         return store.session(self.settings.db_path)
@@ -355,6 +358,8 @@ class App:
         if have < start:
             raise HttpError(409, f"{name}: a piece before byte {start} is missing")
         remaining = length
+        me = object()
+        self._writer[str(partial)] = me
         with partial.open("r+b" if start else "wb") as handle:
             # A piece sent again after being cut off overwrites what arrived of it.
             handle.seek(start)
@@ -363,8 +368,12 @@ class App:
                 chunk = stream.read(min(1 << 20, remaining))
                 if not chunk:
                     raise HttpError(400, f"{name}: the upload was cut off")
+                if self._writer.get(str(partial)) is not me:
+                    raise HttpError(409, f"{name}: this piece was sent again")
                 handle.write(chunk)
                 remaining -= len(chunk)
+        if self._writer.get(str(partial)) is me:
+            del self._writer[str(partial)]
         if start + length < whole:
             return {"ok": True, "name": name, "received": start + length}
         partial.replace(target)
