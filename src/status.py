@@ -189,7 +189,68 @@ def message(item: FieldWater, lang: str, today: date, *,
                     day=sorghum["days_after_planting"])
     if s.confidence == "low":
         body += say("status_rough", lang)
-    return body
+    details = _details(record, s, lang, today)
+    return f"{body}\n\n{details}" if details else body
+
+
+#: US gallons in one acre-inch of water.
+GALLONS_PER_ACRE_INCH = 27_154
+
+
+def _details(record: FieldRow, s, lang: str, today: date) -> str:
+    """The numbers behind the answer: soil, use, rain, watering, amount, sources."""
+    if s.pct_left is None or s.water_left_in is None or s.capacity_in is None:
+        return ""
+    soil = (s.soil or {}).get("name") or ("del campo" if lang == "es" else "The field's")
+    parts = [say("detail_soil", lang, soil=soil, pct=round(100 * s.pct_left),
+                 left=text.inches(round(s.water_left_in, 1)),
+                 capacity=text.inches(round(s.capacity_in, 1)),
+                 root=round(s.root_depth_in or 0))]
+    if s.until_stress_in is not None and s.stress_point_in is not None:
+        parts.append(say("detail_stress", lang, stress=text.inches(round(s.stress_point_in, 1)),
+                         until=text.inches(round(s.until_stress_in, 1)))
+                     if s.until_stress_in > 0 else say("detail_stressed", lang))
+    if s.use_in_day:
+        parts.append(say("detail_use", lang, use=text.inches(round(s.use_in_day, 2))))
+    if s.last_rain:
+        day, _, amount = s.last_rain.partition(" (")
+        rain = text.day(date.fromisoformat(day), lang, today)
+        try:
+            fallen = float(amount.split()[0])
+        except (ValueError, IndexError):
+            fallen = None
+        if fallen:
+            rain += f" ({text.inches(round(fallen, 2))} {'pulg.' if lang == 'es' else 'in.'})"
+        parts.append(say("detail_rain", lang, rain=rain))
+    else:
+        parts.append(say("detail_no_rain", lang))
+    if s.method != "none":
+        if s.last_irrigation:
+            parts.append(say("detail_irrigated", lang,
+                             day=text.day(date.fromisoformat(s.last_irrigation), lang, today)))
+        else:
+            parts.append(say("detail_no_irrigation", lang))
+        gross = s.refill_gross_in if s.refill_gross_in is not None else s.refill_net_in
+        acres = record.acres or record.acres_said
+        if gross and acres:
+            acre_in = gross * acres
+            parts.append(say("detail_volume", lang, acres=f"{acres:,.0f}",
+                             acre_in=f"{acre_in:,.0f}",
+                             gallons=_round_big(acre_in * GALLONS_PER_ACRE_INCH, lang)))
+    if s.stressed_days_30:
+        parts.append(say("detail_stressed_days", lang, n=s.stressed_days_30))
+    if s.last_image and s.weather_through:
+        parts.append(say("detail_sources", lang,
+                         image=text.day(date.fromisoformat(s.last_image), lang, today),
+                         weather=text.day(date.fromisoformat(s.weather_through), lang, today)))
+    return "".join(parts)
+
+
+def _round_big(n: float, lang: str) -> str:
+    """1,234,567 -> '1.2 millones' / '1.2 million'; smaller numbers to the thousand."""
+    if n >= 1e6:
+        return f"{n / 1e6:.1f} " + ("millones" if lang == "es" else "million")
+    return f"{round(n, -3):,.0f}"
 
 
 # --------------------------------------------------------------------------- #

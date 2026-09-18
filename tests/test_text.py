@@ -42,6 +42,10 @@ SAMPLE = {"link": "https://dosojos.example.com/f/AbCdEfGhIjKlMnOp", "field": "Ca
           "chance": "65", "area": "1,240", "pct": "26", "threshold": "30",
           "maturity": "ciclo mediano", "minutes": "15", "problem": "2,940", "total": "9,040",
           "stressed": "33", "missing": "2,907",
+          "soil": "Hidalgo franco arcillo arenoso", "left": "4.1", "capacity": "6.2",
+          "root": "36", "stress": "2.5", "until": "1.6", "use": "0.28", "rain": "jue 3 sep (0.4 pulg.)",
+          "acre_in": "203", "gallons": "5.5 millones", "image": "jue 10 sep",
+          "weather": "vie 11 sep",
           "more": (", ETAPA (como va el sorgo), PULGON (contar pulgon amarillo), DRON (mandar "
                    "las fotos de su vuelo)"), "midge": " y mosquita (el umbral es 1 por panoja)",
           "rest": (" Sigue grano masoso hacia el mar 3 jun. Revise mosquita cada 3 dias, de 10 "

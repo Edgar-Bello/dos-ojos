@@ -30,7 +30,7 @@ def record(**values) -> store.FieldRow:
 
 def test_days_left_with_the_range_and_the_date() -> None:
     body = status.message(FieldWater(record(), FakeStatus()), "es", TODAY)
-    assert body == ("Campo Norte (sorgo): tiene agua para unos 5 días (4 a 7); riegue antes del "
+    assert body.split("\n\n")[0] == ("Campo Norte (sorgo): tiene agua para unos 5 días (4 a 7); riegue antes del "
                     "jue 17 sep, unas 5.3 pulgadas por surcos.")
     english = status.message(FieldWater(record(), FakeStatus()), "en", TODAY)
     assert english.startswith("Campo Norte (sorghum): water for about 5 days (4 to 7); water by "
@@ -40,14 +40,15 @@ def test_days_left_with_the_range_and_the_date() -> None:
 def test_rainfed_counts_days_until_rain() -> None:
     body = status.message(FieldWater(record(irrigation="none"), FakeStatus(method="none")),
                           "es", TODAY)
-    assert body.endswith("si no llueve.") and "pulgadas" not in body
+    answer = body.split("\n\n")[0]
+    assert answer.endswith("si no llueve.") and "pulgadas" not in answer
 
 
 def test_a_rainfed_crop_at_its_thirstiest_is_not_told_to_water() -> None:
     s = FakeStatus(method="none", days_left=0, days_range=None,
                    sensitive="grain sorghum reaches boot to flowering now (day 69 after planting)")
     body = status.message(FieldWater(record(irrigation="none"), s), "en", TODAY)
-    assert body == ("Campo Norte (sorghum): it needs rain now; the crop is under stress. "
+    assert body.split("\n\n")[0] == ("Campo Norte (sorghum): it needs rain now; the crop is under stress. "
                     "It's at boot to flowering, when drought hurts most.")
 
 
@@ -55,7 +56,8 @@ def test_stage_soon_and_rough() -> None:
     s = FakeStatus(sensitive="grain sorghum reaches boot to flowering in about 6 days (day 44)",
                    confidence="low")
     body = status.message(FieldWater(record(), s), "es", TODAY)
-    assert "Pronto entra en embuche y floración" in body and body.endswith("(Cálculo aproximado.)")
+    assert ("Pronto entra en embuche y floración" in body
+            and body.split("\n\n")[0].endswith("(Cálculo aproximado.)"))
 
 
 @pytest.mark.parametrize("reason, words", [
@@ -213,3 +215,26 @@ def test_the_checkbook_runs_on_the_farm_workspace(conn, settings) -> None:
 def test_no_satellite_workspace_yet(conn, settings) -> None:
     result = status.Water(settings).field(record(), [], TODAY)
     assert result.reason == "no_data"
+
+
+def test_the_numbers_behind_the_answer() -> None:
+    body = status.message(FieldWater(record(acres=40.0), FakeStatus()), "en", TODAY)
+    answer, details = body.split("\n\n")
+    assert details.startswith("Hidalgo sandy clay loam soil: it holds 66% of the water it can "
+                              "(4.1 of 6.2 in. in 36 in. of roots).")
+    assert "It gets stressed below 2.5 in.; 1.6 in. to go before that." in details
+    assert "It uses about 0.28 in. a day" in details
+    assert "Last rain: Thu Sep 3 (0.4 in.)." in details
+    assert "Last watering: Tue Aug 18." in details
+    # 5.26 in. gross over 40 acres: 210 acre-inches, 5.7 million gallons.
+    assert "For the 40 acres: about 210 acre-inches (about 5.7 million gallons)." in details
+    assert "Satellite from Thu Sep 10; weather through Fri Sep 11" in details
+
+
+def test_details_ask_for_waterings_and_skip_volumes_without_irrigation() -> None:
+    none_logged = status.message(FieldWater(record(acres=40.0), FakeStatus(last_irrigation=None)),
+                                 "es", TODAY)
+    assert "mande REGUE fecha pulgadas" in none_logged
+    rainfed = status.message(FieldWater(record(irrigation="none", acres=40.0),
+                                        FakeStatus(method="none")), "en", TODAY)
+    assert "acre-inches" not in rainfed and "WATERED" not in rainfed

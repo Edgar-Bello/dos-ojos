@@ -68,6 +68,12 @@ class FakeStatus:
     eto_in_day: float | None = 0.27
     kc: float | None = 1.05
     use_in_day: float | None = 0.28
+    pct_left: float | None = 0.66
+    water_left_in: float | None = 4.1
+    last_rain: str | None = "2026-09-03 (0.40 in)"
+    stressed_days_30: int = 0
+    weather_through: str | None = "2026-09-11"
+    last_image: str | None = "2026-09-10"
     soil: dict = dc_field(default_factory=lambda: {"name": "Hidalgo sandy clay loam",
                                                    "awc_in_per_ft": 1.9, "intake": "slow"})
 

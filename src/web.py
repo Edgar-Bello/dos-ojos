@@ -130,6 +130,18 @@ class HttpError(Exception):
 # --------------------------------------------------------------------------- #
 
 
+class _Counted:
+    """A request body that remembers how much of it was read."""
+
+    def __init__(self, stream):
+        self.stream, self.read_bytes = stream, 0
+
+    def read(self, n: int) -> bytes:
+        chunk = self.stream.read(n)
+        self.read_bytes += len(chunk)
+        return chunk
+
+
 def _covers(pieces: dict[str, int], total: int) -> bool:
     """True when the pieces, by their offsets and lengths, fill 0..total with no gap."""
     reached = 0
@@ -776,7 +788,15 @@ class Handler(BaseHTTPRequestHandler):
                         piece = {k: int(query[k]) for k in ("offset", "total") if k in query}
                     except ValueError as exc:
                         raise HttpError(400, "offset and total must be numbers") from exc
-                    self._json(app.upload_file(parts[1], parts[3], length, self.rfile, **piece))
+                    counted = _Counted(self.rfile)
+                    try:
+                        self._json(app.upload_file(parts[1], parts[3], length, counted, **piece))
+                    except HttpError:
+                        # Refused before reading it all: take in the rest of a small body,
+                        # or Windows cuts the line before the browser reads why.
+                        if length - counted.read_bytes <= MAX_FORM_BYTES:
+                            self.rfile.read(max(0, length - counted.read_bytes))
+                        raise
                 else:
                     raise HttpError(404, "not found")
         except HttpError as exc:

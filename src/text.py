@@ -510,6 +510,31 @@ T: dict[str, tuple[str, str]] = {
     "status_stage_soon_rainfed": (" Pronto entra en {stage}, cuando más le duele la sequía.",
                                   " It's nearly at {stage}, when drought hurts most."),
     "status_rough": (" (Cálculo aproximado.)", " (Rough estimate.)"),
+    # --- the numbers behind AGUA, sent right after the answer -----------------
+    "detail_soil": ("Suelo {soil}: tiene {pct}% del agua que puede guardar ({left} de "
+                    "{capacity} pulg. en {root} pulg. de raíz).",
+                    "{soil} soil: it holds {pct}% of the water it can ({left} of {capacity} "
+                    "in. in {root} in. of roots)."),
+    "detail_stress": (" Se estresa al bajar de {stress} pulg.; le faltan {until} pulg. para eso.",
+                      " It gets stressed below {stress} in.; {until} in. to go before that."),
+    "detail_stressed": (" Ya está en estrés.", " It is under stress now."),
+    "detail_use": (" Usa unas {use} pulg. al día con este clima.",
+                   " It uses about {use} in. a day in this weather."),
+    "detail_rain": (" Última lluvia: {rain}.", " Last rain: {rain}."),
+    "detail_no_rain": (" Sin lluvia desde la siembra.", " No rain since planting."),
+    "detail_irrigated": (" Último riego: {day}.", " Last watering: {day}."),
+    "detail_no_irrigation": (" No tenemos riegos anotados; al regar mande REGUE fecha "
+                             "pulgadas, ej. REGUE hoy 4.",
+                             " No waterings logged; when you water, text WATERED date "
+                             "inches, e.g. WATERED today 4."),
+    "detail_volume": (" Para las {acres} acres: unas {acre_in} acre-pulgadas "
+                      "(unos {gallons} galones).",
+                      " For the {acres} acres: about {acre_in} acre-inches "
+                      "(about {gallons} gallons)."),
+    "detail_sources": (" Satélite del {image}; clima hasta el {weather}.",
+                       " Satellite from {image}; weather through {weather}."),
+    "detail_stressed_days": (" En el último mes pasó {n} días con estrés.",
+                             " It spent {n} days stressed in the last month."),
     "after_irrigation": ("{field} ahora tiene agua para {about}.",
                          "{field} now has water for {about}."),
     # --- the drone's ground report --------------------------------------------

@@ -164,7 +164,7 @@ def test_only_the_strongest_patch_goes_out_by_text(settings, phone: Phone, conn)
     register_field(phone)
     draw(conn, "F001")
     _thermal(settings, [0.62, 0.55, 0.48])
-    pest = [r for r in phone("AGUA") if "%" in r]
+    pest = [r for r in phone("AGUA") if "plaga" in r]
     assert len(pest) == 1
     assert "62%" in pest[0] and "2 manchas" in pest[0]
 
@@ -174,7 +174,7 @@ def test_a_weak_score_is_not_worth_a_text_message(settings, phone: Phone, conn) 
     register_field(phone)
     draw(conn, "F001")
     _thermal(settings, [0.2])
-    assert not any("%" in r for r in phone("AGUA"))
+    assert not any("plaga" in r for r in phone("AGUA"))
 
 
 def test_a_farmer_without_a_thermal_camera_never_hears_about_pests(settings, phone: Phone,
@@ -183,7 +183,7 @@ def test_a_farmer_without_a_thermal_camera_never_hears_about_pests(settings, pho
     register_field(phone)
     draw(conn, "F001")
     _thermal(settings, [0.8])
-    assert not any("%" in r for r in phone("AGUA"))
+    assert not any("plaga" in r for r in phone("AGUA"))
 
 
 def test_the_pest_line_is_bilingual(settings) -> None:
