@@ -129,5 +129,20 @@ def test_the_number_is_pointed_at_the_new_address(ready: Settings) -> None:
 
 def test_a_number_not_on_the_account_is_said_plainly(ready: Settings) -> None:
     get = lambda url, params, auth, timeout: Response(200, {"incoming_phone_numbers": []})
-    with pytest.raises(twilio.TwilioError, match="not a number on this Twilio account"):
+    with pytest.raises(twilio.NotOwned, match="not a number on this Twilio account"):
         twilio.point_number_at(ready, "https://x.trycloudflare.com/sms/twilio", get=get)
+
+
+def test_a_borrowed_trial_number_gets_paste_instructions(monkeypatch, tmp_path) -> None:
+    from click.testing import CliRunner
+    from dosojos_sms import cli
+
+    def not_owned(settings, url):
+        raise twilio.NotOwned("not a number on this Twilio account")
+
+    monkeypatch.setattr(cli.twilio_mod, "point_number_at", not_owned)
+    monkeypatch.setenv("DOSOJOS_PUBLIC_URL", "https://x.trycloudflare.com")
+    result = CliRunner().invoke(cli.cli, ["--data", str(tmp_path), "webhook"])
+    assert result.exit_code == cli.NOT_OWNED_EXIT
+    assert "Try out SMS" in result.output
+    assert "https://x.trycloudflare.com/sms/twilio" in result.output

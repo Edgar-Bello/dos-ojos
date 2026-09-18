@@ -121,6 +121,11 @@ def fetch_media(settings: Settings, url: str, folder: Path, stem: str, *,
     return path
 
 
+class NotOwned(TwilioError):
+    """TWILIO_FROM is not among the account's numbers: a typo, or the trial number that
+    the console's "Try out SMS" page lends, whose webhook only that page can set."""
+
+
 def point_number_at(settings: Settings, url: str, *,
                     get: Callable[..., requests.Response] | None = None,
                     post: Callable[..., requests.Response] | None = None) -> str:
@@ -148,8 +153,8 @@ def point_number_at(settings: Settings, url: str, *,
         raise _fail(found, "look up the number")
     numbers = found.json().get("incoming_phone_numbers") or []
     if not numbers:
-        raise TwilioError(f"{settings.twilio_from} is not a number on this Twilio account; "
-                          "TWILIO_FROM must be the number you bought, like +18885550123")
+        raise NotOwned(f"{settings.twilio_from} is not a number on this Twilio account; "
+                       "TWILIO_FROM must be the number you bought, like +18885550123")
     try:
         done = (post or requests.post)(f"{base}/{numbers[0]['sid']}.json",
                                        data={"SmsUrl": url, "SmsMethod": "POST"},

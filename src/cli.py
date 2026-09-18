@@ -130,6 +130,10 @@ def serve_cmd(ctx: Context, port: int, host: str, sim: bool, no_verify: bool,
         server.server_close()
 
 
+#: The webhook command's exit code when the number must be pointed by hand.
+NOT_OWNED_EXIT = 3
+
+
 @cli.command("webhook")
 @click.pass_obj
 def webhook_cmd(ctx: Context) -> None:
@@ -142,6 +146,13 @@ def webhook_cmd(ctx: Context) -> None:
     url = settings.link("sms/twilio")
     try:
         number = twilio_mod.point_number_at(settings, url)
+    except twilio_mod.NotOwned:
+        click.echo(
+            f"{settings.twilio_from} is not a number this account bought. If it is the trial "
+            "number from the console's \"Try out SMS\" page, set its webhook there yourself:\n"
+            "  Try out SMS > Inbound > Auto-reply settings: Custom > paste this, then Save:\n"
+            f"  {url}")
+        click.get_current_context().exit(NOT_OWNED_EXIT)
     except twilio_mod.TwilioError as exc:
         raise click.ClickException(str(exc)) from exc
     click.echo(f"Texts to {number} now come to {url}")

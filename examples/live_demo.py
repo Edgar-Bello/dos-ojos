@@ -37,6 +37,8 @@ PORT = 8100
 #: The daily run: satellite, weather, soil and the alerts that go out.
 DAILY_AT = 6
 TUNNEL_WAIT_S = 60
+#: `dosojos-sms webhook` exits with this when the number must be pointed by hand.
+NOT_OWNED_EXIT = 3
 QUICK_TUNNEL = re.compile(r"https://[a-z0-9-]+\.trycloudflare\.com")
 
 TEMPLATE = """\
@@ -155,7 +157,10 @@ def start() -> int:
     env = {**os.environ, "DOSOJOS_PUBLIC_URL": address}
     try:
         say(f"  public address  {address}")
-        if sms("webhook", env=env) != 0:
+        pointed = sms("webhook", env=env)
+        if pointed == NOT_OWNED_EXIT:
+            say("\nThe address changes every time live.cmd starts, so paste the new one each time.")
+        elif pointed != 0:
             say("The Twilio number could not be pointed at the tunnel; see the message above.")
             return 1
         threading.Thread(target=every_morning, args=(env,), daemon=True).start()
