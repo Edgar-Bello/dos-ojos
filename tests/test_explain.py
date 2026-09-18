@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 from datetime import timedelta
 
@@ -423,3 +424,32 @@ def test_the_start_of_the_count_is_said_in_the_farmer_s_language(settings, farm)
     """The checkbook says 'planted 2026-07-20' for the team; the page says it in Spanish."""
     page = _built(settings, farm, item=_item(farm, start_reason="planted 2026-07-20"))
     assert "(la siembra)" in page and "planted 2026" not in page
+
+
+def _model3d(settings, report: dict, points: int = 4) -> None:
+    """A tiny 3D model, laid out the way the drone half's 'model3d' writes it."""
+    folder = settings.drone_workspace / "out" / report["flight_id"]
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "model3d.json").write_text(json.dumps({
+        "points": points, "scale_m": 0.01, "size_m": [91.2, 200.5, 6.2], "ground_m": -2.8,
+        "top_m": 2.7, "plants_top_m": 2.7, "cube_m": 0.33}), "utf-8")
+    (folder / "model3d.bin").write_bytes(bytes(range(points * 10)))
+    (folder / "model3d.png").write_bytes(PNG)
+
+
+def test_the_3d_model_turns_on_the_page_with_its_points_inside(settings, farm) -> None:
+    report = _terrain(settings)
+    _model3d(settings, report)
+    page = _built(settings, farm, terrain=report, flags=_summary(report))
+    assert "Su campo en 3D" in page and "91 m por 200 m" in page and "2.7 m" in page
+    assert '<canvas aria-label="3D">' in page and "getContext(\"webgl\"" in page
+    points = base64.b64encode(bytes(range(40))).decode("ascii")
+    assert f'class="points">{points}</script>' in page         # a saved page still has them
+    assert "Este teléfono no puede girar" in page               # the snapshot, for no WebGL
+    assert page.index("Su campo en 3D") < page.index("Cómo salió ese número")
+
+
+def test_no_model_no_3d_section(settings, farm) -> None:
+    report = _terrain(settings)
+    page = _built(settings, farm, terrain=report, flags=_summary(report))
+    assert "Su campo en 3D" not in page and "<canvas" not in page

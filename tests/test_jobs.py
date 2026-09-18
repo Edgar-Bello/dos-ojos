@@ -220,3 +220,19 @@ def test_stitched_photos_come_back_as_squares_of_the_field(app: App) -> None:
     last = texts(app)[-1]
     assert "Your photos of North Field are joined into one map" in last
     assert "1,920 of 6,265 squares" in last
+
+
+def test_a_3d_flight_counts_trees_and_sends_its_snapshot(app: App) -> None:
+    field_id = farmer_with_field(app, plan="drone")
+    summary = {"unit_type": "crown", "n_judged": 324, "n_stressed": 4, "n_dead": 19,
+               "n_missing": 0}
+    model = {"size_m": [91.2, 200.5, 6.2], "plants_top_m": 2.7}
+    flight(app, field_id, "F001-20260910", {"block_summary.json": json.dumps(summary),
+                                             "flag_overlay.png": "PNG",
+                                             "model3d.json": json.dumps(model),
+                                             "model3d.png": "PNG"})
+    app.jobs.finish()
+    trees, three_d = texts(app)[-2:]
+    assert "23 of 324 trees need a look" in trees
+    assert "Your photos built North Field in 3D: 91 m by 200 m" in three_d
+    assert "2.7 m over the ground" in three_d and "text WHY" in three_d

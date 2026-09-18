@@ -40,13 +40,21 @@ PUBLIC_DRONE = ROOT / "public_demo" / "purdue-sorghum-2018" / "download" / "2018
 #: research plots, not a 40-acre field, so the smallest patch worth naming is
 #: smaller too.
 THERMAL_ARGS = ["--group-gap", "1.5", "--min-patch", "8"]
+#: Fewer photos than this seldom overlap enough to build anything in 3D.
+MIN_3D_PHOTOS = 12
+#: Quicker than the drone half's own defaults: a farmer is waiting on a message,
+#: and neither the 3D view nor the flags need ODM's finest detail or its
+#: textured mesh. On 46 photos this takes minutes rather than half an hour.
+ODM_ARGS = ["--feature-quality", "medium", "--pc-quality", "medium", "--skip-3dmodel"]
+#: Crops measured tree by tree (one crown each) rather than as stretches of row.
+TREE_CROPS = {"citrus", "orchard", "pecan", "avocado", "mango"}
 
 
 def say(message: str) -> None:
     print(message, flush=True)
 
 
-def run(workspace: Path, *arguments: str, optional: bool = False) -> None:
+def run(workspace: Path, *arguments: str, optional: bool = False) -> bool:
     """One drone command, printed before it runs so nothing here is a black box."""
     command = [str(DRONE_PYTHON), "-m", "dosojos_drone", "--workspace", str(workspace),
                *[str(a) for a in arguments]]
@@ -55,8 +63,9 @@ def run(workspace: Path, *arguments: str, optional: bool = False) -> None:
     if result.returncode != 0:
         if optional:
             say("  (that step is a nice-to-have here; the farmer's page does not need it)")
-            return
+            return False
         raise SystemExit(f"that step failed ({result.returncode}); nothing after it was run")
+    return True
 
 
 def uploads(data: Path) -> list[dict]:
@@ -141,6 +150,37 @@ def stitched(workspace: Path, flight: str, folder: Path) -> None:
     """
     run(workspace, "stitch", flight, "--photos", folder)
     run(workspace, "colour", flight)
+
+
+def docker_ready() -> tuple[bool, str]:
+    """Whether OpenDroneMap can run here, and if not, why not."""
+    from dosojos_drone import odm_runner
+
+    status = odm_runner.check_docker()
+    if not status.available:
+        return False, (status.problems or ["Docker is not running"])[0]
+    if not status.has_image:
+        return False, f"the {odm_runner.ODM_IMAGE} image is not pulled"
+    return True, ""
+
+
+def three_d(workspace: Path, flight: str, crop: str | None) -> bool:
+    """Photos into a 3D model with OpenDroneMap, then heights, plants and flags from it.
+
+    False when ODM itself fails, so the flat map can be made instead.
+    """
+    if not run(workspace, "odm", flight, *ODM_ARGS, optional=True):
+        return False
+    method = ["--method", "watershed"] if (crop or "") in TREE_CROPS else []
+    segment = [] if method else ["--segment", "1.0"]
+    run(workspace, "chm", flight)
+    run(workspace, "detect", flight, *method, *segment)
+    run(workspace, "metrics", flight, *method)
+    run(workspace, "flag", flight, *method, *segment)
+    run(workspace, "report", flight, *method)
+    run(workspace, "model3d", flight, optional=True)
+    run(workspace, "terrain", flight, optional=True)
+    return True
 
 
 def products(workspace: Path, flight: str, ortho: Path, clouds: list[Path]) -> None:
@@ -232,6 +272,15 @@ def main() -> None:
                 "thermal photos. Each is placed from its GPS and its neighbours first.")
             run(workspace, "thermal", upload["flight_id"], "--photos", folder, *THERMAL_ARGS)
         elif kind == "photos":
+            ready, why_not = docker_ready()
+            if detail["n"] >= MIN_3D_PHOTOS and ready:
+                say(f"  {detail['n']} colour photos: built into a 3D model with OpenDroneMap, "
+                    "then each plant's height and colour judged from it.")
+                if three_d(workspace, upload["flight_id"], upload["crop"]):
+                    continue
+                say("  OpenDroneMap could not build it, so the photos are joined flat instead.")
+            elif detail["n"] >= MIN_3D_PHOTOS:
+                say(f"  no 3D model: {why_not}.")
             say(f"  {detail['n']} colour photos: joined into one map from their GPS and "
                 "where they overlap, then judged square by square by how green they are.")
             stitched(workspace, upload["flight_id"], folder)

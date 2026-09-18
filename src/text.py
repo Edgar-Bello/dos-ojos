@@ -433,6 +433,18 @@ T: dict[str, tuple[str, str]] = {
                           "row need a look ({stressed} stressed, {missing} with plants "
                           "missing). In the picture: yellow = stressed, hatched = missing "
                           "plants. The whole story: WHY."),
+    "flight_ready_trees": ("El vuelo de {field} está listo: {problem} de {total} árboles "
+                           "necesitan una revisada ({stressed} con estrés o muertos, {missing} "
+                           "faltantes). En la foto: amarillo = estrés, rayado = faltan. Todo "
+                           "el detalle: PORQUE.",
+                           "The flight over {field} is ready: {problem} of {total} trees need "
+                           "a look ({stressed} stressed or dead, {missing} missing). In the "
+                           "picture: yellow = stressed, hatched = missing. The whole story: "
+                           "WHY."),
+    "flight_ready_3d": ("Con sus fotos hicimos {field} en 3D: {x} m por {y} m, las plantas más "
+                        "altas a {top} m del suelo. Para girarlo con el dedo, mande PORQUE.",
+                        "Your photos built {field} in 3D: {x} m by {y} m, the tallest plants "
+                        "{top} m over the ground. To turn it with your finger, text WHY."),
     "flight_ready_cells": ("Sus fotos de {field} ya están unidas en un mapa: {problem} de {total} "
                            "cuadros del campo necesitan una revisada ({stressed} ralos o pálidos, "
                            "{missing} casi sin plantas). En la foto: amarillo = ralo, rayado = "

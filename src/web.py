@@ -618,7 +618,8 @@ class App:
                 s = json.loads((out / "block_summary.json").read_text(encoding="utf-8"))
                 stressed = (s.get("n_stressed") or 0) + (s.get("n_dead") or 0)
                 missing = s.get("n_missing") or 0
-                key = "flight_ready_cells" if s.get("unit_type") == "cell" else "flight_ready_rows"
+                key = {"cell": "flight_ready_cells",
+                       "crown": "flight_ready_trees"}.get(s.get("unit_type"), "flight_ready_rows")
                 body = text.say(key, lang, field=record.name,
                                 problem=f"{stressed + missing:,}",
                                 total=f"{s.get('n_judged') or 0:,}",
@@ -632,6 +633,15 @@ class App:
                            media=media)
             if extra:
                 outbox.deliver(conn, self.settings, farmer, extra, now=self.now, urgent=True)
+            if (out / "model3d.json").exists() and (out / "model3d.png").exists():
+                model = json.loads((out / "model3d.json").read_text(encoding="utf-8"))
+                size = model.get("size_m") or [0, 0]
+                outbox.deliver(conn, self.settings, farmer,
+                               text.say("flight_ready_3d", lang, field=record.name,
+                                        x=f"{size[0]:.0f}", y=f"{size[1]:.0f}",
+                                        top=f"{model.get('plants_top_m') or 0:.1f}"),
+                               now=self.now, urgent=True,
+                               media=[self._picture_link(conn, record.id, out / "model3d.png")])
         return None
 
     def _picture_link(self, conn, field_id: str, path: Path) -> str:

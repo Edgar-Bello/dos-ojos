@@ -45,6 +45,23 @@ S = {
     "save": ("Guardar este archivo", "Save this file"),
     "answer": ("La respuesta", "The answer"),
     "found": ("Lo que encontró su vuelo", "What your flight found"),
+    "model3d": ("Su campo en 3D", "Your field in 3D"),
+    "model3d_body": (
+        "Hecho con sus {photos} fotos del dron: donde dos o más fotos vieron el mismo punto "
+        "desde lugares distintos, se calcula a qué altura está. Mide {x} m por {y} m; las "
+        "plantas más altas llegan a {top} m sobre el suelo que tienen debajo. Vuelo del {day}.",
+        "Built from your {photos} drone photos: wherever two or more photos saw the same "
+        "spot from different places, its height is worked out. It is {x} m by {y} m; the "
+        "tallest plants stand {top} m over the ground under them. Flown {day}."),
+    "model3d_how": ("Arrastre para girarlo, pellizque o use la rueda para acercarse.",
+                    "Drag to turn it; pinch or scroll to zoom."),
+    "model3d_photo": ("Colores de la foto", "Photo colours"),
+    "model3d_height": ("Colores por altura", "Colour by height"),
+    "model3d_stretch": ("Alturas x3", "Heights x3"),
+    "model3d_reset": ("Volver", "Reset"),
+    "model3d_legend": ("suelo", "ground"),
+    "model3d_nogl": ("Este teléfono no puede girar el modelo; así se ve desde una esquina:",
+                     "This phone can't turn the model; this is how it looks from a corner:"),
     "found_rows": (
         "{problem} de {total} tramos de surco necesitan una revisada: {stressed} con estrés "
         "y {missing} con plantas faltantes. Vuelo del {day}.",
@@ -449,8 +466,190 @@ td.n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowra
 .patch .chance { font-size: 19px; font-weight: 700; }
 .patch ul { margin: 8px 0 0; padding-left: 20px; color: #4a483f; font-size: 15px; }
 .note { color: #6f6e69; font-size: 15px; }
+.m3d canvas { width: 100%; height: min(72vw, 520px); display: block; border-radius: 10px;
+              background: #20241f; touch-action: none; cursor: grab; }
+.m3d .tools { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 4px; }
+.m3d button { font: inherit; font-size: 15px; padding: 8px 12px; border-radius: 8px;
+              border: 1px solid #cfcdc4; background: #fff; color: #23221e; cursor: pointer; }
+.m3d button[aria-pressed="true"] { background: #199e70; border-color: #199e70; color: #fff; }
+.m3d .legend { display: flex; align-items: center; gap: 8px; font-size: 14px; color: #6f6e69; }
+.m3d .legend i { flex: 0 0 140px; height: 10px; border-radius: 5px;
+                 background: linear-gradient(90deg, #8c6b45, #edcc40, #1a8c33); }
+.m3d .fallback { display: none; }
+.m3d.nogl canvas, .m3d.nogl .tools, .m3d.nogl .legend { display: none; }
+.m3d.nogl .fallback { display: block; }
 footer { margin-top: 44px; color: #6f6e69; font-size: 14px; text-align: center; }
 @media print { body { background: #fff; } .save { display: none; } }
+"""
+
+#: The 3D viewer: plain WebGL, no library, so a saved page still turns with no
+#: signal. The points come inline (base64) in the layout model3d.py writes:
+#: int16 x, y, z, then uint8 r, g, b, then uint8 height over the ground (0.1 m).
+VIEWER_JS = r"""
+(function () {
+  var box = document.querySelector(".m3d");
+  if (!box) return;
+  var meta = JSON.parse(box.getAttribute("data-meta"));
+  var canvas = box.querySelector("canvas");
+  var gl = canvas.getContext("webgl", { antialias: true }) ||
+           canvas.getContext("experimental-webgl");
+  if (!gl) { box.className += " nogl"; return; }
+  var raw = atob(box.querySelector("script.points").textContent.replace(/\s+/g, ""));
+  var n = meta.points, bytes = new Uint8Array(raw.length), i;
+  for (i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+  var data = new DataView(bytes.buffer), pos = new Float32Array(n * 3);
+  for (i = 0; i < n * 3; i++) pos[i] = data.getInt16(i * 2, true) * meta.scale_m;
+
+  function shader(kind, source) {
+    var s = gl.createShader(kind);
+    gl.shaderSource(s, source);
+    gl.compileShader(s);
+    return s;
+  }
+  var program = gl.createProgram();
+  gl.attachShader(program, shader(gl.VERTEX_SHADER,
+    "attribute vec3 p; attribute vec3 c; attribute float h;" +
+    "uniform mat4 m; uniform float stretch, ground, top, byHeight, size;" +
+    "varying vec3 v;" +
+    "void main() {" +
+    "  gl_Position = m * vec4(p.x, p.y, ground + (p.z - ground) * stretch, 1.0);" +
+    "  gl_PointSize = clamp(size / gl_Position.w, 1.0, 14.0);" +
+    "  float t = clamp(h * 25.5 / top, 0.0, 1.0);" +
+    "  vec3 ramp = t < 0.5 ? mix(vec3(0.55, 0.42, 0.27), vec3(0.93, 0.80, 0.25), t * 2.0)" +
+    "                      : mix(vec3(0.93, 0.80, 0.25), vec3(0.10, 0.55, 0.20), t * 2.0 - 1.0);" +
+    "  v = mix(c, ramp, byHeight);" +
+    "}"));
+  gl.attachShader(program, shader(gl.FRAGMENT_SHADER,
+    "precision mediump float; varying vec3 v; void main() { gl_FragColor = vec4(v, 1.0); }"));
+  gl.linkProgram(program);
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) { box.className += " nogl"; return; }
+  gl.useProgram(program);
+
+  function attribute(name, array, size, type, normalized) {
+    var buffer = gl.createBuffer(), where = gl.getAttribLocation(program, name);
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+    gl.bufferData(gl.ARRAY_BUFFER, array, gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(where);
+    gl.vertexAttribPointer(where, size, type, normalized, 0, 0);
+  }
+  attribute("p", pos, 3, gl.FLOAT, false);
+  attribute("c", bytes.subarray(n * 6, n * 9), 3, gl.UNSIGNED_BYTE, true);
+  attribute("h", bytes.subarray(n * 9, n * 10), 1, gl.UNSIGNED_BYTE, true);
+  var u = {};
+  ["m", "stretch", "ground", "top", "byHeight", "size"].forEach(function (k) {
+    u[k] = gl.getUniformLocation(program, k);
+  });
+
+  var reach = Math.max(meta.size_m[0], meta.size_m[1]) / 2;
+  var FOV = 0.8, fresh = { az: -2.36, el: 0.62, dist: reach * 2.1 };
+  var view = { az: fresh.az, el: fresh.el, dist: fresh.dist, stretch: 1, byHeight: 0 };
+  function clamp(x, lo, hi) { return Math.max(lo, Math.min(hi, x)); }
+
+  function multiply(a, b) {
+    var out = new Float32Array(16), r, c, k, s;
+    for (c = 0; c < 4; c++) for (r = 0; r < 4; r++) {
+      for (s = 0, k = 0; k < 4; k++) s += a[k * 4 + r] * b[c * 4 + k];
+      out[c * 4 + r] = s;
+    }
+    return out;
+  }
+  function matrix(aspect) {
+    var zc = (meta.ground_m + meta.top_m) / 2;
+    var ce = Math.cos(view.el);
+    var eye = [view.dist * ce * Math.cos(view.az), view.dist * ce * Math.sin(view.az),
+               zc + view.dist * Math.sin(view.el)];
+    var f = [-eye[0], -eye[1], zc - eye[2]], len = Math.hypot(f[0], f[1], f[2]);
+    var z = [-f[0] / len, -f[1] / len, -f[2] / len];
+    var x = [-z[1], z[0], 0];                        // up (0, 0, 1) crossed with z
+    var xl = Math.hypot(x[0], x[1]) || 1;
+    x = [x[0] / xl, x[1] / xl, 0];
+    var y = [z[1] * x[2] - z[2] * x[1], z[2] * x[0] - z[0] * x[2], z[0] * x[1] - z[1] * x[0]];
+    var dot = function (a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; };
+    var look = new Float32Array([x[0], y[0], z[0], 0, x[1], y[1], z[1], 0,
+                                 x[2], y[2], z[2], 0, -dot(x, eye), -dot(y, eye), -dot(z, eye), 1]);
+    var near = view.dist / 50, far = view.dist * 6, t = 1 / Math.tan(FOV / 2);
+    var lens = new Float32Array([t / aspect, 0, 0, 0, 0, t, 0, 0,
+                                 0, 0, (far + near) / (near - far), -1,
+                                 0, 0, 2 * far * near / (near - far), 0]);
+    return multiply(lens, look);
+  }
+
+  var waiting = false;
+  function draw() {
+    if (waiting) return;
+    waiting = true;
+    requestAnimationFrame(function () {
+      waiting = false;
+      var ratio = window.devicePixelRatio || 1;
+      var w = Math.round(canvas.clientWidth * ratio), h = Math.round(canvas.clientHeight * ratio);
+      if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+      gl.viewport(0, 0, w, h);
+      gl.clearColor(0.125, 0.141, 0.122, 1);
+      gl.enable(gl.DEPTH_TEST);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+      gl.uniformMatrix4fv(u.m, false, matrix(w / h));
+      gl.uniform1f(u.stretch, view.stretch);
+      gl.uniform1f(u.ground, meta.ground_m);
+      gl.uniform1f(u.top, Math.max(meta.plants_top_m, 0.5));
+      gl.uniform1f(u.byHeight, view.byHeight);
+      // A point as wide on screen as the little cube it stands for.
+      gl.uniform1f(u.size, 1.5 * Math.max(meta.cube_m, 0.05) * h / (2 * Math.tan(FOV / 2)));
+      gl.drawArrays(gl.POINTS, 0, n);
+    });
+  }
+
+  var down = {}, pinch = null;
+  canvas.addEventListener("pointerdown", function (e) {
+    canvas.setPointerCapture(e.pointerId);
+    down[e.pointerId] = [e.clientX, e.clientY];
+  });
+  canvas.addEventListener("pointermove", function (e) {
+    var before = down[e.pointerId];
+    if (!before) return;
+    down[e.pointerId] = [e.clientX, e.clientY];
+    var ids = Object.keys(down);
+    if (ids.length === 1) {
+      view.az -= (e.clientX - before[0]) * 0.008;
+      view.el = clamp(view.el + (e.clientY - before[1]) * 0.006, 0.08, 1.55);
+    } else if (ids.length === 2) {
+      var a = down[ids[0]], b = down[ids[1]], gap = Math.hypot(a[0] - b[0], a[1] - b[1]);
+      if (pinch) view.dist = clamp(view.dist * pinch / gap, reach * 0.08, reach * 5);
+      pinch = gap;
+    }
+    draw();
+  });
+  function up(e) { delete down[e.pointerId]; pinch = null; }
+  canvas.addEventListener("pointerup", up);
+  canvas.addEventListener("pointercancel", up);
+  canvas.addEventListener("wheel", function (e) {
+    e.preventDefault();
+    view.dist = clamp(view.dist * Math.exp(e.deltaY * 0.0012), reach * 0.08, reach * 5);
+    draw();
+  }, { passive: false });
+
+  var legend = box.querySelector(".legend");
+  function press() {
+    box.querySelectorAll("button").forEach(function (b) {
+      var act = b.getAttribute("data-act");
+      if (act === "photo") b.setAttribute("aria-pressed", String(!view.byHeight));
+      if (act === "height") b.setAttribute("aria-pressed", String(!!view.byHeight));
+      if (act === "stretch") b.setAttribute("aria-pressed", String(view.stretch > 1));
+    });
+    legend.style.visibility = view.byHeight ? "visible" : "hidden";
+  }
+  box.querySelector(".tools").addEventListener("click", function (e) {
+    var act = e.target.getAttribute && e.target.getAttribute("data-act");
+    if (act === "photo") view.byHeight = 0;
+    if (act === "height") view.byHeight = 1;
+    if (act === "stretch") view.stretch = view.stretch > 1 ? 1 : 3;
+    if (act === "reset") { view.az = fresh.az; view.el = fresh.el; view.dist = fresh.dist; }
+    press();
+    draw();
+  });
+  window.addEventListener("resize", draw);
+  press();
+  draw();
+})();
 """
 
 
@@ -673,6 +872,7 @@ def build(settings: Settings, farmer: Farmer, item: FieldWater, events: list[Eve
     # A flight's picture of where to walk sits right under the answer: of
     # everything on this page it is the one a farmer acts on first.
     parts += _found(settings, flags, lang, today)
+    parts += _model3d(settings, flags or terrain, lang, today)
     parts += _arithmetic(item, events, lang)
     parts += _charts(item, images, lang)
     stage_image = draw_stage_chart(item, settings.sms_dir / "explain" / record.id, lang,
@@ -848,6 +1048,49 @@ def _found(settings: Settings, summary: dict | None, lang: str, today: date) -> 
     if unit == "cell":
         parts.append(f'<p class="note">{_esc(_("found_colour", lang))}</p>')
     return parts
+
+
+def _model3d(settings: Settings, report: dict | None, lang: str, today: date) -> list[str]:
+    """The flight's 3D model, to turn with a finger; its snapshot where WebGL is missing."""
+    if not report or not report.get("flight_id"):
+        return []
+    out = settings.drone_workspace / "out" / report["flight_id"]
+    meta_path, data_path = out / "model3d.json", out / "model3d.bin"
+    if not (meta_path.exists() and data_path.exists()):
+        return []
+    meta = json.loads(meta_path.read_text("utf-8"))
+    keep = {k: meta[k] for k in ("points", "scale_m", "size_m", "ground_m", "top_m",
+                                 "plants_top_m", "cube_m")}
+    photos = settings.drone_workspace / "data" / "odm" / report["flight_id"] / "images"
+    count = sum(1 for p in photos.glob("*") if p.suffix.lower() in (".jpg", ".jpeg", ".tif",
+                                                                     ".tiff", ".png")) \
+        if photos.is_dir() else 0
+    flown = report.get("flown_on")
+    body = _("model3d_body", lang, photos=f"{count:,}" if count else "",
+             x=f"{meta['size_m'][0]:.0f}", y=f"{meta['size_m'][1]:.0f}",
+             top=f"{meta['plants_top_m']:.1f}",
+             day=text.day(date.fromisoformat(flown), lang, today) if flown else "?")
+    points = base64.b64encode(data_path.read_bytes()).decode("ascii")
+    snapshot = _drone_image(settings, report, "model3d")
+    buttons = "".join(f'<button type="button" data-act="{act}">{_esc(_(key, lang))}</button>'
+                      for act, key in (("photo", "model3d_photo"), ("height", "model3d_height"),
+                                       ("stretch", "model3d_stretch"), ("reset", "model3d_reset")))
+    fallback = (f'<div class="fallback"><p class="note">{_esc(_("model3d_nogl", lang))}</p>'
+                f'<img src="{snapshot}" alt=""></div>' if snapshot else "")
+    return [
+        f"<h2>{_esc(_('model3d', lang))}</h2>",
+        f"<p>{_esc(body.replace('  ', ' '))}</p>",
+        f'<div class="m3d" data-meta="{_esc(json.dumps(keep))}">',
+        '<canvas aria-label="3D"></canvas>',
+        f'<div class="tools">{buttons}</div>',
+        f'<div class="legend">{_esc(_("model3d_legend", lang))} 0 m <i></i> '
+        f'{meta["plants_top_m"]:.1f} m</div>',
+        f'<p class="note">{_esc(_("model3d_how", lang))}</p>',
+        fallback,
+        f'<script type="application/octet-stream" class="points">{points}</script>',
+        "</div>",
+        f"<script>{VIEWER_JS}</script>",
+    ]
 
 
 def _thermal(settings: Settings, report: dict | None, lang: str) -> list[str]:
