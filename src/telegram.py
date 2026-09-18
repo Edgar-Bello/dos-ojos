@@ -12,6 +12,7 @@ the two can never mix, and everything else treats it like any other farmer.
 
 from __future__ import annotations
 
+import json
 import logging
 import mimetypes
 import threading
@@ -32,6 +33,7 @@ API = "https://api.telegram.org"
 PREFIX = "+0"
 POLL_S = 30
 LIMIT = 4096        # characters in one Telegram message
+PHOTO_MAX = 10 * 1024 * 1024    # the most Telegram takes for a photo sent as a file
 
 
 class TelegramError(RuntimeError):
@@ -53,12 +55,14 @@ def chat_of(phone: str) -> int:
 
 
 def _call(settings: Settings, method: str, data: dict, *, timeout: float = 20,
-          post: Callable[..., requests.Response] | None = None) -> dict:
+          post: Callable[..., requests.Response] | None = None,
+          files: dict | None = None) -> dict:
     if not settings.telegram_token:
         raise TelegramError("Telegram is not set up: put TELEGRAM_BOT_TOKEN in sms.env")
     try:
+        extra = {"files": files} if files else {}
         response = (post or requests.post)(f"{API}/bot{settings.telegram_token}/{method}",
-                                           data=data, timeout=timeout)
+                                           data=data, timeout=timeout, **extra)
     except requests.RequestException as exc:
         # The token is in the address; never let it reach a log.
         raise TelegramError(f"could not reach Telegram ({type(exc).__name__})") from None
@@ -85,9 +89,30 @@ def send(settings: Settings, phone: str, body: str, *, media: list[str] | None =
                       "disable_web_page_preview": "true"}, post=post)
     # Telegram fetches a picture itself, so only a public link can carry one.
     for url in media or ():
-        if url.startswith("https://"):
+        local = _our_picture(settings, url)
+        if local is not None:
+            # Handed over directly: fetching it back through a slow tunnel can take
+            # longer than Telegram waits for a link.
+            sent = _call(settings, "sendPhoto", {"chat_id": chat}, post=post, timeout=60,
+                         files={"photo": (local.name, local.read_bytes())})
+        elif url.startswith("https://"):
             sent = _call(settings, "sendPhoto", {"chat_id": chat, "photo": url}, post=post)
     return str(sent["message_id"]) if sent else ""
+
+
+def _our_picture(settings: Settings, url: str) -> Path | None:
+    """The file behind one of this server's own picture links (/p/<token>), if any."""
+    prefix = settings.link("p/")
+    if not url.startswith(prefix):
+        return None
+    from . import store
+
+    with store.session(settings.db_path) as conn:
+        link = store.get_link(conn, url[len(prefix):], "picture")
+    if link is None:
+        return None
+    path = Path(json.loads(link["meta"] or "{}").get("path", ""))
+    return path if path.is_file() and path.stat().st_size <= PHOTO_MAX else None
 
 
 def _save_file(settings: Settings, file_id: str, folder: Path, stem: str) -> Path:

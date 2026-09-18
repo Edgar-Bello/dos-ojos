@@ -239,7 +239,11 @@ def main() -> None:
             say(f"  {detail['n']} files this script does not recognise; left alone.")
             continue
 
-    run(workspace, "join", optional=True)
+    # Joining the drone to the satellite's scores needs those scores; a live system
+    # that has never run `dosojos-sat score` has none, and the farmer's page does not
+    # need them, so skip it quietly rather than print an error that is not one.
+    if (data / "dosojos_sat" / "out" / "flags.json").exists():
+        run(workspace, "join", optional=True)
     say("\nDone. The farmer can now text PORQUE (or WHY) and get the page with it on.")
 
 

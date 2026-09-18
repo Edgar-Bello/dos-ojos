@@ -806,18 +806,29 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"ok": False, "error": str(exc)}, exc.status)
             else:
                 self._send(exc.status, str(exc).encode("utf-8"), "text/plain; charset=utf-8")
+        except ConnectionError:
+            raise                              # nobody left to answer; see do_GET/do_PUT
         except Exception:                      # a bug: say so, and keep the server up
             log.exception("error answering %s %s", method, self.path)
             self._send(500, b"internal error; see the server log", "text/plain")
 
     def do_GET(self) -> None:
-        self._dispatch("GET")
+        try:
+            self._dispatch("GET")
+        except ConnectionError:
+            # The other side (a phone, Telegram, the tunnel) stopped listening.
+            log.info("%s was cut off by the other side", self.path.split("?")[0])
+            self.close_connection = True
 
     def do_HEAD(self) -> None:
         self._dispatch("HEAD")
 
     def do_POST(self) -> None:
-        self._dispatch("POST")
+        try:
+            self._dispatch("POST")
+        except ConnectionError:
+            log.info("%s was cut off by the other side", self.path.split("?")[0])
+            self.close_connection = True
 
     def do_PUT(self) -> None:
         try:
