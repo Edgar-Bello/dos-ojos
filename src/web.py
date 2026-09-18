@@ -174,7 +174,7 @@ class App:
         settings = self.settings
         if self.verify:
             if not settings.twilio_token:
-                raise HttpError(503, "Twilio keys are missing from farm_data/sms/sms.env")
+                raise HttpError(503, "Twilio keys are missing from this server's sms.env")
             url = settings.link("sms/twilio")
             if not twilio.valid_signature(url, params, settings.twilio_token, signature_header):
                 log.warning("refused a webhook call with a bad signature. If it came from "
