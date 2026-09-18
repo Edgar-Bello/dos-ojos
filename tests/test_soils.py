@@ -99,3 +99,33 @@ def test_the_survey_is_asked_three_questions_about_the_outline() -> None:
 def test_outside_the_survey_says_how_to_proceed() -> None:
     with pytest.raises(soils.SoilError, match="soil_awc_in_ft"):
         soils.fetch_ssurgo(box(-99.2, 19.4, -99.1, 19.5), post=lambda *a, **k: _Response([]))
+
+
+class _Page:
+    status_code = 200
+
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+    def json(self) -> dict:
+        raise ValueError("Expecting value")
+
+
+def test_the_nightly_maintenance_is_said_plainly() -> None:
+    page = _Page("<html><body><h1>Site is under daily maintenance from 12:30 AM CST to "
+                 "12:45 AM CST.</h1></body></html>")
+    with pytest.raises(soils.SoilError, match="daily maintenance"):
+        soils.fetch_ssurgo(box(-97.91, 26.21, -97.90, 26.22), post=lambda *a, **k: page)
+
+
+def test_a_stray_page_is_tried_again() -> None:
+    answers = [_Page("<html>busy</html>"), _Response([["mukey", "area"], ["1", "3.0"]])]
+    waits = []
+    rows = soils._query(lambda *a, **k: answers.pop(0), "SELECT 1", sleep=waits.append)
+    assert rows == [{"mukey": "1", "area": "3.0"}] and waits == [soils.RETRY_WAIT_S]
+
+
+def test_a_page_that_never_turns_into_data_fails_in_the_end() -> None:
+    with pytest.raises(soils.SoilError, match="not data, 3 times"):
+        soils._query(lambda *a, **k: _Page("<html>busy</html>"), "SELECT 1",
+                     sleep=lambda s: None)

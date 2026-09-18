@@ -15,6 +15,7 @@ soaks in decides how a field should be watered.
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import asdict, dataclass, field
 from typing import Callable
 
@@ -29,6 +30,9 @@ STORAGE_DEPTHS_M: tuple[float, ...] = (0.25, 0.5, 1.0, 1.5)
 STORAGE_COLUMNS: tuple[str, ...] = ("aws025wta", "aws050wta", "aws0100wta", "aws0150wta")
 CM_PER_FOOT = 30.48
 TIMEOUT_S = 90
+#: A page where data should be is tried this many times, this far apart.
+QUERY_ATTEMPTS = 3
+RETRY_WAIT_S = 10
 
 
 class SoilError(RuntimeError):
@@ -149,23 +153,48 @@ def _number(value) -> float | None:
     return number if np.isfinite(number) else None
 
 
-def _query(post: Callable, sql: str) -> list[dict]:
-    """Run one Soil Data Access query, raising :class:`SoilError` on failure."""
-    try:
-        response = post(SDA_URL, json={"query": sql, "format": "JSON+COLUMNNAME"},
-                        timeout=TIMEOUT_S)
-    except Exception as exc:  # noqa: BLE001 - any transport failure is fatal here
-        raise SoilError(
-            f"could not reach USDA Soil Data Access ({exc}). Check the connection, or "
-            "set soil_awc_in_ft on the field in fields.geojson."
-        ) from exc
-    if response.status_code != 200:
-        raise SoilError(
-            f"Soil Data Access refused the query ({response.status_code}): "
-            f"{response.text[:300].strip()}"
-        )
-    text = response.text.strip()
-    return _rows(response.json()) if text else []
+def _query(post: Callable, sql: str, *, attempts: int = QUERY_ATTEMPTS,
+           sleep: Callable[[float], None] = time.sleep) -> list[dict]:
+    """Run one Soil Data Access query, raising :class:`SoilError` on failure.
+
+    The service goes down for maintenance every night and then answers 200 with
+    a web page instead of data. That is said plainly rather than retried, since
+    it lasts a quarter of an hour; any other page that is not data is tried
+    again a couple of times first.
+    """
+    for attempt in range(1, attempts + 1):
+        try:
+            response = post(SDA_URL, json={"query": sql, "format": "JSON+COLUMNNAME"},
+                            timeout=TIMEOUT_S)
+        except Exception as exc:  # noqa: BLE001 - any transport failure is fatal here
+            raise SoilError(
+                f"could not reach USDA Soil Data Access ({exc}). Check the connection, or "
+                "set soil_awc_in_ft on the field in fields.geojson."
+            ) from exc
+        if response.status_code != 200:
+            raise SoilError(
+                f"Soil Data Access refused the query ({response.status_code}): "
+                f"{response.text[:300].strip()}"
+            )
+        text = response.text.strip()
+        if not text:
+            return []
+        try:
+            return _rows(response.json())
+        except ValueError:
+            if "maintenance" in text.lower():
+                raise SoilError(
+                    "USDA Soil Data Access is down for its daily maintenance (12:30 to "
+                    "12:45 AM Central). Try again after that."
+                ) from None
+            if attempt == attempts:
+                raise SoilError(
+                    f"Soil Data Access answered with something that is not data, "
+                    f"{attempts} times: {text[:200]}"
+                ) from None
+            log.info("Soil Data Access answered with a page, not data; trying again")
+            sleep(RETRY_WAIT_S)
+    return []
 
 
 def fetch_ssurgo(geometry: BaseGeometry, *, post: Callable | None = None) -> SoilProfile:
