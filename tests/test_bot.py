@@ -486,3 +486,21 @@ def test_water_now_with_the_stage(conn, settings) -> None:
     reply = phone("AGUA")[0]
     assert reply.startswith("Campo Norte (sorgo): REGAR YA. Ponga unas 5.3 pulgadas por surcos.")
     assert "Esta en embuche y floracion" in reply
+
+
+def test_mistyped_coordinates_are_asked_again_not_sent_to_the_team(phone: Phone) -> None:
+    onboard(phone, lang="2")
+    phone("UTRGV")
+    phone("NOT SURE")
+    replies = phone("40.47744, -8698959")                 # the dot left out of -86.98959
+    assert phone.state == "f:location" and "each with its dot" in replies[0]
+    replies = phone("40.47744, -86.98959")
+    assert "tap the corners" in replies[0] and "/f/" in replies[0]
+
+
+def test_a_described_place_still_gets_the_map(phone: Phone) -> None:
+    onboard(phone, lang="2")
+    phone("North Field")
+    phone("40")
+    replies = phone("mile 9 north and Western road, by the canal")
+    assert "Find it on this map" in replies[0] and "/f/" in replies[0]

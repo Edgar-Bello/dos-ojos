@@ -462,11 +462,17 @@ class Turn:
                      link=self._map_link(record))
             self._next_question()
             return
+        if re.search(r"\d", self.body) and not re.search(r"[^\W\d_]", self.body):
+            # Only numbers, yet not coordinates: a slip ("-8698959" for "-86.98959").
+            # Passing it on as a description would leave the field with no map.
+            self.say("location_bad_numbers")
+            return
         if len(parse.words(self.body)) >= 2 and not parse.command(self.body):
             record.place = self.body[:300]
             self._save(record)
             self._flag_for_team()
-            self.say("location_described")
+            # The map opens without a pin too, so nobody waits on the team for it.
+            self.say("location_described", link=self._map_link(record))
             self._next_question()
             return
         self._retry("location_again", reask=False)

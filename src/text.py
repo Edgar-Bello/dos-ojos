@@ -279,8 +279,17 @@ T: dict[str, tuple[str, str]] = {
                      "¿Puede mandarla otra vez?",
                      "That location ({lat}, {lon}) isn't in the continental US. Could you "
                      "send it again?"),
-    "location_described": ("Gracias. Nuestro equipo lo buscará en el mapa y le avisará.",
-                           "Thanks. Our team will find it on the map and let you know."),
+    "location_described": ("Gracias. Búsquelo usted en este mapa y toque las esquinas del "
+                           "campo: {link} . Si no lo encuentra, nuestro equipo lo busca y le "
+                           "avisa.",
+                           "Thanks. Find it on this map and tap the corners of the field: {link} "
+                           ". If you can't, our team will find it and let you know."),
+    "location_bad_numbers": ("Esos números no parecen coordenadas. Deben verse así, cada una con "
+                             "su punto: 26.15384, -97.99216. Mándelas otra vez, o un pin de "
+                             "Google Maps.",
+                             "Those numbers don't look like coordinates. They should look like "
+                             "this, each with its dot: 26.15384, -97.99216. Send them again, "
+                             "or a Google Maps pin."),
     "location_again": ("No encontré la ubicación. Mande un pin de Google Maps, las coordenadas "
                        "(ej. 26.15, -97.99) o describa el lugar con caminos o millas.",
                        "I couldn't find a location. Send a Google Maps pin, the coordinates "
