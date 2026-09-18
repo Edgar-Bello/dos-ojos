@@ -32,6 +32,8 @@ HINTS = {
     21614: "that number cannot receive texts (a landline?)",
     30007: "the carrier filtered the text as spam; check the A2P 10DLC registration",
     30034: "the number is not registered for A2P 10DLC yet; US carriers block unregistered texts",
+    30032: "the toll-free number is not verified yet; submit Toll-Free Verification in the "
+           "Twilio console (Phone Numbers > Regulatory Compliance)",
 }
 
 
