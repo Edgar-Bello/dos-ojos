@@ -5,7 +5,8 @@ the photos received, an alert, a team message) goes through :func:`deliver`:
 
 - never to a farmer who replied STOP;
 - nothing unasked between 8 pm and 8 am farm time: it waits for the morning;
-- through Twilio only when it is set up and the farmer came in by real SMS.
+- through Twilio only when it is set up and the farmer came in by real SMS, and
+  through Telegram only when its bot is set up and the farmer came in there.
   Farmers made in the simulator or the terminal keep their texts in the
   database, where those screens show them. Nothing reaches a phone by accident.
 """
@@ -17,11 +18,20 @@ import logging
 import sqlite3
 from datetime import datetime, time, timedelta, timezone
 
-from . import store, text, twilio
+from . import store, telegram, text, twilio
 from .config import QUIET_END_HOUR, QUIET_START_HOUR, Settings
 from .store import Farmer
 
 log = logging.getLogger(__name__)
+
+
+def can_send(settings: Settings, channel: str) -> bool:
+    """True when texts on this channel really leave the computer."""
+    if channel == "sms":
+        return settings.twilio_ready
+    if channel == "telegram":
+        return bool(settings.telegram_token)
+    return False
 
 
 def quiet(now_local: datetime) -> bool:
@@ -48,7 +58,7 @@ def deliver(conn: sqlite3.Connection, settings: Settings, farmer: Farmer, body: 
     if farmer.opted_out_at:
         log.info("not texting %s: they opted out", farmer.phone)
         return "opted out"
-    if farmer.channel != "sms" or not settings.twilio_ready:
+    if not can_send(settings, farmer.channel):
         store.log_out(conn, farmer.phone, body, status="kept", media=media)
         return "kept"
     if not urgent and quiet(now):
@@ -63,9 +73,12 @@ def deliver(conn: sqlite3.Connection, settings: Settings, farmer: Farmer, body: 
 def _send(conn: sqlite3.Connection, settings: Settings, phone: str, body: str,
           message_id: int, media: list[str] | None = None) -> str:
     try:
-        sid = (twilio.send(settings, phone, body, media=media) if media
-               else twilio.send(settings, phone, body))
-    except twilio.TwilioError as exc:
+        if telegram.is_telegram(phone):
+            sid = telegram.send(settings, phone, body, media=media)
+        else:
+            sid = (twilio.send(settings, phone, body, media=media) if media
+                   else twilio.send(settings, phone, body))
+    except (twilio.TwilioError, telegram.TelegramError) as exc:
         store.mark_message(conn, message_id, status="failed", error=str(exc))
         log.warning("text to %s failed: %s", phone, exc)
         if exc.code == 21610:
@@ -89,7 +102,7 @@ def flush(conn: sqlite3.Connection, settings: Settings, *, now: datetime | None 
         if farmer is None or farmer.opted_out_at:
             store.mark_message(conn, row["id"], status="failed", error="opted out before sending")
             continue
-        if not settings.twilio_ready:
+        if not can_send(settings, farmer.channel):
             store.mark_message(conn, row["id"], status="kept")
             continue
         sent += _send(conn, settings, row["phone"], row["body"], row["id"],

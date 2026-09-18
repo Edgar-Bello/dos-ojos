@@ -164,8 +164,11 @@ class App:
                 return []
             message.message_id = message_id
             replies = self._bot(conn).handle(message)
-            by_api = (message.channel == "sms" and self.settings.reply_by_api
-                      and self.settings.twilio_ready)
+            # Telegram has no webhook answer to put replies in; the console's
+            # trial number throws webhook answers away.
+            by_api = ((message.channel == "telegram" and self.settings.telegram_token)
+                      or (message.channel == "sms" and self.settings.reply_by_api
+                          and self.settings.twilio_ready))
             for reply in replies:
                 if by_api:
                     reply_id = store.log_out(conn, message.phone, reply, status="sending")

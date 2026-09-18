@@ -396,9 +396,14 @@ and every demo), reached through a Cloudflare quick tunnel. Each start reads the
 tunnel's new address, points the Twilio number at it (`dosojos-sms webhook`) and
 serves; the daily run goes at 6 am while it is up.
 
-- A **trial** account texts only phones verified in the console (up to five),
-  and trial accounts cannot register a local (10DLC) number, so buy a
-  **toll-free** number with the trial credit.
+- A **trial** account can only send Twilio's own sample texts (code 572006,
+  WhatsApp too: 21654), so the bot's answers never go out. The "Try out SMS"
+  number is also not the account's own: its webhook is pasted by hand on that
+  page, and it drops webhook answers (12300), so live.cmd answers through the
+  sending API there (`DOSOJOS_REPLY_BY_API`).
+- **Telegram** works today with no approval: make a bot with @BotFather and put
+  `TELEGRAM_BOT_TOKEN` in `live_data\sms\sms.env`. The server polls Telegram
+  itself; farmers there are kept as `+0` and the chat number.
 - For anyone at all to text it: upgrade the account, then complete Toll-Free
   Verification (or register A2P 10DLC for a local number).
 - `cloudflared.exe` goes in `Dos_Ojos	ools`. A quick tunnel refuses any single

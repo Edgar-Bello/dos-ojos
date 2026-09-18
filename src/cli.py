@@ -19,6 +19,7 @@ from dosojos_sat.fields import compute_acres, utm_epsg_for
 
 from . import export as export_mod
 from . import outbox, store, text
+from . import telegram as telegram_mod
 from . import twilio as twilio_mod
 from .bot import Bot, Inbound, Media, Turn, map_token
 from .config import DEFAULT_PORT, LINK_DAYS, ConfigError, Settings, setup_logging
@@ -102,6 +103,8 @@ def serve_cmd(ctx: Context, port: int, host: str, sim: bool, no_verify: bool,
         raise click.ClickException(f"cannot listen on {host}:{port} ({exc}); is another "
                                    "server already running? Try --port 8081.") from exc
     start_flusher(app)
+    if settings.telegram_token:
+        telegram_mod.start_listening(app)
     local = f"http://{'localhost' if host in ('127.0.0.1', '0.0.0.0') else host}:{port}"
     click.echo(f"Dos Ojos SMS on {local}   (Ctrl+C to stop)")
     click.echo(f"  data       {settings.data_dir}")
@@ -116,6 +119,8 @@ def serve_cmd(ctx: Context, port: int, host: str, sim: bool, no_verify: bool,
                         "phones.", fg="yellow")
     else:
         click.echo("  Twilio     not set up: texts stay on this computer (simulator, 'chat')")
+    if settings.telegram_token:
+        click.echo("  Telegram   on: messages to the bot get answers")
     if ctx.as_of:
         click.secho(f"  pinned to {ctx.as_of} (--as-of or DOSOJOS_AS_OF)", fg="yellow")
     if open_browser:

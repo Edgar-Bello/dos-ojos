@@ -56,6 +56,8 @@ class Settings:
     twilio_token: str | None = None
     twilio_from: str | None = None
     twilio_service: str | None = None
+    #: A Telegram bot's token from @BotFather: farmers can also message that bot.
+    telegram_token: str | None = None
     timezone: str = TIMEZONE
     #: A band on every page, e.g. to mark a demo's made-up farmers.
     banner: str | None = None
@@ -151,6 +153,7 @@ class Settings:
             public_url=get("DOSOJOS_PUBLIC_URL") or f"http://localhost:{port}",
             team_contact=get("DOSOJOS_TEAM_CONTACT"),
             twilio_sid=sid, twilio_token=token, twilio_from=sender, twilio_service=service,
+            telegram_token=get("TELEGRAM_BOT_TOKEN"),
             timezone=get("DOSOJOS_TIMEZONE") or TIMEZONE, banner=get("DOSOJOS_BANNER"),
             as_of=as_of,
             read_now=(get("DOSOJOS_READ_NOW") or "").lower() in ("1", "yes", "true"),

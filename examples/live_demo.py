@@ -8,6 +8,10 @@ from farm_data and from every demo. Whoever texts the Twilio number signs up the
 way anyone would; on a trial account, only phones verified in the Twilio console
 get answers.
 
+Farmers can also message a Telegram bot (TELEGRAM_BOT_TOKEN, from @BotFather), a
+stand-in while no number can text yet. With the bot set up, the Twilio step is
+skipped.
+
 The tunnel is a Cloudflare quick tunnel: free and with no account, but its
 address changes every start. So each start reads the new address, points the
 Twilio number's incoming texts at it, and hands it to the server for the links
@@ -41,6 +45,12 @@ TUNNEL_WAIT_S = 60
 NOT_OWNED_EXIT = 3
 QUICK_TUNNEL = re.compile(r"https://[a-z0-9-]+\.trycloudflare\.com")
 
+TELEGRAM = """\
+# Or instead: a Telegram bot. In Telegram, message @BotFather, send /newbot, and
+# paste the token it gives you here:
+TELEGRAM_BOT_TOKEN=
+"""
+
 TEMPLATE = """\
 # Dos Ojos live system. Fill in the three Twilio lines yourself, from the Twilio
 # console (Account Info on the front page; the number under Phone Numbers).
@@ -50,6 +60,7 @@ TWILIO_AUTH_TOKEN=
 # The number people text, as +1 and ten digits, e.g. +18885550123:
 TWILIO_FROM=
 
+{telegram}
 # Put at the end of the HELP text, e.g. your name and a number to call:
 # DOSOJOS_TEAM_CONTACT=Edgar 956-555-0100
 
@@ -69,8 +80,11 @@ def prepare() -> bool:
         ENV.parent.mkdir(parents=True, exist_ok=True)
         team_step = (f'"{DRONE_PYTHON.as_posix()}" "{(HERE / "process_flight.py").as_posix()}" '
                      f'--data "{LIVE.as_posix()}" --uploads-only')
-        ENV.write_text(TEMPLATE.format(team_step=team_step), encoding="utf-8")
+        ENV.write_text(TEMPLATE.format(team_step=team_step, telegram=TELEGRAM), encoding="utf-8")
         say(f"Made the live system in {LIVE}")
+    elif "TELEGRAM_BOT_TOKEN" not in ENV.read_text(encoding="utf-8"):
+        with ENV.open("a", encoding="utf-8") as file:
+            file.write("\n" + TELEGRAM)
     values = {}
     for line in ENV.read_text(encoding="utf-8").splitlines():
         if "=" in line and not line.lstrip().startswith("#"):
@@ -78,11 +92,21 @@ def prepare() -> bool:
             values[key.strip()] = value.strip()
     missing = [k for k in ("TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_FROM")
                if not values.get(k)]
-    if missing:
+    if missing and not values.get("TELEGRAM_BOT_TOKEN"):
         say(f"\nThe Twilio keys are not in yet: {', '.join(missing)}.\n"
-            f"Open this file, fill them in, save it, and run live.cmd again:\n    {ENV}")
+            f"Open this file, fill them in (or the Telegram bot's token), save it, and run "
+            f"live.cmd again:\n    {ENV}")
         return False
     return True
+
+
+def telegram_only() -> bool:
+    """True when the bot is set up: then the Twilio step is skipped."""
+    for line in ENV.read_text(encoding="utf-8").splitlines():
+        key, _, value = line.partition("=")
+        if key.strip() == "TELEGRAM_BOT_TOKEN" and value.strip():
+            return True
+    return False
 
 
 def find_cloudflared() -> Path | None:
@@ -157,7 +181,7 @@ def start() -> int:
     env = {**os.environ, "DOSOJOS_PUBLIC_URL": address}
     try:
         say(f"  public address  {address}")
-        pointed = sms("webhook", env=env)
+        pointed = 0 if telegram_only() else sms("webhook", env=env)
         if pointed == NOT_OWNED_EXIT:
             env["DOSOJOS_REPLY_BY_API"] = "1"      # that number drops answers sent back in the webhook
             say("\nThe address changes every time live.cmd starts, so paste the new one each time.")
@@ -165,7 +189,7 @@ def start() -> int:
             say("The Twilio number could not be pointed at the tunnel; see the message above.")
             return 1
         threading.Thread(target=every_morning, args=(env,), daemon=True).start()
-        say(f"\nText the Twilio number from a verified phone. The pretend phone still works "
+        say(f"\nMessage the Telegram bot, or text the Twilio number from a verified phone. The pretend phone still works "
             f"here: http://localhost:{PORT}/sim\nCtrl+C stops it all.\n")
         return sms("serve", "--port", str(PORT), "--sim", env=env)
     except KeyboardInterrupt:
