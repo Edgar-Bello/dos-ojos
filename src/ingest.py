@@ -225,8 +225,10 @@ def read_shot(path: Path) -> Shot:
             merged.update(dict(exif.get_ifd(0x8769)))   # ExifIFD holds focal plane tags
         except Exception:  # noqa: BLE001 - malformed EXIF must not sink the read
             pass
+        # Inside the with: a TIFF reads its sub-IFDs from the open file, so asked
+        # for after closing, every geotagged TIFF would read as having no position.
+        gps = _gps_block(exif)
 
-    gps = _gps_block(exif)
     camera = merged.get(_EXIF_TAGS.get("Model", -1))
     # DJI pads the model to a fixed width with NUL bytes ('FC6310\x00\x00...').
     camera = str(camera).replace("\x00", "").strip() or None if camera else None

@@ -35,6 +35,7 @@ and would have to be read from the checkbook instead.
 from __future__ import annotations
 
 import logging
+import warnings
 import re
 from dataclasses import asdict, dataclass, field as dc_field
 from datetime import datetime
@@ -222,7 +223,23 @@ def ground_around(celsius: np.ndarray, block_px: int,
     padded = np.pad(celsius, ((0, pad_y), (0, pad_x)), mode="edge")
     rows, columns = padded.shape[0] // block, padded.shape[1] // block
     tiles = padded.reshape(rows, block, columns, block).transpose(0, 2, 1, 3)
-    coarse = np.percentile(tiles.reshape(rows, columns, -1), percentile, axis=2)
+    flat = tiles.reshape(rows, columns, -1)
+    if np.isnan(flat).any():
+        # A frame placed from photos has empty corners and edges. Each block's
+        # ground comes from the pixels it has; a block with none borrows its
+        # nearest neighbour's, so no emptiness spreads into the frame.
+        with np.errstate(invalid="ignore"), warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            coarse = np.nanpercentile(flat, percentile, axis=2)
+        empty = np.isnan(coarse)
+        if empty.all():
+            return np.full(celsius.shape, np.nan)
+        if empty.any():
+            nearest = ndimage.distance_transform_edt(empty, return_distances=False,
+                                                     return_indices=True)
+            coarse = coarse[tuple(nearest)]
+    else:
+        coarse = np.percentile(flat, percentile, axis=2)
     if coarse.shape == padded.shape:
         grown = coarse
     else:
@@ -403,7 +420,8 @@ class FlatField:
 
     def correction(self, seconds: float, shape: tuple[int, int]) -> np.ndarray:
         """The pattern to take off a frame taken at ``seconds``."""
-        if not self.seconds.size or self.down.shape[1:] != (shape[0],):
+        if (not self.seconds.size or self.down.shape[1:] != (shape[0],)
+                or self.across.shape[1:] != (shape[1],)):
             return np.zeros(shape)
         down = np.array([np.interp(seconds, self.seconds, self.down[:, i])
                          for i in range(shape[0])])
@@ -579,8 +597,8 @@ def _groups(shares) -> np.ndarray:
 
 def build(paths, out_dir: Path, *, cell_m: float = DEFAULT_CELL_M,
           colder_c: float = LEAF_COLDER_C, half_window_s: float = DRIFT_HALF_WINDOW_S,
-          min_samples: int = MIN_LEAF_SAMPLES, trim: float = TRIM_EDGE
-          ) -> tuple[Scan, Path, Path]:
+          min_samples: int = MIN_LEAF_SAMPLES, trim: float = TRIM_EDGE,
+          camera_pattern: bool = True) -> tuple[Scan, Path, Path]:
     """Average a scan's frames into one canopy-temperature map and a leaf map.
 
     Writes ``thermal.tif`` - leaves only, in Celsius, moved onto the middle of
@@ -644,7 +662,11 @@ def build(paths, out_dir: Path, *, cell_m: float = DEFAULT_CELL_M,
 
     n_all = np.zeros(height * width, dtype=np.int64)
     zero = min((f.when for f in frames if f.when is not None), default=None)
-    flat = flat_field([f.path for f in frames], colder_c=colder_c)
+    # Frames placed from photos come already turned, their camera's pattern
+    # taken off before turning (photos.write_frames); measuring it again here,
+    # on frames facing different ways, would only blur it.
+    flat = (flat_field([f.path for f in frames], colder_c=colder_c) if camera_pattern
+            else FlatField(np.zeros(0), np.zeros((0, 0)), np.zeros((0, 0))))
     unit = ""
     placed: list[Frame] = []
     #: What each frame contributed, cell by cell: which cells, how many leaf

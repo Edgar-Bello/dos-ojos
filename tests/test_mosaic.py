@@ -312,3 +312,17 @@ def test_a_picture_that_is_not_temperatures_is_refused(tmp_path: Path):
             ds.write(grey.astype(np.float32), 1)
     with pytest.raises(mosaic.MosaicError, match="no frame could be placed|no cell holds"):
         mosaic.build(mosaic.find_frames(folder), tmp_path / "out")
+
+
+def test_empty_pixels_do_not_spread_into_the_ground_around_them() -> None:
+    """A frame placed from a photo has empty corners; the ground next to them still counts."""
+    celsius = np.full((60, 60), 40.0)
+    leaf = np.zeros((60, 60), bool)
+    leaf[::6, ::6] = leaf[1::6, 1::6] = True     # small leaves, 7 degrees cooler than soil
+    celsius[leaf] = 33.0
+    celsius[:10, :10] = np.nan                   # a corner no photo reached
+    celsius[25, 45] = np.nan
+    leaves = mosaic.leaves_of(celsius, pixel_m=0.01, window_m=0.1)
+    seen = leaf & np.isfinite(celsius)
+    assert leaves[seen].mean() > 0.95            # right up to the empty corner
+    assert not leaves[~leaf].any()

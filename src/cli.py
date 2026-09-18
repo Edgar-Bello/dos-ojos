@@ -610,6 +610,124 @@ def _format_odm_result(result) -> str:
     return "\n".join(lines)
 
 
+@cli.command("stitch")
+@click.argument("flight_id")
+@click.option("--photos", "photos_dir", default=None,
+              type=click.Path(file_okay=False, exists=True, path_type=Path),
+              help="The folder of photos  [default: the flight's raw folder]")
+@click.option("--height", type=float, default=None,
+              help="Flying height above the ground in metres, for photos that do not say.")
+@click.option("--resolution", type=float, default=None,
+              help="Map resolution in metres  [default: the photos' own, capped in size]")
+@click.pass_obj
+def stitch_cmd(settings: Settings, flight_id: str, photos_dir: Path | None,
+               height: float | None, resolution: float | None) -> None:
+    """Join a flight's photos into one colour map, without ODM or Docker.
+
+    Each photo is placed from its GPS, height and heading, matched to its
+    neighbours, and the whole flight solved at once. No height model comes out
+    of it: for plant height run 'odm' (Docker, hours) instead. Next: 'colour'.
+    """
+    from . import photos as photos_mod
+
+    settings.ensure_dirs(flight_id)
+    folder = photos_dir or settings.flight_raw(flight_id)
+    try:
+        found = photos_mod.find_photos(folder)
+        click.echo(f"Placing {len(found)} photos from {folder}...")
+        stitched = photos_mod.place(found, height_m=height)
+        ortho = settings.flight_odm(flight_id) / "odm_orthophoto" / "odm_orthophoto.tif"
+        photos_mod.paint(stitched, ortho, resolution_m=resolution)
+    except photos_mod.StitchError as exc:
+        raise click.ClickException(str(exc)) from exc
+    record = {"photos": len(stitched.photos), "connected": stitched.connected,
+              "pairs_used": stitched.pairs_used, "pairs_tried": stitched.pairs_tried,
+              "ties_agree_m": stitched.tie_rms_m, "moved_from_gps_m": stitched.moved_from_gps_m,
+              "crs": stitched.crs, "notes": stitched.all_notes, "orthophoto": str(ortho)}
+    (settings.flight_out(flight_id) / "stitch.json").write_text(
+        json.dumps(record, indent=2), encoding="utf-8")
+    click.echo(_format_stitched(stitched))
+    click.echo(f"\n  {ortho}\n  Next: dosojos-drone colour {flight_id}")
+
+
+def _format_stitched(stitched) -> str:
+    """How the placing went, as an aligned block."""
+    lines = [
+        f"  photos placed    {len(stitched.photos)} ({stitched.connected} matched to a neighbour)",
+        f"  pairs tied       {stitched.pairs_used} of {stitched.pairs_tried} tried",
+    ]
+    if stitched.tie_rms_m is not None:
+        lines.append(f"  photos agree to  {stitched.tie_rms_m * 100:.1f} cm where they overlap")
+    if stitched.moved_from_gps_m is not None:
+        lines.append(f"  moved from GPS   {stitched.moved_from_gps_m:.1f} m (median)")
+    lines += [f"  NOTE: {note}" for note in stitched.all_notes]
+    return "\n".join(lines)
+
+
+@cli.command("colour")
+@click.argument("flight_id")
+@click.option("--cell", type=float, default=None,
+              help="Size of the squares judged, in metres  [default: 1]")
+@click.pass_obj
+def colour_cmd(settings: Settings, flight_id: str, cell: float | None) -> None:
+    """Flag thin and bare squares of the field from the colour map alone.
+
+    For a flight with no height model (stitched photos): each square metre is
+    judged by how much of it is green, and how green, against the rest of the
+    same field. Writes the same flag overlay and block summary as 'report'.
+    """
+    from . import colour as colour_mod
+
+    out_dir = settings.flight_out(flight_id)
+    settings.ensure_dirs(flight_id)
+    ortho = settings.flight_odm(flight_id) / "odm_orthophoto" / "odm_orthophoto.tif"
+    if not ortho.exists():
+        raise click.ClickException(
+            f"no colour map at {ortho}. Run 'dosojos-drone stitch {flight_id}' first.")
+    flight = None
+    try:
+        flight = get_flight(settings.manifest_path, flight_id)
+    except ManifestError:
+        pass
+    field_id = flight.field_id if flight else None
+    field = _load_field(settings, field_id)
+    try:
+        cells, result = colour_mod.judge(ortho, field,
+                                         cell_m=cell or colour_mod.DEFAULT_CELL_M)
+    except colour_mod.ColourError as exc:
+        raise click.ClickException(str(exc)) from exc
+    cells.to_file(out_dir / "flags_colour.geojson", driver="GeoJSON")
+
+    summary = report_mod.block_summary(
+        cells, flight_id=flight_id, field_id=field_id, method="colour",
+        flown_on=flight.flown_on.isoformat() if flight and flight.flown_on else None,
+        source=flight.source if flight else None)
+    summary["unit_type"] = "cell"
+    summary["cell_m"] = cell or colour_mod.DEFAULT_CELL_M
+    summary["field_cover"] = result.field_cover
+    summary["notes"] = result.notes
+    problems = summary["n_stressed"] + summary["n_dead"] + summary["n_missing"]
+    crop = (flight.crop if flight and flight.crop else "").strip()
+    heading = f"{field_id or flight_id}" + (f" - {crop}" if crop else "")
+    try:
+        overlay = report_mod.save_flag_overlay(
+            cells, ortho, out_dir / "flag_overlay.png", title=heading,
+            subtitle=(f"{problems} of {summary['n_judged']} squares of "
+                      f"{summary['cell_m']:g} m need a look  -  from colour alone, "
+                      f"flight {flight_id}"),
+            banner=_public_banner(flight))
+    except report_mod.ReportError as exc:
+        raise click.ClickException(str(exc)) from exc
+    summary_path = out_dir / "block_summary.json"
+    summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    click.echo(_format_block_summary(summary))
+    for note in result.notes:
+        click.echo(f"  NOTE: {note}")
+    click.echo("")
+    for path in (overlay, summary_path):
+        click.echo(f"  {path}")
+
+
 @cli.command("import")
 @click.argument("flight_id")
 @click.option("--ortho", type=click.Path(exists=True, dir_okay=False, path_type=Path),
@@ -1467,6 +1585,10 @@ def _format_terrain(report) -> str:
               type=click.Path(file_okay=False, exists=True, path_type=Path),
               help="...or the folder of georeferenced thermal frames the camera wrote, "
                    "which are stitched into that mosaic first.")
+@click.option("--photos", "photos_dir", default=None,
+              type=click.Path(file_okay=False, exists=True, path_type=Path),
+              help="...or a folder of thermal photos with only GPS tags (a drone's own): "
+                   "each is placed on the ground first, then stitched the same way.")
 @click.option("--leaves", "leaves_path", default=None,
               type=click.Path(dir_okay=False, exists=True, path_type=Path),
               help="Leaf share per cell, in place of a canopy height model  [default: "
@@ -1494,7 +1616,8 @@ def _format_terrain(report) -> str:
                    "at centimetres wants far less.")
 @click.pass_obj
 def thermal_cmd(settings: Settings, flight_id: str, thermal_path: Path | None,
-                frames_dir: Path | None, leaves_path: Path | None, cell: float,
+                frames_dir: Path | None, photos_dir: Path | None, leaves_path: Path | None,
+                cell: float,
                 trim: float, leaf_colder: float, method: str, water_days: int | None,
                 canopy_min: float, warm_z: float, min_patch: float, group_gap: float) -> None:
     """Optional: find canopy running hot on a thermal mosaic and score it for pests.
@@ -1511,10 +1634,11 @@ def thermal_cmd(settings: Settings, flight_id: str, thermal_path: Path | None,
 
     out_dir = settings.flight_out(flight_id)
     settings.ensure_dirs(flight_id)
-    if (thermal_path is None) == (frames_dir is None):
+    if sum(x is not None for x in (thermal_path, frames_dir, photos_dir)) != 1:
         raise click.ClickException(
-            "give either --thermal <mosaic.tif>, a finished radiometric orthophoto, or "
-            "--frames <folder>, the georeferenced frames the camera wrote. Not both."
+            "give one of --thermal <mosaic.tif>, a finished radiometric orthophoto; "
+            "--frames <folder>, the georeferenced frames a scanner or mapping camera wrote; "
+            "or --photos <folder>, a drone's thermal photos with GPS tags."
         )
     flight = None
     try:
@@ -1524,12 +1648,30 @@ def thermal_cmd(settings: Settings, flight_id: str, thermal_path: Path | None,
     field_id = flight.field_id if flight else None
 
     scan = None
+    placed_notes: list[str] = []
+    if photos_dir is not None:
+        from . import photos as photos_mod
+
+        try:
+            found = photos_mod.find_photos(photos_dir)
+            click.echo(f"Placing {len(found)} thermal photos from {photos_dir}...")
+            stitched = photos_mod.place(found)
+            click.echo(_format_stitched(stitched))
+            frames_dir = out_dir / "placed_frames"
+            photos_mod.write_frames(stitched, frames_dir)
+            placed_notes = stitched.all_notes
+        except photos_mod.StitchError as exc:
+            raise click.ClickException(str(exc)) from exc
     if frames_dir is not None:
         try:
             found = mosaic_mod.find_frames(frames_dir)
             click.echo(f"Stitching {len(found)} thermal frames from {frames_dir}...")
+            # Frames placed from photos had the camera's pattern taken off before
+            # they were turned; measuring it again on turned frames would blur it.
             scan, thermal_path, built = mosaic_mod.build(
-                found, out_dir, cell_m=cell, colder_c=leaf_colder, trim=trim)
+                found, out_dir, cell_m=cell, colder_c=leaf_colder, trim=trim,
+                camera_pattern=photos_dir is None)
+            scan.notes.extend(placed_notes)
         except (mosaic_mod.MosaicError, thermal_mod.ThermalError) as exc:
             raise click.ClickException(str(exc)) from exc
         leaves_path = leaves_path or built
