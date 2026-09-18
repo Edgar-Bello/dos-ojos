@@ -19,6 +19,7 @@ from dosojos_sat.fields import compute_acres, utm_epsg_for
 
 from . import export as export_mod
 from . import outbox, store, text
+from . import twilio as twilio_mod
 from .bot import Bot, Inbound, Media, Turn, map_token
 from .config import DEFAULT_PORT, LINK_DAYS, ConfigError, Settings, setup_logging
 from .status import Water, latest_terrain
@@ -127,6 +128,23 @@ def serve_cmd(ctx: Context, port: int, host: str, sim: bool, no_verify: bool,
         click.echo("\nstopped")
     finally:
         server.server_close()
+
+
+@cli.command("webhook")
+@click.pass_obj
+def webhook_cmd(ctx: Context) -> None:
+    """Point the Twilio number's incoming texts at this server's public address."""
+    settings = ctx.settings
+    if not settings.public_url.startswith("https://"):
+        raise click.ClickException(
+            f"DOSOJOS_PUBLIC_URL is {settings.public_url}, which Twilio cannot reach: it must "
+            "be the https address a tunnel or host gives this server")
+    url = settings.link("sms/twilio")
+    try:
+        number = twilio_mod.point_number_at(settings, url)
+    except twilio_mod.TwilioError as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(f"Texts to {number} now come to {url}")
 
 
 @cli.command("chat")

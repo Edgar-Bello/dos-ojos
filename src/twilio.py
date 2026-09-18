@@ -26,7 +26,8 @@ HINTS = {
     21211: "that is not a valid phone number",
     21408: "texting that country is not enabled on the account (Messaging > Settings > Geo permissions)",
     21606: "the TWILIO_FROM number cannot send texts; pick an SMS-capable number",
-    21608: "a trial account only texts phone numbers verified in the console",
+    21608: "a trial account only texts phone numbers verified in the console (Phone Numbers > "
+           "Verified Caller IDs): add that phone there, up to five",
     21610: "the farmer replied STOP; Twilio will not deliver to them until they reply START",
     21614: "that number cannot receive texts (a landline?)",
     30007: "the carrier filtered the text as spam; check the A2P 10DLC registration",
@@ -116,3 +117,43 @@ def fetch_media(settings: Settings, url: str, folder: Path, stem: str, *,
     path = folder / f"{stem}{mimetypes.guess_extension(kind) or '.bin'}"
     path.write_bytes(response.content)
     return path
+
+
+def point_number_at(settings: Settings, url: str, *,
+                    get: Callable[..., requests.Response] | None = None,
+                    post: Callable[..., requests.Response] | None = None) -> str:
+    """Set the number's "A message comes in" webhook to ``url``; returns the number.
+
+    A quick tunnel gets a new address every time it starts, and a webhook left
+    on the old one drops every text, so the live launcher calls this each start.
+    Only TWILIO_FROM numbers: a Messaging Service keeps its own webhook, set once
+    in the console.
+    """
+    if not settings.twilio_ready:
+        raise TwilioError("Twilio is not set up: put TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN and "
+                          "TWILIO_FROM in sms.env")
+    if not settings.twilio_from:
+        raise TwilioError("a Messaging Service keeps its own webhook: set it in the Twilio "
+                          f"console to {url}")
+    auth = (settings.twilio_sid, settings.twilio_token)
+    base = f"{API}/Accounts/{settings.twilio_sid}/IncomingPhoneNumbers"
+    try:
+        found = (get or requests.get)(f"{base}.json", params={"PhoneNumber": settings.twilio_from},
+                                      auth=auth, timeout=20)
+    except requests.RequestException as exc:
+        raise TwilioError(f"could not reach Twilio: {exc}") from exc
+    if found.status_code >= 400:
+        raise _fail(found, "look up the number")
+    numbers = found.json().get("incoming_phone_numbers") or []
+    if not numbers:
+        raise TwilioError(f"{settings.twilio_from} is not a number on this Twilio account; "
+                          "TWILIO_FROM must be the number you bought, like +18885550123")
+    try:
+        done = (post or requests.post)(f"{base}/{numbers[0]['sid']}.json",
+                                       data={"SmsUrl": url, "SmsMethod": "POST"},
+                                       auth=auth, timeout=20)
+    except requests.RequestException as exc:
+        raise TwilioError(f"could not reach Twilio: {exc}") from exc
+    if done.status_code >= 400:
+        raise _fail(done, "set the number's webhook")
+    return numbers[0].get("phone_number") or settings.twilio_from

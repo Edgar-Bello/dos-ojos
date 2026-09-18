@@ -103,3 +103,31 @@ def test_fetch_media(ready: Settings, tmp_path) -> None:
 
     path = twilio.fetch_media(ready, "https://api.twilio.com/m/1", tmp_path / "m", "x", get=get)
     assert path.name == "x.jpg" and path.read_bytes() == b"jpegbytes"
+
+
+def test_the_number_is_pointed_at_the_new_address(ready: Settings) -> None:
+    """A quick tunnel's address changes each start; the number follows it."""
+    calls = []
+
+    def get(url, params, auth, timeout):
+        calls.append(("get", url, params))
+        return Response(200, {"incoming_phone_numbers": [
+            {"sid": "PN1", "phone_number": ready.twilio_from}]})
+
+    def post(url, data, auth, timeout):
+        calls.append(("post", url, data))
+        return Response(200, {"sid": "PN1"})
+
+    number = twilio.point_number_at(ready, "https://a-b.trycloudflare.com/sms/twilio",
+                                    get=get, post=post)
+    assert number == ready.twilio_from
+    assert calls[0][2] == {"PhoneNumber": ready.twilio_from}
+    assert calls[1][1].endswith("/IncomingPhoneNumbers/PN1.json")
+    assert calls[1][2] == {"SmsUrl": "https://a-b.trycloudflare.com/sms/twilio",
+                           "SmsMethod": "POST"}
+
+
+def test_a_number_not_on_the_account_is_said_plainly(ready: Settings) -> None:
+    get = lambda url, params, auth, timeout: Response(200, {"incoming_phone_numbers": []})
+    with pytest.raises(twilio.TwilioError, match="not a number on this Twilio account"):
+        twilio.point_number_at(ready, "https://x.trycloudflare.com/sms/twilio", get=get)

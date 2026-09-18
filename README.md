@@ -389,6 +389,22 @@ details, and nothing here does them for you.
 Farmers' numbers, fields and water records stay in `farm_data` on this computer.
 Only the texts themselves pass through Twilio.
 
+### Trying it on real phones: `examples\live.cmd`
+
+A live system on the real date, in `Dos_Ojos\live_data` (apart from `farm_data`
+and every demo), reached through a Cloudflare quick tunnel. Each start reads the
+tunnel's new address, points the Twilio number at it (`dosojos-sms webhook`) and
+serves; the daily run goes at 6 am while it is up.
+
+- A **trial** account texts only phones verified in the console (up to five),
+  and trial accounts cannot register a local (10DLC) number, so buy a
+  **toll-free** number with the trial credit.
+- For anyone at all to text it: upgrade the account, then complete Toll-Free
+  Verification (or register A2P 10DLC for a local number).
+- `cloudflared.exe` goes in `Dos_Ojos	ools`. A quick tunnel refuses any single
+  upload over 100 MB: photos and thermal frames pass, a whole-field laser scan
+  does not.
+
 ## Setup
 
 It runs in the satellite half's environment, which it uses to measure outlines
