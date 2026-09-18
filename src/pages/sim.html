@@ -26,6 +26,7 @@
   .in a { color: #fff; }
   .meta { font-size: 11px; opacity: .6; margin-top: 3px; }
   .photo { font-style: italic; opacity: .85; }
+  .picture { display: block; max-width: 100%; border-radius: 8px; margin-bottom: 6px; }
   .composer { display: flex; gap: 6px; padding: 8px; background: #fff; border-top: 1px solid #d6dbd3; }
   .composer input[type=text] { flex: 1; font-size: 16px; padding: 10px 12px; border-radius: 18px; border: 1px solid #c9d0c6; }
   button { border: 0; border-radius: 18px; padding: 8px 12px; font-size: 16px; cursor: pointer; background: #e2e8e1; }
@@ -80,10 +81,20 @@ function show(message) {
   shown.add(message.id);
   const bubble = document.createElement("div");
   bubble.className = "msg " + message.direction;
-  if (message.media.length) {
+  const pictures = message.media.filter(m => /^https?:\/\//.test(m));
+  const files = message.media.filter(m => !/^https?:\/\//.test(m));
+  pictures.forEach(url => {          // a picture we sent: shown, and a tap opens it big
+    const link = document.createElement("a");
+    link.href = url; link.target = "_blank";
+    const img = document.createElement("img");
+    img.src = url; img.className = "picture"; img.alt = "";
+    link.appendChild(img);
+    bubble.appendChild(link);
+  });
+  if (files.length) {
     const photo = document.createElement("div");
     photo.className = "photo";
-    photo.textContent = "[" + message.media.join(", ") + "]";
+    photo.textContent = "[" + files.join(", ") + "]";
     bubble.appendChild(photo);
   }
   linkify(bubble, message.body);

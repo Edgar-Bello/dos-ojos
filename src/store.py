@@ -445,12 +445,13 @@ def log_in(conn: sqlite3.Connection, phone: str, body: str, *, media: list | Non
 
 def log_out(conn: sqlite3.Connection, phone: str, body: str, *, status: str,
             provider_id: str | None = None, error: str | None = None,
-            send_after: str | None = None) -> int:
+            send_after: str | None = None, media: list[str] | None = None) -> int:
+    """An outgoing text; ``media`` are links to the pictures it carries."""
     stamp = now_iso()
     cursor = conn.execute(
-        "INSERT INTO messages(phone, direction, body, status, provider_id, error, send_after, "
-        "created_at, sent_at) VALUES (?, 'out', ?, ?, ?, ?, ?, ?, ?)",
-        (phone, body, status, provider_id, error, send_after, stamp,
+        "INSERT INTO messages(phone, direction, body, media, status, provider_id, error, "
+        "send_after, created_at, sent_at) VALUES (?, 'out', ?, ?, ?, ?, ?, ?, ?, ?)",
+        (phone, body, json.dumps(media or []), status, provider_id, error, send_after, stamp,
          stamp if status in ("sent", "kept") else None),
     )
     return int(cursor.lastrowid)

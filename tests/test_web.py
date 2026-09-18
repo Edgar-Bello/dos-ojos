@@ -62,7 +62,7 @@ def base(app: App):
 @pytest.fixture
 def sent(monkeypatch) -> list:
     calls = []
-    monkeypatch.setattr(twilio, "send", lambda settings, to, body: calls.append((to, body)) or "SM9")
+    monkeypatch.setattr(twilio, "send", lambda settings, to, body, media=None: calls.append((to, body)) or "SM9")
     return calls
 
 

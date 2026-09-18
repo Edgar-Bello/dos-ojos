@@ -314,10 +314,10 @@ T: dict[str, tuple[str, str]] = {
     "field_done": (
         "¡Listo! {field} quedó registrado. Cuando riegue, mande REGUE y la fecha (ej. REGUE "
         "hoy 4). Para ver sus campos: AGUA. Otro campo: NUEVO. Fotos de tickets de agua: "
-        "bienvenidas.",
+        "bienvenidas. Todo lo que puede pedir: AYUDA.",
         "Done! {field} is registered. When you water, text WATERED and the date (e.g. "
         "WATERED today 4). To see your fields: WATER. Another field: NEW. Photos of water "
-        "tickets: welcome."),
+        "tickets: welcome. Everything you can ask: HELP."),
     "field_done_map": ("Falta marcar el mapa: {link}", "The map still needs its corners: {link}"),
     "resume": ("Sigamos con {field}.", "Back to {field}."),
     # --- read-backs: what we heard, for a yes or a no -------------------------
@@ -395,6 +395,43 @@ T: dict[str, tuple[str, str]] = {
                     "avisa.",
                     "We got {n} photos ({size}) of {field}. Our team will process them and let "
                     "you know."),
+    # --- work done right away, in the background ------------------------------
+    "reading_now": ("Estoy revisando {field} con el satélite, el clima y el suelo. Le mando la "
+                    "respuesta en unos minutos.",
+                    "I'm reading {field} from the satellite, the weather and the soil. I'll "
+                    "text you the answer in a few minutes."),
+    "reading_retry": ("Todavía no pude leer {field}: un servicio del gobierno no contestó. Lo "
+                      "intento otra vez en {minutes} minutos.",
+                      "I couldn't read {field} yet: a government service didn't answer. I'll "
+                      "try again in {minutes} minutes."),
+    "reading_gave_up": ("No pude leer {field}; se lo pasé al equipo. Mande AGUA más tarde.",
+                        "I couldn't read {field}; I passed it to the team. Text WATER later."),
+    "ready_menu": ("También puede mandar: PORQUE (las gráficas y las cuentas){more}, AYUDA "
+                   "(todo lo demás).",
+                   "You can also text: WHY (the charts and the arithmetic){more}, HELP "
+                   "(everything else)."),
+    "menu_sorghum": (", ETAPA (cómo va el sorgo), PULGON (contar pulgón amarillo)",
+                     ", STAGE (how the sorghum is doing), APHID (count sugarcane aphid)"),
+    "menu_drone": (", DRON (mandar las fotos de su vuelo)", ", DRONE (send your flight)"),
+    "flight_working": ("Estoy procesando el vuelo de {field}. Le aviso cuando esté listo.",
+                       "I'm processing the flight over {field}. I'll text you when it's "
+                       "ready."),
+    "flight_ready_rows": ("El vuelo de {field} está listo: {problem} de {total} tramos de surco "
+                          "necesitan una revisada ({stressed} con estrés, {missing} con plantas "
+                          "faltantes). En la foto: amarillo = estrés, rayado = faltan "
+                          "plantas. Todo el detalle: PORQUE.",
+                          "The flight over {field} is ready: {problem} of {total} stretches of "
+                          "row need a look ({stressed} stressed, {missing} with plants "
+                          "missing). In the picture: yellow = stressed, hatched = missing "
+                          "plants. The whole story: WHY."),
+    "flight_ready_heat": ("La cámara térmica de {field} está lista. En la foto, lo rojo es lo más "
+                          "caliente. Todo el detalle: PORQUE.",
+                          "The thermal scan of {field} is ready. In the picture, red is "
+                          "hottest. The whole story: WHY."),
+    "flight_ready": ("El vuelo de {field} está listo. Todo el detalle: PORQUE.",
+                     "The flight over {field} is ready. The whole story: WHY."),
+    "flight_failed": ("No pude procesar el vuelo de {field}; se lo pasé al equipo.",
+                      "I couldn't process the flight over {field}; I passed it to the team."),
     "map_link": ("Marque las esquinas de {field} en este mapa: {link}",
                  "Tap the corners of {field} on this map: {link}"),
     "map_saved": ("Guardamos el mapa de {field}: {acres} acres.{said} Si no está bien, mande "

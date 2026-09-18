@@ -451,25 +451,38 @@ BASELINE_YEARS = 4
                    "own normal is built from.")
 @click.option("--skip-baseline", is_flag=True,
               help="Don't rebuild each field's own normal (it changes slowly).")
+@click.option("--fields", "field_csv", default=None,
+              help="Only these fields (comma-separated ids), e.g. one just drawn.")
+@click.option("--since-planting", is_flag=True,
+              help="Fetch imagery and weather only from the planting date on: the quick "
+                   "first reading of a new field, with no years of history behind it.")
 @click.pass_obj
 def daily_cmd(ctx: Context, send: bool, skip_fetch: bool, years: int,
-              skip_baseline: bool) -> None:
+              skip_baseline: bool, field_csv: str | None, since_planting: bool) -> None:
     """Once a day: export, fetch imagery, weather and soil, then alerts and reminders."""
     result = _export(ctx)
-    if not result.field_ids:
+    wanted = [i for i in result.field_ids
+              if not field_csv or i in field_csv.split(",")]
+    if not wanted:
         click.echo("No field has a map and a crop yet; nothing for the satellite to look at.")
         return
     today = ctx.as_of or ctx.settings.now().date()
+    only = ("--fields", ",".join(wanted)) if field_csv else ()
     _sat(ctx, "init-fields", str(result.fields_path))
-    if not skip_fetch and ctx.as_of:
+    earliest = today - timedelta(days=400)
+    if since_planting:
+        planted = [d for d in (_planted_on(ctx, i, today) for i in wanted) if d]
+        # The first days after sowing are bare soil either way; a month before
+        # shows what the ground was doing when the seed went in.
+        earliest = (min(planted) if planted else date(today.year, 1, 1)) - SEASON_LEAD
+    if not skip_fetch and (ctx.as_of or since_planting):
         # A pinned demo needs its own years, not every image up to the real today.
-        _sat(ctx, "fetch", "--start", date(today.year - years + 1, 1, 1).isoformat(),
-             "--end", today.isoformat())
+        start = earliest if since_planting else date(today.year - years + 1, 1, 1)
+        _sat(ctx, "fetch", "--start", start.isoformat(), "--end", today.isoformat(), *only)
     elif not skip_fetch:
-        _sat(ctx, "fetch", "--years", str(years))
-    _sat(ctx, "weather", "--start", (today - timedelta(days=400)).isoformat(),
-         "--end", today.isoformat())
-    _sat(ctx, "soil")
+        _sat(ctx, "fetch", "--years", str(years), *only)
+    _sat(ctx, "weather", "--start", earliest.isoformat(), "--end", today.isoformat(), *only)
+    _sat(ctx, "soil", *only)
     if not skip_baseline:
         # What each field usually does on this date, from its own earlier years.
         # Only the "why" page draws it, so a field with too little history behind
@@ -480,11 +493,23 @@ def daily_cmd(ctx: Context, send: bool, skip_fetch: bool, years: int,
         except click.ClickException as exc:
             click.secho(f"NOTE: no field normal yet ({exc.message}); the water advice "
                         "does not need one.", fg="yellow")
-    growing = [i for i in result.field_ids if _crop_of(ctx, i) not in (None, "none")]
+    growing = [i for i in wanted if _crop_of(ctx, i) not in (None, "none")]
     if growing:
         _sat(ctx, "water", "--as-of", today.isoformat(), "--fields", ",".join(growing))
     click.secho("\n$ dosojos-sms remind" + (" --send" if send else ""), fg="cyan")
     _remind(ctx, send)
+
+
+#: How far before planting a first reading starts looking.
+SEASON_LEAD = timedelta(days=30)
+
+
+def _planted_on(ctx: Context, field_id: str, today: date) -> date | None:
+    """The field's latest planting date this season, if the farmer gave one."""
+    with store.session(ctx.settings.db_path) as conn:
+        days = [e.day for e in store.events_for(conn, field_id)
+                if e.kind == "planted" and 0 <= (today - e.day).days <= 400]
+    return max(days) if days else None
 
 
 def _crop_of(ctx: Context, field_id: str) -> str | None:

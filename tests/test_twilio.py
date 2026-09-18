@@ -86,6 +86,16 @@ def test_keys_from_the_env_file(tmp_path) -> None:
     assert settings.twilio_ready and settings.twilio_token == "tok"
 
 
+def test_quotes_inside_a_value_are_kept(tmp_path) -> None:
+    (tmp_path / "sms").mkdir()
+    (tmp_path / "sms" / "sms.env").write_text(
+        'DOSOJOS_ON_UPLOAD="C:/py/python.exe" "step.py" --data "C:/farm"\n'
+        "DOSOJOS_READ_NOW=1\n", encoding="utf-8")
+    settings = Settings.load(tmp_path, env={})
+    assert settings.on_upload == '"C:/py/python.exe" "step.py" --data "C:/farm"'
+    assert settings.read_now
+
+
 def test_fetch_media(ready: Settings, tmp_path) -> None:
     def get(url, auth, timeout):
         assert auth == ("AC1", "tok")

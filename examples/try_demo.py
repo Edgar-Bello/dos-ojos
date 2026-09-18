@@ -9,12 +9,14 @@ example demos on 8080-8082:
     thermal     port 8092   Sun 20 May 2018   the morning a thermal camera ran over TERRA-REF
 
 Nobody is signed up in any of them. You text in, draw your own field, and send
-your own flight; ``update`` then does what happens overnight in the real
-product: the satellite, the weather and the soil for every field drawn so far,
-and the drone half on every flight uploaded so far.
+your own flight. Nothing waits for the night: the moment a field has its map,
+crop and planting date, the server reads it from the satellite (only the
+pictures since planting, so it takes a minute or two) and texts the answer; the
+moment an upload is finished, it runs the drone half on it and texts what it
+found, with the picture. Watch the window the system runs in to see it work.
 
     try.cmd thermal            start it (and open the phone in the browser)
-    try.cmd thermal update     the overnight step
+    try.cmd thermal update     the whole overnight run by hand, if you want it
     try.cmd thermal reset      start that one over; the old one goes to old_demos
 """
 
@@ -61,14 +63,36 @@ def sms(scene: str, *arguments: str) -> int:
     return subprocess.run(command, cwd=ROOT).returncode
 
 
+def settings_for(scene: str) -> dict[str, str]:
+    """What a try-it system's sms.env says: its day, its banner, and no waiting."""
+    data = folder(scene)
+    team_step = (f'"{DRONE_PYTHON.as_posix()}" "{(HERE / "process_flight.py").as_posix()}" '
+                 f'--data "{data.as_posix()}" --uploads-only')
+    return {"DOSOJOS_BANNER": SCENES[scene]["banner"],
+            "DOSOJOS_AS_OF": SCENES[scene]["as_of"],
+            "DOSOJOS_READ_NOW": "1",
+            "DOSOJOS_ON_UPLOAD": team_step}
+
+
 def prepare(scene: str) -> Path:
-    """An empty system for this scene, pinned to its day, if there is none yet."""
-    data, settings = folder(scene), SCENES[scene]
+    """An empty system for this scene, pinned to its day, if there is none yet.
+
+    One made before reading right away existed gets the settings it lacks, and
+    keeps everything already in it.
+    """
+    data = folder(scene)
     env = data / "sms" / "sms.env"
-    if not env.exists():
-        env.parent.mkdir(parents=True, exist_ok=True)
-        env.write_text(f"DOSOJOS_BANNER={settings['banner']}\n"
-                       f"DOSOJOS_AS_OF={settings['as_of']}\n", encoding="utf-8")
+    fresh = not env.exists()
+    env.parent.mkdir(parents=True, exist_ok=True)
+    text = "" if fresh else env.read_text(encoding="utf-8")
+    have = {line.split("=", 1)[0].strip() for line in text.splitlines() if "=" in line}
+    missing = {k: v for k, v in settings_for(scene).items() if k not in have}
+    if missing:
+        if text and not text.endswith("\n"):
+            text += "\n"
+        env.write_text(text + "".join(f"{k}={v}\n" for k, v in missing.items()),
+                       encoding="utf-8")
+    if fresh:
         print(f"A new, empty {scene} system in {data}")
     return data
 
@@ -78,8 +102,9 @@ def start(scene: str) -> int:
     prepare(scene)
     print(f"\nThe phone opens at http://localhost:{settings['port']}/sim  -  "
           "Ctrl+C here stops it.")
-    print(f"Text 'hola' (or 'hello') to sign up. After you draw your field, run:\n"
-          f"    {HERE / 'try.cmd'} {scene} update\n")
+    print("Text 'hola' (or 'hello') to sign up. Once the field has its map, its crop and "
+          "its planting date, this window shows the satellite being read, and the phone "
+          "gets the answer a minute or two later.\n")
     return sms(scene, "serve", "--sim", "--open", "--port", str(settings["port"]))
 
 

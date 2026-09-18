@@ -12,6 +12,7 @@ the photos received, an alert, a team message) goes through :func:`deliver`:
 
 from __future__ import annotations
 
+import json
 import logging
 import sqlite3
 from datetime import datetime, time, timedelta, timezone
@@ -34,11 +35,13 @@ def next_morning(now_local: datetime) -> datetime:
 
 
 def deliver(conn: sqlite3.Connection, settings: Settings, farmer: Farmer, body: str, *,
-            now: datetime | None = None, urgent: bool = False) -> str:
+            now: datetime | None = None, urgent: bool = False,
+            media: list[str] | None = None) -> str:
     """Send one text the farmer did not just ask for; returns what became of it.
 
     ``urgent`` is for answers to something the farmer did a moment ago, such as
-    saving a map, which go out at any hour.
+    saving a map, which go out at any hour. ``media`` are links to pictures the
+    text carries; a phone only gets them when the links are public (https).
     """
     body = text.gsm_safe(body)
     now = now or settings.now()
@@ -46,20 +49,22 @@ def deliver(conn: sqlite3.Connection, settings: Settings, farmer: Farmer, body: 
         log.info("not texting %s: they opted out", farmer.phone)
         return "opted out"
     if farmer.channel != "sms" or not settings.twilio_ready:
-        store.log_out(conn, farmer.phone, body, status="kept")
+        store.log_out(conn, farmer.phone, body, status="kept", media=media)
         return "kept"
     if not urgent and quiet(now):
         morning = next_morning(now).astimezone(timezone.utc).isoformat(timespec="seconds")
-        store.log_out(conn, farmer.phone, body, status="queued", send_after=morning)
+        store.log_out(conn, farmer.phone, body, status="queued", send_after=morning,
+                      media=media)
         return "queued"
-    message_id = store.log_out(conn, farmer.phone, body, status="sending")
-    return _send(conn, settings, farmer.phone, body, message_id)
+    message_id = store.log_out(conn, farmer.phone, body, status="sending", media=media)
+    return _send(conn, settings, farmer.phone, body, message_id, media)
 
 
 def _send(conn: sqlite3.Connection, settings: Settings, phone: str, body: str,
-          message_id: int) -> str:
+          message_id: int, media: list[str] | None = None) -> str:
     try:
-        sid = twilio.send(settings, phone, body)
+        sid = (twilio.send(settings, phone, body, media=media) if media
+               else twilio.send(settings, phone, body))
     except twilio.TwilioError as exc:
         store.mark_message(conn, message_id, status="failed", error=str(exc))
         log.warning("text to %s failed: %s", phone, exc)
@@ -87,5 +92,6 @@ def flush(conn: sqlite3.Connection, settings: Settings, *, now: datetime | None 
         if not settings.twilio_ready:
             store.mark_message(conn, row["id"], status="kept")
             continue
-        sent += _send(conn, settings, row["phone"], row["body"], row["id"]) == "sent"
+        sent += _send(conn, settings, row["phone"], row["body"], row["id"],
+                      json.loads(row["media"] or "[]")) == "sent"
     return sent

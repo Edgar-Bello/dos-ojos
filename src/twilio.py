@@ -68,7 +68,7 @@ def _fail(response: requests.Response, what: str) -> TwilioError:
                        f"{hint}", code)
 
 
-def send(settings: Settings, to: str, body: str, *,
+def send(settings: Settings, to: str, body: str, *, media: list[str] | None = None,
          post: Callable[..., requests.Response] | None = None) -> str:
     """Send one text; returns Twilio's message id.
 
@@ -85,6 +85,10 @@ def send(settings: Settings, to: str, body: str, *,
         data["From"] = settings.twilio_from
     if settings.public_url.startswith("https://"):
         data["StatusCallback"] = settings.link("sms/status")
+        # Twilio fetches a picture itself, so only a public link can carry one.
+        pictures = [url for url in media or () if url.startswith("https://")]
+        if pictures:
+            data["MediaUrl"] = pictures
     try:
         response = (post or requests.post)(
             f"{API}/Accounts/{settings.twilio_sid}/Messages.json", data=data,

@@ -61,6 +61,12 @@ class Settings:
     banner: str | None = None
     #: A demo folder's pinned day, so every command on it answers as of that day.
     as_of: date | None = None
+    #: Read a field from the satellite as soon as it has a map, a crop and a
+    #: planting date, and text the answer, instead of waiting for the daily run.
+    read_now: bool = False
+    #: A command run when a farmer finishes an upload, given ``--flight <id>``:
+    #: in a demo, the step a person on the team would otherwise do by hand.
+    on_upload: str | None = None
 
     @property
     def sms_dir(self) -> Path:
@@ -144,11 +150,13 @@ class Settings:
             twilio_sid=sid, twilio_token=token, twilio_from=sender, twilio_service=service,
             timezone=get("DOSOJOS_TIMEZONE") or TIMEZONE, banner=get("DOSOJOS_BANNER"),
             as_of=as_of,
+            read_now=(get("DOSOJOS_READ_NOW") or "").lower() in ("1", "yes", "true"),
+            on_upload=get("DOSOJOS_ON_UPLOAD"),
         )
 
 
 def read_env_file(path: Path) -> dict[str, str]:
-    """``KEY=VALUE`` lines; blank lines and ``#`` comments skipped, quotes trimmed."""
+    """``KEY=VALUE`` lines; blank lines and ``#`` comments skipped, wrapping quotes trimmed."""
     path = Path(path)
     if not path.exists():
         return {}
@@ -160,7 +168,13 @@ def read_env_file(path: Path) -> dict[str, str]:
         if "=" not in line:
             raise ConfigError(f"{path} line {number}: expected KEY=VALUE, got {line!r}")
         key, value = line.split("=", 1)
-        values[key.strip()] = value.strip().strip('"').strip("'")
+        value = value.strip()
+        # Quotes round the whole value go; quotes inside it (a command line with
+        # paths) stay, or the command could no longer be split.
+        if (len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'"
+                and value[0] not in value[1:-1]):
+            value = value[1:-1]
+        values[key.strip()] = value
     return values
 
 

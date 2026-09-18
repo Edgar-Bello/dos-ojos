@@ -40,7 +40,10 @@ SAMPLE = {"link": "https://dosojos.example.com/f/AbCdEfGhIjKlMnOp", "field": "Ca
           "contact": "Edgar 956-555-0100", "amount": ", 4 pulgadas",
           "about": "unos 12 días", "year": "2019", "plan": "satélite y dron",
           "chance": "65", "area": "1,240", "pct": "26", "threshold": "30",
-          "maturity": "ciclo mediano", "midge": " y mosquita (el umbral es 1 por panoja)",
+          "maturity": "ciclo mediano", "minutes": "15", "problem": "2,940", "total": "9,040",
+          "stressed": "33", "missing": "2,907",
+          "more": (", ETAPA (como va el sorgo), PULGON (contar pulgon amarillo), DRON (mandar "
+                   "las fotos de su vuelo)"), "midge": " y mosquita (el umbral es 1 por panoja)",
           "rest": (" Sigue grano masoso hacia el mar 3 jun. Revise mosquita cada 3 dias, de 10 "
                    "a 2: el umbral es 1 por panoja.")}
 

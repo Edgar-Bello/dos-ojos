@@ -19,7 +19,9 @@ import base64
 import json
 import logging
 import re
+import shlex
 import shutil
+import sys
 import threading
 import time
 import urllib.parse
@@ -34,8 +36,10 @@ from dosojos_sat.fields import compute_acres, utm_epsg_for
 
 from . import explain, export, outbox, parse, store, text, twilio
 from .bot import Bot, Inbound, Media, map_token
-from .config import Settings
-from .status import Water, latest_terrain, latest_thermal
+from .config import LINK_DAYS, Settings
+from .jobs import Jobs
+from .status import Water, latest_terrain, latest_thermal, pest_line
+from .status import message as status_message
 
 log = logging.getLogger(__name__)
 
@@ -54,6 +58,10 @@ FIELD_ACRES = (0.2, 5000.0)
 FORWARDED = ("X-Forwarded-For", "X-Forwarded-Host", "Cf-Connecting-Ip", "X-Real-Ip",
              "Forwarded", "Ngrok-Trace-Id")
 SIM_PHONE = "+19565550123"      # 555-01xx numbers are reserved for fiction
+#: A first reading that fails (a government service down) is tried again this
+#: often, this many times in all, before the team is told.
+READ_RETRY_MINUTES = 15
+READ_ATTEMPTS = 3
 
 PAGE_TEXT = {
     "map": {
@@ -131,6 +139,10 @@ class App:
         self.lock = threading.Lock()
         #: A pinned "now" for demos (``--as-of``); None means the real time.
         self.now: datetime | None = None
+        self.jobs = Jobs()
+        #: What each field looked like when it was last sent to be read, so a
+        #: corrected map or planting date reads it again and nothing else does.
+        self._read_as: dict[str, str] = {}
 
     def db(self):
         return store.session(self.settings.db_path)
@@ -154,6 +166,8 @@ class App:
             replies = self._bot(conn).handle(message)
             for reply in replies:
                 store.log_out(conn, message.phone, reply, status=reply_status)
+            for record in store.fields_of(conn, message.phone):
+                self._maybe_read(conn, record)
             return replies
 
     def twilio_webhook(self, params: dict[str, str], signature_header: str | None) -> bytes:
@@ -267,6 +281,7 @@ class App:
                 body = text.say("map_saved", lang, field=record.name, acres=f"{acres:.1f}",
                                 said=said)
             outbox.deliver(conn, self.settings, farmer, body, now=self.now, urgent=not team)
+            self._maybe_read(conn, record)
         return {"ok": True, "acres": round(acres, 1)}
 
     # ---- the upload page -----------------------------------------------------------------
@@ -344,6 +359,7 @@ class App:
                 body = text.say("upload_done", farmer.language, n=upload["files"],
                                 size=text.size(upload["bytes"]), field=record.name)
                 outbox.deliver(conn, self.settings, farmer, body, now=self.now, urgent=True)
+                self._process_flight(record.id, flight_id)
         log.info("upload %s finished: %s files for %s", flight_id, upload["files"], record.id)
         return {"ok": True, "files": upload["files"], "flight": flight_id}
 
@@ -400,6 +416,151 @@ class App:
         self.receive(message, reply_status="kept")
         return {"ok": True, "phone": phone}
 
+    # ---- work done right away, in the background ---------------------------------------
+
+    def _today(self):
+        return (self.now or self.settings.now()).date()
+
+    def _sms_command(self, *arguments: str) -> list[str]:
+        """This same program on this same farm folder, pinned to the same day."""
+        pinned = ["--as-of", self._today().isoformat()] if self.now else []
+        return [sys.executable, "-m", "dosojos_sms", "--data", str(self.settings.data_dir),
+                *pinned, *arguments]
+
+    def _maybe_read(self, conn, record) -> None:
+        """Read a field from the satellite the moment it has all it needs.
+
+        That is a map, a crop and a planting date, from a farmer who has finished
+        answering questions (the waterings they give last count too). Only with
+        ``DOSOJOS_READ_NOW``; otherwise the daily run does it overnight.
+        """
+        if not self.settings.read_now or record.outline is None or record.crop in (None, "none"):
+            return
+        farmer = store.get_farmer(conn, record.phone)
+        if farmer is None or farmer.state != "idle":
+            return
+        events = store.events_for(conn, record.id)
+        planted = sorted(e.day.isoformat() for e in events
+                         if e.kind == "planted" and e.voided_at is None)
+        if not planted:
+            return
+        shape_now = json.dumps([record.outline, record.crop, planted], sort_keys=True)
+        seen = self._read_as.get(record.id)
+        if seen == shape_now:
+            return
+        self._read_as[record.id] = shape_now
+        if seen is None and self.water.field(record, events, self._today()).status is not None:
+            return          # read before this server started
+        command = self._sms_command("daily", "--fields", record.id, "--since-planting",
+                                    "--skip-baseline")
+        if self.jobs.add(f"read:{record.id}", command,
+                         lambda ok, attempt: self._read_done(record.id, ok, attempt)):
+            outbox.deliver(conn, self.settings, farmer,
+                           text.say("reading_now", farmer.language, field=record.name),
+                           now=self.now, urgent=True)
+
+    def _read_done(self, field_id: str, ok: bool, attempt: int) -> float | None:
+        """Text the answer a reading came to, or say it will be tried again."""
+        today = self._today()
+        with self.lock, self.db() as conn:
+            record = store.get_field(conn, field_id)
+            farmer = store.get_farmer(conn, record.phone)
+            lang = farmer.language
+
+            def send(body: str) -> None:
+                outbox.deliver(conn, self.settings, farmer, body, now=self.now, urgent=True)
+
+            item = (self.water.field(record, store.events_for(conn, record.id), today)
+                    if ok else None)
+            if item is not None and item.status is not None:
+                send(status_message(item, lang, today, map_link=lambda r: self.settings.link(
+                    f"f/{map_token(conn, r.id, self.now)}")))
+                send(self._menu(farmer, record))
+                return None
+            if attempt < READ_ATTEMPTS:
+                send(text.say("reading_retry", lang, field=record.name,
+                              minutes=READ_RETRY_MINUTES))
+                return READ_RETRY_MINUTES * 60
+            send(text.say("reading_gave_up", lang, field=record.name))
+            log.warning("gave up reading %s after %s tries; see the server window", field_id,
+                        attempt)
+            self._read_as.pop(field_id, None)
+            return None
+
+    def _menu(self, farmer, record) -> str:
+        """What else there is to ask, for this farmer's crop and plan."""
+        lang = farmer.language
+        more = text.say("menu_sorghum", lang) if record.crop == "sorghum" else ""
+        if farmer.plan in text.FLYING_PLANS:
+            more += text.say("menu_drone", lang)
+        return text.say("ready_menu", lang, more=more)
+
+    def _process_flight(self, field_id: str, flight_id: str) -> None:
+        """Run the team's step on a finished upload, when this server is told how."""
+        if not self.settings.on_upload:
+            return
+        try:
+            command = shlex.split(self.settings.on_upload) + ["--flight", flight_id]
+        except ValueError as exc:            # the upload is safe; only the hook is wrong
+            log.error("DOSOJOS_ON_UPLOAD cannot be read as a command (%s): %s", exc,
+                      self.settings.on_upload)
+            return
+        self.jobs.add(f"flight:{flight_id}", command,
+                      lambda ok, attempt: self._flight_done(field_id, flight_id, ok))
+
+    def _flight_done(self, field_id: str, flight_id: str, ok: bool) -> None:
+        """Text what the flight found, with its picture."""
+        out = self.settings.drone_workspace / "out" / flight_id
+        with self.lock, self.db() as conn:
+            record = store.get_field(conn, field_id)
+            farmer = store.get_farmer(conn, record.phone)
+            lang = farmer.language
+            if not ok:
+                outbox.deliver(conn, self.settings, farmer,
+                               text.say("flight_failed", lang, field=record.name),
+                               now=self.now, urgent=True)
+                return None
+            extra, picture = None, None
+            if (out / "thermal.json").exists():
+                body = text.say("flight_ready_heat", lang, field=record.name)
+                picture = out / "thermal.png"
+                extra = pest_line(json.loads((out / "thermal.json").read_text(encoding="utf-8")),
+                                  lang, record.name)
+            elif (out / "block_summary.json").exists():
+                s = json.loads((out / "block_summary.json").read_text(encoding="utf-8"))
+                stressed = (s.get("n_stressed") or 0) + (s.get("n_dead") or 0)
+                missing = s.get("n_missing") or 0
+                body = text.say("flight_ready_rows", lang, field=record.name,
+                                problem=f"{stressed + missing:,}",
+                                total=f"{s.get('n_judged') or 0:,}",
+                                stressed=f"{stressed:,}", missing=f"{missing:,}")
+                picture = out / "flag_overlay.png"
+            else:
+                body = text.say("flight_ready", lang, field=record.name)
+            media = ([self._picture_link(conn, record.id, picture)]
+                     if picture is not None and picture.exists() else [])
+            outbox.deliver(conn, self.settings, farmer, body, now=self.now, urgent=True,
+                           media=media)
+            if extra:
+                outbox.deliver(conn, self.settings, farmer, extra, now=self.now, urgent=True)
+        return None
+
+    def _picture_link(self, conn, field_id: str, path: Path) -> str:
+        """A link to one picture, for a text that carries it."""
+        token = store.new_link(conn, "picture", field_id, days=LINK_DAYS,
+                               meta={"path": str(path)}, now=self.now)
+        return self.settings.link(f"p/{token}")
+
+    def picture(self, token: str) -> bytes:
+        with self.db() as conn:
+            link = store.get_link(conn, token, "picture", now=self.now)
+        if link is None:
+            raise HttpError(404, "gone")
+        path = Path(json.loads(link["meta"] or "{}").get("path", ""))
+        if not path.is_file():
+            raise HttpError(404, "gone")
+        return path.read_bytes()
+
     def sim_messages(self, phone: str, after: int) -> dict:
         phone = store.normalize_phone(phone or SIM_PHONE)
         with self.db() as conn:
@@ -407,7 +568,8 @@ class App:
             farmer = store.get_farmer(conn, phone)
         return {"state": farmer.state if farmer else "new", "messages": [
             {"id": r["id"], "direction": r["direction"], "body": r["body"],
-             "media": [Path(p).name for p in json.loads(r["media"] or "[]")],
+             "media": [p if p.startswith("http") else Path(p).name
+                       for p in json.loads(r["media"] or "[]")],
              "status": r["status"], "at": r["created_at"],
              "segments": text.segments(r["body"]) if r["direction"] == "out" else None}
             for r in rows]}
@@ -503,6 +665,8 @@ class Handler(BaseHTTPRequestHandler):
                     self.end_headers()
                     if self.command != "HEAD":
                         self.wfile.write(body)
+                elif len(parts) == 2 and parts[0] == "p":
+                    self._send(200, app.picture(parts[1]), "image/png")
                 elif parts == ["sim"]:
                     self._sim_allowed()
                     self._send(200, app.sim_page())
