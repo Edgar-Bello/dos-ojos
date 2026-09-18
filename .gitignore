@@ -12,3 +12,6 @@ examples/demo_data/
 examples/demo_data_clean/
 examples/demo_data_drone/
 examples/demo_data_thermal/
+examples/try_satellite/
+examples/try_drone/
+examples/try_thermal/

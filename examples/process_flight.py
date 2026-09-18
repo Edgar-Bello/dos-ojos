@@ -142,6 +142,8 @@ def main() -> None:
                         help="the demo folder, e.g. examples\\demo_data_thermal")
     parser.add_argument("--flight", default=None, help="one flight, rather than every "
                                                        "upload waiting")
+    parser.add_argument("--uploads-only", action="store_true",
+                        help="only what farmers uploaded: never fall back on the public files")
     arguments = parser.parse_args()
     data = arguments.data.resolve()
     workspace = data / "dosojos_drone"
@@ -150,6 +152,10 @@ def main() -> None:
                if arguments.flight in (None, u["flight_id"])
                and not (workspace / "out" / u["flight_id"] / "thermal.json").exists()
                and not (workspace / "out" / u["flight_id"] / "chm.tif").exists()]
+    if not waiting and arguments.uploads_only:
+        say("No finished upload is waiting. When the farmer texts DRONE, sends the files "
+            "and presses I'm done, run this again.")
+        return
     if not waiting:
         field, crop = a_field(data)
         if PUBLIC_THERMAL.is_dir() and (data / "sms" / "sms.env").read_text(
@@ -193,7 +199,7 @@ def main() -> None:
             say(f"  {detail['n']} files this script does not recognise; left alone.")
             continue
 
-    run(workspace, "join")
+    run(workspace, "join", optional=True)
     say("\nDone. The farmer can now text PORQUE (or WHY) and get the page with it on.")
 
 

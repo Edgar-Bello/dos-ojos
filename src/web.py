@@ -40,8 +40,11 @@ from .status import Water, latest_terrain, latest_thermal
 log = logging.getLogger(__name__)
 
 PAGES = Path(__file__).resolve().parent / "pages"
+#: Photos, video and its flight log, finished maps (GeoTIFF), and the point
+#: clouds a drone's laser or a mapping service delivers - a laser flight is
+#: nothing but .las files, and refusing them refuses the flight.
 UPLOAD_EXTENSIONS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".dng", ".mp4", ".mov",
-                     ".srt", ".zip"}
+                     ".srt", ".zip", ".las", ".laz"}
 MAX_FILE_BYTES = 8 * 1024 ** 3
 MAX_FORM_BYTES = 1024 ** 2
 MAX_PHOTO_BYTES = 15 * 1024 ** 2
@@ -301,7 +304,8 @@ class App:
     def upload_file(self, token: str, raw_name: str, length: int, stream) -> dict:
         name = re.sub(r"[^A-Za-z0-9._-]", "_", Path(urllib.parse.unquote(raw_name)).name)
         if not name or name.startswith(".") or Path(name).suffix.lower() not in UPLOAD_EXTENSIONS:
-            raise HttpError(415, f"{raw_name}: only photos, videos (with .srt) or a zip")
+            raise HttpError(415, f"{raw_name}: only photos, videos (with .srt), maps, "
+                                 "laser point clouds or a zip")
         if not 0 < length <= MAX_FILE_BYTES:
             raise HttpError(413, f"{name}: too big or empty")
         with self.db() as conn:

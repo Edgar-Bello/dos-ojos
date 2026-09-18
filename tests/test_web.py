@@ -273,6 +273,14 @@ def test_only_flight_files_are_taken(base: str, app: App) -> None:
     assert not (app.settings.drone_workspace / "data" / "escape.jpg").exists()
 
 
+def test_a_laser_flight_is_taken_too(base: str, app: App) -> None:
+    """A lidar drone writes point clouds and nothing else; refusing them refuses the flight."""
+    token = an_upload(app)
+    for name in ("20180710_field54_dsm_4cm.las", "scan.laz", "ortho_1cm.tif"):
+        status, body = call(f"{base}/u/{token}/file/{name}", method="PUT", data=b"x" * 10)
+        assert status == 200, body
+
+
 def test_done_with_nothing_uploaded(base: str, app: App) -> None:
     token = an_upload(app)
     status, result = post_json(f"{base}/u/{token}/done", {})
