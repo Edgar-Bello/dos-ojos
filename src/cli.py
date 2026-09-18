@@ -526,6 +526,9 @@ def doctor_cmd(images: int | None) -> None:
               help="Resume from a stage instead of starting over.")
 @click.option("--fast-orthophoto", is_flag=True,
               help="Skip meshing for a quicker, rougher orthophoto.")
+@click.option("--skip-3dmodel", "skip_3dmodel", is_flag=True,
+              help="Skip ODM's textured 3D mesh (about a quarter of the time); the point "
+                   "cloud, which 'model3d' shows, is still made.")
 @click.option("--dry-run", is_flag=True,
               help="Stage images and print the command without running it.")
 @click.pass_obj
@@ -539,6 +542,7 @@ def odm_cmd(
     max_concurrency: int | None,
     rerun_from: str | None,
     fast_orthophoto: bool,
+    skip_3dmodel: bool,
     dry_run: bool,
 ) -> None:
     """Run OpenDroneMap on a flight, producing orthophoto, DSM, DTM and point cloud."""
@@ -550,6 +554,7 @@ def odm_cmd(
         max_concurrency=max_concurrency,
         rerun_from=rerun_from,
         fast_orthophoto=fast_orthophoto,
+        extra_args=("--skip-3dmodel",) if skip_3dmodel else (),
     )
     settings.ensure_dirs(flight_id)
     raw_dir = settings.flight_raw(flight_id)
@@ -648,6 +653,41 @@ def stitch_cmd(settings: Settings, flight_id: str, photos_dir: Path | None,
         json.dumps(record, indent=2), encoding="utf-8")
     click.echo(_format_stitched(stitched))
     click.echo(f"\n  {ortho}\n  Next: dosojos-drone colour {flight_id}")
+
+
+@cli.command("model3d")
+@click.argument("flight_id")
+@click.option("--cloud", default=None, type=click.Path(dir_okay=False, exists=True, path_type=Path),
+              help="A LAS/LAZ point cloud  [default: the one ODM made for the flight]")
+@click.option("--points", type=int, default=None,
+              help="About how many points to keep  [default: what a phone turns smoothly]")
+@click.pass_obj
+def model3d_cmd(settings: Settings, flight_id: str, cloud: Path | None,
+                points: int | None) -> None:
+    """Make the flight's 3D model small enough to turn in a web page, plus a snapshot.
+
+    Reads the coloured point cloud ODM built from the photos. Writes model3d.bin,
+    model3d.json and model3d.png to the flight's out folder; the farmer's WHY
+    page shows the model, and the snapshot goes out in the text.
+    """
+    from . import model3d as model3d_mod
+
+    settings.ensure_dirs(flight_id)
+    source = cloud or (settings.flight_odm(flight_id) / "odm_georeferencing"
+                       / "odm_georeferenced_model.laz")
+    out = settings.flight_out(flight_id)
+    try:
+        model = model3d_mod.build(source, out, target=points or model3d_mod.TARGET_POINTS)
+    except model3d_mod.ModelError as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(f"  points kept      {model.points:,} of {model.source_points:,} "
+               f"(one per {model.cube_m * 100:.0f} cm cube)")
+    # Only the model's size: plant height is the canopy step's job, since the
+    # ground here still rises and falls across the field.
+    click.echo(f"  size             {model.size_m[0]:.0f} m x {model.size_m[1]:.0f} m, "
+               f"{model.size_m[2]:.1f} m from the lowest point to the highest")
+    for name in ("model3d.bin", "model3d.json", "model3d.png"):
+        click.echo(f"  {out / name}")
 
 
 def _format_stitched(stitched) -> str:
