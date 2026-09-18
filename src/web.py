@@ -99,6 +99,8 @@ PAGE_TEXT = {
         "finished": ("¡Listo! Recibimos {n} archivos. Ya puede cerrar esta página.",
                      "Done! We got {n} files. You can close this page."),
         "failed": ("Falló {name}: {error}", "{name} failed: {error}"),
+        "shrinking": ("Achicando el mapa {name} para que suba rápido: {pct}%",
+                      "Making the map {name} smaller so it uploads fast: {pct}%"),
         "nothing": ("Todavía no ha subido nada.", "Nothing uploaded yet."),
     },
     "gone": ("Este enlace ya no sirve. Mande MAPA, DRON o PORQUE por mensaje para recibir "

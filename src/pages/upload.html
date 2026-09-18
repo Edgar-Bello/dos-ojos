@@ -121,6 +121,163 @@ function putPiece(file, body, start, progress) {
 
 let onProgress = () => {};
 
+// A drone map (orthophoto) is often 1-2 cm a pixel and hundreds of MB. Dos Ojos
+// judges it in 1 m squares, where 5 cm a pixel sees the same, so a big map is
+// made 5 cm here before it is sent: about 25 times smaller. Every pixel kept is
+// an original one (no blending) and the map keeps its place on Earth. Only plain
+// (uncompressed) 8-bit colour maps in metres are shrunk, which is what makes them
+// this big; anything else goes up as it is.
+const SHRINK_TO_M = 0.05;
+const SHRINK_OVER = 20 * 1024 * 1024;
+const shrunkName = file => file.name.replace(/\.tiff?$/i, "") + "_5cm.tif";
+const TYPE_BYTES = { 1: 1, 2: 1, 3: 2, 4: 4, 5: 8, 7: 1, 11: 4, 12: 8, 16: 8 };
+
+async function bytesAt(file, start, length) {
+  return new DataView(await file.slice(start, start + length).arrayBuffer());
+}
+
+async function readTiffTags(file) {
+  const head = await bytesAt(file, 0, 16);
+  const le = head.getUint16(0) === 0x4949;
+  const big = head.getUint16(2, le) === 43;
+  if (!big && head.getUint16(2, le) !== 42) return null;
+  const at = big ? Number(head.getBigUint64(8, le)) : head.getUint32(4, le);
+  const counted = await bytesAt(file, at, 8);
+  const count = big ? Number(counted.getBigUint64(0, le)) : counted.getUint16(0, le);
+  const size = big ? 20 : 12, inline = big ? 8 : 4;
+  const dir = await bytesAt(file, at + (big ? 8 : 2), count * size);
+  const tags = {};
+  for (let i = 0; i < count; i++) {
+    const o = i * size, tag = dir.getUint16(o, le), type = dir.getUint16(o + 2, le);
+    const n = big ? Number(dir.getBigUint64(o + 4, le)) : dir.getUint32(o + 4, le);
+    const each = TYPE_BYTES[type];
+    if (!each) continue;
+    let view = dir, base = o + (big ? 12 : 8);
+    if (each * n > inline) {
+      view = await bytesAt(file, big ? Number(dir.getBigUint64(o + 12, le)) : dir.getUint32(o + 8, le),
+                           each * n);
+      base = 0;
+    }
+    const values = [];
+    for (let k = 0, p = base; k < n; k++, p += each) {
+      values.push(type === 3 ? view.getUint16(p, le) : type === 4 ? view.getUint32(p, le)
+        : type === 16 ? Number(view.getBigUint64(p, le)) : type === 12 ? view.getFloat64(p, le)
+        : type === 11 ? view.getFloat32(p, le) : view.getUint8(p));
+    }
+    tags[tag] = type === 2 ? String.fromCharCode(...values).replace(/\0+$/, "") : values;
+  }
+  return { le, tags };
+}
+
+// The same picture, one pixel in every `factor` each way, as 3-band 8-bit RGB.
+async function shrinkPixels(file, t, factor, report) {
+  const T = t.tags;
+  const W = T[256][0], H = T[257][0], spp = T[277] ? T[277][0] : 1;
+  const planar = T[284] ? T[284][0] : 1;
+  const w = Math.floor(W / factor), h = Math.floor(H / factor);
+  const alpha = spp >= 4 && T[338] ? 3 : -1;                 // an "extra sample" is see-through
+  const out = new Uint8Array(w * h * 3);
+  const tiled = !!T[324];
+  const TW = tiled ? T[322][0] : W, TL = tiled ? T[323][0] : T[278] ? T[278][0] : H;
+  const offsets = tiled ? T[324] : T[273];
+  const across = Math.ceil(W / TW), perPlane = across * Math.ceil(H / TL);
+  const bands = planar === 2 ? [0, 1, 2].concat(alpha >= 0 ? [3] : []) : [null];
+  for (let y = 0; y < h; y++) {
+    const source = y * factor, down = Math.floor(source / TL), inside = source % TL;
+    const rows = {};                                          // band (or all) -> [tile -> bytes]
+    for (const band of bands) {
+      rows[band] = [];
+      for (let tx = 0; tx < across; tx++) {
+        const index = (band === null ? 0 : band * perPlane) + down * across + tx;
+        const width = (band === null ? spp : 1) * TW;
+        rows[band].push(new Uint8Array(await file.slice(offsets[index] + inside * width,
+                                                         offsets[index] + (inside + 1) * width)
+                                                   .arrayBuffer()));
+      }
+    }
+    for (let x = 0; x < w; x++) {
+      const sx = x * factor, tx = Math.floor(sx / TW), col = sx % TW;
+      const value = b => planar === 2 ? rows[b][tx][col] : rows[null][tx][col * spp + b];
+      const empty = alpha >= 0 && value(alpha) === 0;
+      const j = (y * w + x) * 3;
+      out[j] = empty ? 0 : value(0);
+      out[j + 1] = empty ? 0 : value(1);
+      out[j + 2] = empty ? 0 : value(2);
+    }
+    if (y % 50 === 0) report(y / h);
+  }
+  return { w, h, out };
+}
+
+function writeTiff(w, h, rgb, geo) {
+  const tags = [[256, 4, [w]], [257, 4, [h]], [258, 3, [8, 8, 8]], [259, 3, [1]],
+    [262, 3, [2]], [273, 4, [0]], [277, 3, [3]], [278, 4, [h]], [279, 4, [w * h * 3]],
+    [284, 3, [1]], [33550, 12, geo.scale], [33922, 12, geo.tiepoint], [34735, 3, geo.keys]];
+  if (geo.doubles) tags.push([34736, 12, geo.doubles]);
+  if (geo.ascii) tags.push([34737, 2, geo.ascii]);
+  tags.sort((a, b) => a[0] - b[0]);
+  const values = t => t[1] === 2 ? [...t[2]].map(c => c.charCodeAt(0)).concat([0]) : t[2];
+  let end = 8 + 2 + tags.length * 12 + 4;
+  const where = tags.map(t => {
+    const n = TYPE_BYTES[t[1]] * values(t).length;
+    if (n <= 4) return -1;
+    const at = end;
+    end += n + (n & 1);
+    return at;
+  });
+  tags.find(t => t[0] === 273)[2] = [end];                    // the picture comes last
+  const buffer = new ArrayBuffer(end + rgb.length), v = new DataView(buffer);
+  v.setUint16(0, 0x4949);
+  v.setUint16(2, 42, true);
+  v.setUint32(4, 8, true);
+  v.setUint16(8, tags.length, true);
+  tags.forEach((t, i) => {
+    const o = 10 + i * 12, list = values(t);
+    v.setUint16(o, t[0], true);
+    v.setUint16(o + 2, t[1], true);
+    v.setUint32(o + 4, list.length, true);
+    let p = o + 8;
+    if (where[i] >= 0) { v.setUint32(o + 8, where[i], true); p = where[i]; }
+    for (const x of list) {
+      if (t[1] === 2) v.setUint8(p, x);
+      else if (t[1] === 3) v.setUint16(p, x, true);
+      else if (t[1] === 4) v.setUint32(p, x, true);
+      else v.setFloat64(p, x, true);
+      p += TYPE_BYTES[t[1]];
+    }
+  });
+  v.setUint32(10 + tags.length * 12, 0, true);
+  new Uint8Array(buffer, end).set(rgb);
+  return buffer;
+}
+
+async function smaller(file, have) {
+  if (!/\.tiff?$/i.test(file.name) || file.size < SHRINK_OVER) return file;
+  try {
+    const t = await readTiffTags(file);
+    if (!t) return file;
+    const T = t.tags, keys = T[34735] || [];
+    const key = id => { for (let i = 4; i + 3 < keys.length; i += 4) if (keys[i] === id) return keys[i + 3]; };
+    const metres = key(1024) === 1 && [undefined, 9001].includes(key(3076));
+    const plain = (T[259] || [1])[0] === 1 && (T[277] || [1])[0] >= 3 &&
+      (T[258] || []).every(b => b === 8);
+    if (!metres || !plain || !T[33550] || !T[33922]) return file;
+    const [sx, sy, sz] = T[33550];
+    const factor = Math.floor(SHRINK_TO_M / Math.max(sx, sy) + 1e-6);
+    if (factor < 2) return file;
+    if (have[shrunkName(file).replace(/[^A-Za-z0-9._-]/g, "_")]) return null;   // already up
+    const report = part => { $("status").textContent = S.shrinking.replace("{name}", file.name)
+      .replace("{pct}", Math.round(100 * part)); };
+    const { w, h, out } = await shrinkPixels(file, t, factor, report);
+    const buffer = writeTiff(w, h, out, { scale: [sx * factor, sy * factor, sz || 0],
+      tiepoint: T[33922], keys, doubles: T[34736], ascii: T[34737] });
+    return new File([buffer], shrunkName(file), { type: "image/tiff" });
+  } catch (error) {
+    console.warn("sending the map as it is:", error);
+    return file;
+  }
+}
+
 async function send(input) {
   // A folder carries whatever else lives in it - readmes, thumbnails, a stray
   // spreadsheet - and the server refuses those one by one; drop them here so a
@@ -131,9 +288,14 @@ async function send(input) {
   $("error").textContent = "";
   $("chooseLabel").style.opacity = .5;
   const have = (await (await fetch(`${location.pathname}/files`)).json()).files;
-  const todo = chosen.filter(f => have[f.name.replace(/[^A-Za-z0-9._-]/g, "_")] !== f.size);
-  const total = chosen.reduce((s, f) => s + f.size, 0);
-  let sent = chosen.filter(f => !todo.includes(f)).reduce((s, f) => s + f.size, 0);
+  const ready = [];
+  for (const file of chosen) {
+    const sending = await smaller(file, have);               // null: its small copy is up
+    if (sending) ready.push(sending);
+  }
+  const todo = ready.filter(f => have[f.name.replace(/[^A-Za-z0-9._-]/g, "_")] !== f.size);
+  const total = ready.reduce((s, f) => s + f.size, 0) || 1;
+  let sent = ready.filter(f => !todo.includes(f)).reduce((s, f) => s + f.size, 0);
   let count = chosen.length - todo.length;
   const show = extra => {
     $("bar").style.width = `${Math.min(100, 100 * (sent + extra) / total)}%`;
