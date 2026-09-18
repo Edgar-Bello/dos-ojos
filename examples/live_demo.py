@@ -159,6 +159,7 @@ def start() -> int:
         say(f"  public address  {address}")
         pointed = sms("webhook", env=env)
         if pointed == NOT_OWNED_EXIT:
+            env["DOSOJOS_REPLY_BY_API"] = "1"      # that number drops answers sent back in the webhook
             say("\nThe address changes every time live.cmd starts, so paste the new one each time.")
         elif pointed != 0:
             say("The Twilio number could not be pointed at the tunnel; see the message above.")

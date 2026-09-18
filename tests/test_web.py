@@ -73,6 +73,21 @@ def webhook(base: str, params: dict, *, token: str = TOKEN) -> tuple[int, bytes]
                          "Content-Type": "application/x-www-form-urlencoded"})
 
 
+def test_reply_by_api_sends_the_answer_and_leaves_the_webhook_empty(base: str, app: App,
+                                                                    sent: list) -> None:
+    from dataclasses import replace
+    app.settings = replace(app.settings, reply_by_api=True)
+    status, body = webhook(base, {"From": "+19565550123", "Body": "hola", "MessageSid": "SM1",
+                                  "NumMedia": "0"})
+    assert status == 200
+    assert "<Message>" not in body.decode()
+    assert sent and sent[0][0] == "+19565550123"
+    with app.db() as conn:
+        statuses = [row[0] for row in conn.execute(
+            "select status from messages where direction = 'out'")]
+    assert statuses == ["sent"] * len(sent)
+
+
 def test_a_signed_text_gets_twiml_back(base: str, app: App) -> None:
     status, body = webhook(base, {"From": "+19565550123", "Body": "hola", "MessageSid": "SM1",
                                   "NumMedia": "0"})

@@ -164,8 +164,16 @@ class App:
                 return []
             message.message_id = message_id
             replies = self._bot(conn).handle(message)
+            by_api = (message.channel == "sms" and self.settings.reply_by_api
+                      and self.settings.twilio_ready)
             for reply in replies:
-                store.log_out(conn, message.phone, reply, status=reply_status)
+                if by_api:
+                    reply_id = store.log_out(conn, message.phone, reply, status="sending")
+                    outbox._send(conn, self.settings, message.phone, reply, reply_id)
+                else:
+                    store.log_out(conn, message.phone, reply, status=reply_status)
+            if by_api:
+                replies = []           # already sent; the webhook answers with nothing
             for record in store.fields_of(conn, message.phone):
                 self._maybe_read(conn, record)
             return replies
