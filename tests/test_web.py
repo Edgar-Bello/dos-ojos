@@ -260,25 +260,34 @@ def an_upload(app: App) -> str:
     return token
 
 
-def test_a_big_file_arrives_in_pieces(base: str, app: App, sent: list) -> None:
+def test_a_big_file_arrives_in_pieces_in_any_order(base: str, app: App, sent: list) -> None:
     token = an_upload(app)
     whole = bytes(range(256)) * 40                              # 10,240 bytes
     url = f"{base}/u/{token}/file/map.tif"
     piece = lambda start, end: call(f"{url}?offset={start}&total={len(whole)}", method="PUT",
                                     data=whole[start:end])
-    assert piece(0, 4000)[0] == 200
-    assert piece(8000, len(whole))[0] == 409                    # the middle is missing
-    assert piece(4000, 6000)[0] == 200                          # cut off on the way...
-    status, body = piece(4000, 8000)                            # ...so sent again whole
-    assert status == 200 and json.loads(body)["received"] == 8000
-    listed = json.loads(call(f"{base}/u/{token}/files")[1])["files"]
-    assert "map.tif" not in listed                              # not finished yet
-    status, body = piece(8000, len(whole))
-    assert status == 200 and json.loads(body)["bytes"] == len(whole)
     folder = app.settings.drone_workspace / "data" / "raw" / "F001-20260912"
+    assert piece(8000, len(whole))[0] == 200                    # the last piece first
+    assert piece(0, 4000)[0] == 200
+    assert piece(4000, 6000)[0] == 200                          # cut short on the way...
+    listed = json.loads(call(f"{base}/u/{token}/files")[1])["files"]
+    assert listed == {}                                         # not finished, no ledger shown
+    status, body = piece(4000, 8000)                            # ...so sent again whole
+    assert status == 200 and json.loads(body)["bytes"] == len(whole)
     assert (folder / "map.tif").read_bytes() == whole
+    assert sorted(p.name for p in folder.iterdir()) == ["map.tif"]
     assert call(f"{url}?offset=9000&total={len(whole)}", method="PUT",
                 data=b"x" * 2000)[0] == 400                     # past the end
+    with app.db() as conn:
+        assert store.get_upload(conn, token)["files"] == 1
+
+
+def test_pieces_cover_the_file_only_without_gaps() -> None:
+    from dosojos_sms.web import _covers
+    assert _covers({"0": 4, "4": 4, "8": 2}, 10)
+    assert _covers({"8": 2, "0": 5, "3": 5}, 10)
+    assert not _covers({"0": 4, "8": 2}, 10)
+    assert not _covers({"0": 4, "4": 4}, 10)
 
 
 def test_uploading_a_flight(base: str, app: App, sent: list) -> None:

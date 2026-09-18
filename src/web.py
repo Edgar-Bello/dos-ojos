@@ -128,6 +128,16 @@ class HttpError(Exception):
 # --------------------------------------------------------------------------- #
 
 
+def _covers(pieces: dict[str, int], total: int) -> bool:
+    """True when the pieces, by their offsets and lengths, fill 0..total with no gap."""
+    reached = 0
+    for start, length in sorted((int(k), v) for k, v in pieces.items()):
+        if start > reached:
+            return False
+        reached = max(reached, start + length)
+    return reached >= total
+
+
 class App:
     def __init__(self, settings: Settings, *, sim: bool = False, verify: bool = True,
                  resolve: parse.Resolver | None = None, water: Water | None = None):
@@ -146,6 +156,7 @@ class App:
         #: The newest request writing each partly uploaded file: a piece the page
         #: gave up on can still be arriving when its retry starts, and must stop.
         self._writer: dict[str, object] = {}
+        self.upload_lock = threading.Lock()
 
     def db(self):
         return store.session(self.settings.db_path)
@@ -327,14 +338,19 @@ class App:
             upload, _, _ = self._upload(conn, token)
         folder = Path(upload["folder"])
         files = {p.name: p.stat().st_size for p in folder.iterdir()
-                 if p.is_file() and not p.name.endswith(".part")} if folder.exists() else {}
+                 if p.is_file() and not p.name.endswith((".part", ".part.json"))} if folder.exists() else {}
         return {"files": files}
 
     def upload_file(self, token: str, raw_name: str, length: int, stream, *,
                     offset: int | None = None, total: int | None = None) -> dict:
-        """Save one file, or one piece of it: a tunnel caps each request (Cloudflare's
-        quick tunnel at 100 MB), so the page sends big files in pieces, each at
-        ``offset`` of a file ``total`` bytes long, and the last piece finishes it."""
+        """Save one file, or one piece of it.
+
+        A quick tunnel caps a request at 100 MB and about 100 s, and each connection
+        through it is slow (~0.12 MB/s) while several together are not, so the page
+        sends big files as pieces, several at once and in any order: each ``length``
+        bytes at ``offset`` of a file ``total`` bytes long. The pieces that arrived
+        are listed next to the partial file; when they cover it, it is finished.
+        """
         name = re.sub(r"[^A-Za-z0-9._-]", "_", Path(urllib.parse.unquote(raw_name)).name)
         if not name or name.startswith(".") or Path(name).suffix.lower() not in UPLOAD_EXTENSIONS:
             raise HttpError(415, f"{raw_name}: only photos, videos (with .srt), maps, "
@@ -349,38 +365,59 @@ class App:
             upload, _, _ = self._upload(conn, token)
         folder = Path(upload["folder"])
         folder.mkdir(parents=True, exist_ok=True)
-        if start == 0 and shutil.disk_usage(folder).free < whole + DISK_RESERVE_BYTES:
-            raise HttpError(507, "the server's disk is full; tell the Dos Ojos team")
         target = folder / name
-        existed = target.exists()
         partial = folder / (name + ".part")
-        have = partial.stat().st_size if start and partial.exists() else 0
-        if have < start:
-            raise HttpError(409, f"{name}: a piece before byte {start} is missing")
+        ledger = folder / (name + ".part.json")
+        key = f"{partial}@{start}"
+        with self.upload_lock:
+            pieces = self._pieces(ledger, whole) if offset is not None else {}
+            if not pieces and shutil.disk_usage(folder).free < whole + DISK_RESERVE_BYTES:
+                raise HttpError(507, "the server's disk is full; tell the Dos Ojos team")
+            if offset is None or not partial.exists():
+                partial.open("wb").close()
+                if offset is not None:
+                    ledger.write_text(json.dumps({"total": whole, "pieces": {}}), "utf-8")
+            me = object()
+            self._writer[key] = me              # a piece sent again stops the one before
         remaining = length
-        me = object()
-        self._writer[str(partial)] = me
-        with partial.open("r+b" if start else "wb") as handle:
-            # A piece sent again after being cut off overwrites what arrived of it.
+        with partial.open("r+b") as handle:
             handle.seek(start)
-            handle.truncate()
             while remaining:
                 chunk = stream.read(min(1 << 20, remaining))
                 if not chunk:
                     raise HttpError(400, f"{name}: the upload was cut off")
-                if self._writer.get(str(partial)) is not me:
+                if self._writer.get(key) is not me:
                     raise HttpError(409, f"{name}: this piece was sent again")
                 handle.write(chunk)
                 remaining -= len(chunk)
-        if self._writer.get(str(partial)) is me:
-            del self._writer[str(partial)]
-        if start + length < whole:
-            return {"ok": True, "name": name, "received": start + length}
-        partial.replace(target)
+        with self.upload_lock:
+            if self._writer.get(key) is me:
+                del self._writer[key]
+            if offset is not None:
+                pieces = self._pieces(ledger, whole)
+                pieces[str(start)] = length
+                ledger.write_text(json.dumps({"total": whole, "pieces": pieces}), "utf-8")
+                if not _covers(pieces, whole):
+                    return {"ok": True, "name": name,
+                            "received": sum(pieces.values())}
+                ledger.unlink(missing_ok=True)
+            if not partial.exists():
+                return {"ok": True, "name": name, "bytes": whole}      # a twin piece finished it
+            existed = target.exists()
+            partial.replace(target)
         if not existed:
             with self.lock, self.db() as conn:
                 store.count_upload(conn, token, whole)
         return {"ok": True, "name": name, "bytes": whole}
+
+    @staticmethod
+    def _pieces(ledger: Path, total: int) -> dict[str, int]:
+        """The pieces of this file that arrived, or none when it is a new file."""
+        try:
+            saved = json.loads(ledger.read_text("utf-8"))
+        except (OSError, ValueError):
+            return {}
+        return saved.get("pieces", {}) if saved.get("total") == total else {}
 
     def upload_done(self, token: str) -> dict:
         with self.lock, self.db() as conn:
