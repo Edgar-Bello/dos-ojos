@@ -275,10 +275,10 @@ T: dict[str, tuple[str, str]] = {
         "los números que salen (ej. 26.15, -97.99) y mándelos.",
         "I couldn't open that link. In Google Maps, press and hold on the field, copy the "
         "numbers that appear (e.g. 26.15, -97.99) and send them."),
-    "location_far": ("Esa ubicación ({lat}, {lon}) no está en Estados Unidos continental. "
-                     "¿Puede mandarla otra vez?",
-                     "That location ({lat}, {lon}) isn't in the continental US. Could you "
-                     "send it again?"),
+    "location_far": ("Esa ubicación ({lat}, {lon}) queda fuera de donde podemos leer campos "
+                     "(Estados Unidos continental y México). ¿Puede mandarla otra vez?",
+                     "That location ({lat}, {lon}) is outside where we can read fields (the "
+                     "continental US and Mexico). Could you send it again?"),
     "location_described": ("Gracias. Búsquelo usted en este mapa y toque las esquinas del "
                            "campo: {link} . Si no lo encuentra, nuestro equipo lo busca y le "
                            "avisa.",

@@ -678,8 +678,18 @@ class Place:
 
     @property
     def in_conus(self) -> bool:
-        """Inside the lower 48, where gridMET weather exists."""
+        """Inside the lower 48, where gridMET weather and the USDA soil survey are."""
         return 24.3 <= self.lat <= 49.5 and -125.0 <= self.lon <= -66.5
+
+    @property
+    def in_mexico(self) -> bool:
+        """Inside Mexico, where NASA POWER weather and SoilGrids stand in."""
+        return 14.3 <= self.lat <= 32.8 and -118.5 <= self.lon <= -86.5
+
+    @property
+    def covered(self) -> bool:
+        """Somewhere Dos Ojos can read a field: the lower 48 or Mexico."""
+        return self.in_conus or self.in_mexico
 
 
 _COORD = r"(-?\d{1,3}\.\d+)"

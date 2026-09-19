@@ -202,11 +202,22 @@ def test_a_short_link_that_will_not_open(phone: Phone) -> None:
     assert "No pude abrir" in reply[0] and phone.state == "f:location"
 
 
-def test_mexico_is_refused(phone: Phone) -> None:
+def test_a_field_in_mexico_is_taken(phone: Phone, conn) -> None:
+    """Veracruz: the satellite is worldwide, and NASA POWER and SoilGrids stand in
+    for the US-only weather grid and soil survey."""
     onboard(phone)
     phone("Campo Norte")
     phone("40")
-    assert "no esta en Estados Unidos" in phone("19.4326, -99.1332")[0]
+    reply = phone("19.5000, -96.9000")
+    assert "Recibido (19.50000, -96.90000)" in reply[0] and "/f/" in reply[0]
+    assert store.get_field(conn, "F001").lat == 19.5
+
+
+def test_a_field_off_both_maps_is_refused(phone: Phone) -> None:
+    onboard(phone)
+    phone("Campo Norte")
+    phone("40")
+    assert "fuera de donde podemos leer" in phone("40.4168, -3.7038")[0]      # Madrid
 
 
 # ---- once set up ------------------------------------------------------------------

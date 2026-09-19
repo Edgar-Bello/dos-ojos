@@ -513,7 +513,7 @@ class Turn:
             self.say("location_link_failed")
             return
         if isinstance(place, parse.Place):
-            if not place.in_conus:
+            if not place.covered:
                 self.say("location_far", lat=f"{place.lat:.4f}", lon=f"{place.lon:.4f}")
                 return
             record.lat, record.lon = place.lat, place.lon
@@ -1005,7 +1005,7 @@ class Turn:
             self._command(command)
             return
         place = parse.find_place(self.body, lat=self.msg.lat, lon=self.msg.lon)
-        if isinstance(place, parse.Place) and place.in_conus:
+        if isinstance(place, parse.Place) and place.covered:
             unplaced = [r for r in store.fields_of(self.conn, self.f.phone) if r.lat is None]
             if len(unplaced) == 1:
                 # The field whose location never came through: this is it.
@@ -1015,7 +1015,7 @@ class Turn:
                 self.say("location_pin", lat=f"{place.lat:.5f}", lon=f"{place.lon:.5f}",
                          link=self._map_link(record))
                 return
-        if place == "unresolved" or (isinstance(place, parse.Place) and place.in_conus):
+        if place == "unresolved" or (isinstance(place, parse.Place) and place.covered):
             self.say("location_idle")
             return
         if parse.is_greeting(self.body):

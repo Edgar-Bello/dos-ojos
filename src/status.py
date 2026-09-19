@@ -112,7 +112,8 @@ class Water:
         try:
             status, daily, projection = sat_water.checkbook(
                 field_id=record.id, name=record.name, crop_text=crop_text(record),
-                soil=profile, soil_note={"name": profile.name, "intake": profile.intake},
+                soil=profile, soil_note={"name": profile.name, "intake": profile.intake,
+                                         "source": profile.source},
                 weather=weather, ndvi=ndvi, events=log_events(events), as_of=as_of,
                 method=record.irrigation, maturity=record.answers.get("maturity"),
             )

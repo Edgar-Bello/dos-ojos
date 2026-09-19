@@ -492,3 +492,15 @@ def test_without_the_trained_model_the_watershed_count_stays(settings, farm) -> 
     (settings.drone_workspace / "out" / report["flight_id"] / "flag_overlay.png").write_bytes(PNG)
     page = _built(settings, farm, terrain=report, flags=_summary(report, unit_type="crown"))
     assert "inteligencia artificial" not in page and "Lo que encontró su vuelo" in page
+
+
+def test_a_field_in_mexico_names_the_world_sources(settings, conn, farm) -> None:
+    """Veracruz: the page must not credit gridMET or the USDA survey, which stop
+    at the border, and must say which world sources stood in for them."""
+    record = store.get_field(conn, "F001")
+    record.lat, record.lon = 19.5, -96.9
+    store.save_field(conn, record)
+    page = _built(settings, conn)
+    assert "NASA POWER" in page and "SoilGrids" in page
+    assert "gridMET" not in page and "USDA SSURGO" not in page
+    assert "El mapa de suelos (SoilGrids)" in page and "La red de clima (NASA POWER)" in page

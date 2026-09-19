@@ -149,11 +149,11 @@ S = {
     "how": ("Cómo salió ese número", "How that number came out"),
     "step_soil": ("1. Cuánta agua cabe en su suelo", "1. How much water your soil holds"),
     "step_soil_body": (
-        "El mapa de suelos del USDA dice que {field} es {soil}. Bajo el cultivo, las raíces "
+        "El mapa de suelos ({map}) dice que {field} es {soil}. Bajo el cultivo, las raíces "
         "llegan hoy a unas {root} pulgadas de hondo, y en esa capa caben {capacity} pulgadas "
         "de agua aprovechable. El cultivo empieza a sufrir antes de vaciarla: cuando quedan "
         "menos de {stress} pulgadas.",
-        "The USDA soil map says {field} is {soil}. Under the crop the roots reach about "
+        "The soil map ({map}) says {field} is {soil}. Under the crop the roots reach about "
         "{root} inches down today, and that layer holds {capacity} inches of usable water. "
         "The crop starts to suffer before it runs out: below {stress} inches left."),
     "reason_planted": ("la siembra", "the planting"),
@@ -165,12 +165,12 @@ S = {
         "{field} va en {stage}: día {day} desde la siembra, con {gdu} grados-día de calor "
         "acumulados. El sorgo avanza con el calor, no con el calendario: uno sembrado en un "
         "febrero fresco va más atrasado, a los mismos días, que uno sembrado en abril. Sumamos "
-        "el calor de cada día con las temperaturas del gobierno (gridMET), como enseña Texas "
+        "el calor de cada día con las temperaturas de {grid}, como enseña Texas "
         "A&M AgriLife.",
         "{field} is at {stage}: day {day} after planting, with {gdu} heat units so far. "
         "Sorghum moves with heat, not the calendar: one planted in a cool February is behind, "
         "at the same day count, one planted in April. We add up each day's heat from "
-        "government temperatures (gridMET), the way Texas A&M AgriLife teaches."),
+        "{grid} temperatures, the way Texas A&M AgriLife teaches."),
     "sorghum_maturity": ("Lo calculamos como {maturity}, que es lo que usted nos dijo.",
                          "Worked out as {maturity}, as you told us."),
     "sorghum_maturity_assumed": (
@@ -246,11 +246,11 @@ S = {
         "irrigation you told us about went in, plus {rain} inches of rain."),
     "step_out": ("3. Lo que salió", "3. What went out"),
     "step_out_body": (
-        "Cada día el sol y el aire se llevan agua. La estación del gobierno (gridMET) dice "
+        "Cada día el sol y el aire se llevan agua. La red de clima ({grid}) dice "
         "cuánta se llevaría un pasto de referencia: {eto} pulgadas al día. Su cultivo no gasta "
         "lo mismo: gasta esa cifra por un factor que sale de qué tan verde y tapado está el "
         "campo en la foto del satélite, hoy {kc}. Eso da {use} pulgadas al día.",
-        "Every day the sun and the air take water away. The government weather grid (gridMET) "
+        "Every day the sun and the air take water away. The weather grid ({grid}) "
         "says how much a reference grass would lose: {eto} inches a day. Your crop doesn't use "
         "the same: it uses that figure times a factor taken from how green and how covered the "
         "field looks to the satellite, today {kc}. That gives {use} inches a day."),
@@ -462,6 +462,24 @@ SOURCES = [
     ("gridMET (University of Idaho)",
      ("clima diario en cuadros de 4 km", "daily weather on a 4 km grid")),
     ("USDA SSURGO", ("mapa de suelos", "soil map")),
+    ("FAO-56", ("el método de la cuenta del agua", "the water accounting method")),
+]
+
+#: Outside the contiguous US the US government's grids stop, and these stand in.
+SOURCES_ABROAD = [
+    ("Sentinel-2 (ESA/Copernicus)",
+     ("fotos del satélite cada 5 días, gratis y públicas",
+      "satellite images every 5 days, free and public")),
+    ("NASA POWER",
+     ("clima diario en cuadros de 50 km, de satélite; la evaporación de referencia la "
+      "calculamos nosotros con FAO-56",
+      "daily weather on a 50 km grid, from satellites; we work out the reference "
+      "evaporation ourselves with FAO-56")),
+    ("SoilGrids (ISRIC, CC-BY 4.0)",
+     ("mapa mundial de suelos de 250 m; el agua aprovechable sale de la arena, la arcilla y "
+      "la materia orgánica con Saxton y Rawls (2006)",
+      "a 250 m world soil map; the water it holds comes from its sand, clay and organic "
+      "matter with Saxton and Rawls (2006)")),
     ("FAO-56", ("el método de la cuenta del agua", "the water accounting method")),
 ]
 
@@ -833,7 +851,7 @@ def _sorghum(item: FieldWater, events: list[Event], image: str | None, lang: str
     stage = status.stage
     name = lambda key: text.pick(text.SORGHUM_STAGES[key], lang)  # noqa: E731
     parts = [f"<h2>{_esc(_('sorghum', lang))}</h2>",
-             f"<p>{_esc(_('sorghum_body', lang, field=item.field.name, stage=name(stage['stage']), day=stage['days_after_planting'], gdu=stage['gdu']))}</p>"]
+             f"<p>{_esc(_('sorghum_body', lang, field=item.field.name, stage=name(stage['stage']), day=stage['days_after_planting'], gdu=stage['gdu'], grid=grid_names(item.field)['grid']))}</p>"]
     if stage["maturity_assumed"]:
         parts.append(f"<p>{_esc(_('sorghum_maturity_assumed', lang))}</p>")
     else:
@@ -888,6 +906,23 @@ def _sorghum(item: FieldWater, events: list[Event], image: str | None, lang: str
     return parts
 
 
+def abroad(record: FieldRow) -> bool:
+    """True when this field lies outside the US grids, so the world ones were used."""
+    from .parse import Place
+
+    lat, lon = record.lat, record.lon
+    if lat is None and record.outline:
+        ring = (record.outline.get("coordinates") or [[[None, None]]])[0]
+        lon, lat = ring[0][0], ring[0][1]
+    return lat is not None and not Place(lat, lon).in_conus
+
+
+def grid_names(record: FieldRow) -> dict[str, str]:
+    """What to call the weather grid and the soil map on this field's page."""
+    return ({"grid": "NASA POWER", "map": "SoilGrids"} if abroad(record)
+            else {"grid": "gridMET", "map": "USDA"})
+
+
 def _drone_image(settings: Settings, report: dict | None, name: str) -> str | None:
     """A figure the drone half wrote beside its report, as a data URI."""
     if not report or not report.get("flight_id"):
@@ -939,7 +974,8 @@ def build(settings: Settings, farmer: Farmer, item: FieldWater, events: list[Eve
     parts += _flight(settings, thermal or terrain, lang)
     parts += _thermal(settings, thermal, lang)
     parts += _sources(lang, sorghum=bool(status is not None and status.stage),
-                      ground_3dep=(terrain or {}).get("ground_source") == "3dep")
+                      ground_3dep=(terrain or {}).get("ground_source") == "3dep",
+                      abroad=abroad(record))
 
     parts.append(f"<footer>{_esc(_('footer', lang))}</footer>")
     parts.append("</main>")
@@ -990,7 +1026,8 @@ def _arithmetic(item: FieldWater, events: list[Event], lang: str) -> list[str]:
         parts.append(f"<h3>{_esc(_(heading, lang))}</h3>")
         parts.append(f"<p>{_esc(_(body, lang, **values))}</p>")
 
-    step("step_soil", "step_soil_body",
+    names = grid_names(item.field)
+    step("step_soil", "step_soil_body", map=names["map"],
          field=item.field.name,
          soil=(item.soil or {}).get("name") or (s.soil or {}).get("name") or "?",
          root=_inches(s.root_depth_in, 0), capacity=_inches(s.capacity_in),
@@ -1008,7 +1045,7 @@ def _arithmetic(item: FieldWater, events: list[Event], lang: str) -> list[str]:
          start_reason=_start_reason(s, lang), irrigation=_inches(went_in["irrigated"]),
          rain=_inches(went_in["rain"]))
 
-    step("step_out", "step_out_body", eto=_inches(s.eto_in_day, 2),
+    step("step_out", "step_out_body", grid=names["grid"], eto=_inches(s.eto_in_day, 2),
          kc=f"{s.kc:.2f}" if s.kc else "?", use=_inches(s.use_in_day, 2))
 
     if s.days_left is None:
@@ -1284,8 +1321,9 @@ def _signs(patch: dict, lang: str) -> list[str]:
     return lines
 
 
-def _sources(lang: str, *, sorghum: bool = False, ground_3dep: bool = False) -> list[str]:
-    listed = (SOURCES + (SORGHUM_SOURCES if sorghum else [])
+def _sources(lang: str, *, sorghum: bool = False, ground_3dep: bool = False,
+             abroad: bool = False) -> list[str]:
+    listed = ((SOURCES_ABROAD if abroad else SOURCES) + (SORGHUM_SOURCES if sorghum else [])
               + ([GROUND_3DEP_SOURCE] if ground_3dep else []))
     rows = "".join(f"<tr><td>{_esc(name)}</td><td>{_esc(text.pick(what, lang))}</td></tr>"
                    for name, what in listed)
