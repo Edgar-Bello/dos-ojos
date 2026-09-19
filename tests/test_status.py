@@ -78,6 +78,15 @@ def test_harvested() -> None:
     assert body == "Campo Norte: harvested; no water needed until the next crop."
 
 
+def test_mature_sorghum_is_told_to_stop_watering() -> None:
+    mature = FieldWater(record(), FakeStatus(status="mature", days_left=None, water_by=None))
+    body = status.message(mature, "en", TODAY)
+    assert body.startswith("Campo Norte: the sorghum has reached black layer")
+    assert "stop watering" in body and "WATER NOW" not in body
+    urgent = FieldWater(record(id="F002"), FakeStatus(days_left=0))
+    assert [i.field.id for i in sorted([mature, urgent], key=status.urgency)] == ["F002", "F001"]
+
+
 def test_most_urgent_first() -> None:
     later = FieldWater(record(id="F002"), FakeStatus(days_left=9))
     now = FieldWater(record(id="F003"), FakeStatus(days_left=0))

@@ -534,6 +534,12 @@ T: dict[str, tuple[str, str]] = {
                             "if it doesn't rain."),
     "status_plenty": ("{field} ({crop}): tiene agua para más de {days} días.",
                       "{field} ({crop}): water for more than {days} days."),
+    "status_mature": ("{field}: el sorgo ya llegó a capa negra (madurez). El grano ya está "
+                      "hecho y más agua no le da más rendimiento: ya no riegue. Coseche cuando "
+                      "el grano esté seco.",
+                      "{field}: the sorghum has reached black layer (maturity). The grain is "
+                      "made and more water adds no yield: stop watering. Harvest when the grain "
+                      "is dry."),
     "status_harvested": ("{field}: cosechado; no necesita agua hasta la próxima siembra.",
                          "{field}: harvested; no water needed until the next crop."),
     "status_no_data": ("{field}: todavía no tenemos los datos del satélite; le avisamos pronto.",

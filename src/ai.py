@@ -330,7 +330,8 @@ def understand(model: LocalAI, message: str, *, lang: str, today: date,
 # The recommendation
 # --------------------------------------------------------------------------- #
 
-ACTIONS = ("water_now", "water_soon", "no_water_yet", "not_irrigated", "harvested")
+ACTIONS = ("water_now", "water_soon", "no_water_yet", "not_irrigated", "harvested",
+           "mature")
 
 # The water balance decides when and how much: that is arithmetic, and a 3B model
 # gets arithmetic wrong (it once told a rainfed field to water "now", in 27 days).
@@ -381,8 +382,8 @@ class Advice:
 def expected_action(brief: dict) -> str | None:
     """The action the water balance calls for."""
     book = brief.get("water_checkbook") or {}
-    if book.get("status") == "harvested":
-        return "harvested"
+    if book.get("status") in ("harvested", "mature"):
+        return book["status"]
     if (brief.get("field") or {}).get("watered_by") == "rainfed (not irrigated)":
         return "not_irrigated"
     days = book.get("days_until_water")
@@ -421,6 +422,8 @@ def facts(brief: dict) -> list[str]:
                          + f", by {when}{give}."),
         "not_irrigated": "this field is rainfed, so there is nothing to water; only watch it.",
         "harvested": "the crop is harvested; nothing to water until the next planting.",
+        "mature": ("the sorghum is at black layer (mature): the grain is made and more water "
+                   "adds no yield, so stop watering; harvest when the grain is dry."),
     }.get(action, "no water decision yet.")
     lines = [f"DECISION (from the water balance, do not change it): {decision}"]
     lines.append(f"Field: {info.get('crop')}"
@@ -520,6 +523,8 @@ def check(advice: dict, brief: dict, lang: str = "en") -> list[str]:
             problems.append(f"the message does not give the DECISION's day ({days} days, by {by})")
     if action == "not_irrigated" and any(w in said for w in _WATER_WORDS):
         problems.append("the field is rainfed and the message says to water it")
+    if action in ("mature", "harvested") and any(w in said for w in _WATER_WORDS[3:]):
+        problems.append("the DECISION is no more water and the message says to water")
     written = " ".join(facts(brief))
     known_days = _days_named(written)
     for day in _days_named(message + " " + str(advice.get("check_first") or "")):

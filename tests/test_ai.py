@@ -308,3 +308,13 @@ def test_the_why_page_leads_with_the_ai_and_shows_how_it_was_checked(app, monkey
     assert "llama3.2:3b" in page and "cada número sale de las lecturas" not in page
     assert "every number comes from the readings" in page
     assert "Lo que dicen las cuentas del agua solas" in page
+
+
+def test_mature_sorghum_is_told_to_stop_and_never_to_water() -> None:
+    mature = {**BRIEF, "water_checkbook": {**BRIEF["water_checkbook"], "status": "mature",
+                                           "days_until_water": None, "water_by": None}}
+    assert ai.expected_action(mature) == "mature"
+    assert "stop watering" in ai.facts(mature)[0]
+    assert ai.check({**GOOD, "message": "Water it now to finish the grain."}, mature)
+    assert ai.check({**GOOD, "message": "The grain is made; stop watering and get ready to "
+                                        "harvest."}, mature) == []

@@ -570,7 +570,7 @@ CHECKIN_AFTER = timedelta(days=3)
 
 def plan_reminders(conn, settings: Settings, bot: Bot, today: date) -> list[Planned]:
     """At most one text per farmer: water first, then a check-in, then a missing fact."""
-    from dosojos_sat.water import STATUS_HARVESTED
+    from dosojos_sat.water import NO_WATER, STATUS_HARVESTED
 
     planned: list[Planned] = []
     for farmer in store.farmers(conn):
@@ -582,7 +582,7 @@ def plan_reminders(conn, settings: Settings, bot: Bot, today: date) -> list[Plan
             item = bot.water.field(record, store.events_for(conn, record.id), today)
             # A drone field's first answer comes with its photos, not in an alert before them.
             s = None if drone_wait(settings, farmer, record) else item.status
-            if s is not None and s.status != STATUS_HARVESTED and s.method != "none":
+            if s is not None and s.status not in NO_WATER and s.method != "none":
                 cycle = s.last_irrigation or s.start
                 gross = text.inches(round(s.refill_gross_in or s.refill_net_in or 0, 1))
                 sent_now = store.last_alert(conn, record.id, "water_now")

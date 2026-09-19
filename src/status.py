@@ -136,7 +136,7 @@ def urgency(item: FieldWater) -> tuple:
     s = item.status
     if s is None:
         return (3, 0, item.field.id)
-    if s.status == sat_water.STATUS_HARVESTED:
+    if s.status in sat_water.NO_WATER:
         return (2, 0, item.field.id)
     days = s.days_left if s.days_left is not None else sat_water.MAX_PROJECTION_DAYS + 1
     return (0 if s.days_left is not None else 1, days, item.field.id)
@@ -157,6 +157,8 @@ def message(item: FieldWater, lang: str, today: date, *,
         return say("status_no_data", lang, field=name)
     if s.status == sat_water.STATUS_HARVESTED:
         return say("status_harvested", lang, field=name)
+    if s.status == sat_water.STATUS_MATURE:
+        return say("status_mature", lang, field=name)
 
     crop = text.crop_name(record.crop, lang, record.crop_name)
     rainfed = s.method == "none"
