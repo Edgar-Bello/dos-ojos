@@ -160,6 +160,7 @@ def test_a_field_read_before_a_restart_is_left_alone(app: App) -> None:
 
 
 def test_a_failed_reading_is_tried_again_then_handed_to_the_team(app: App) -> None:
+    app.retry_seconds = lambda: READ_RETRY_MINUTES * 60     # whatever the clock says now
     app.jobs = Held(result=1)
     field_id = farmer_with_field(app)
     read_now(app, field_id)
@@ -270,3 +271,20 @@ def test_a_3d_flight_counts_trees_and_sends_its_snapshot(app: App) -> None:
     assert "23 of 324 trees need a look" in trees
     assert "Your photos built North Field in 3D: 91 m by 200 m" in three_d
     assert "2.7 m over the ground" in three_d and "text WHY" in three_d
+
+
+def test_the_soil_services_nightly_break_is_waited_out_not_fifteen_minutes(app: App) -> None:
+    from datetime import datetime
+    tz = app.settings.tz
+    assert app.retry_seconds(datetime(2026, 9, 19, 0, 40, tzinfo=tz)) == 6 * 60
+    assert app.retry_seconds(datetime(2026, 9, 19, 0, 20, tzinfo=tz)) == READ_RETRY_MINUTES * 60
+    assert app.retry_seconds(datetime(2026, 9, 19, 14, 0, tzinfo=tz)) == READ_RETRY_MINUTES * 60
+
+
+def test_a_drone_field_on_hold_hears_nothing_about_a_retry(app: App) -> None:
+    app.retry_seconds = lambda: 60
+    app.jobs = Held(result=1)
+    field_id = farmer_with_field(app, plan="drone")
+    read_now(app, field_id)
+    assert app.jobs.held[0].done(False, 1) == 60
+    assert not any("try again" in t for t in texts(app))

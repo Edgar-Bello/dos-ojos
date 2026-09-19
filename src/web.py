@@ -62,6 +62,9 @@ SIM_PHONE = "+19565550123"      # 555-01xx numbers are reserved for fiction
 #: A first reading that fails (a government service down) is tried again this
 #: often, this many times in all, before the team is told.
 READ_RETRY_MINUTES = 15
+#: USDA Soil Data Access goes down every night from 12:30 to 12:45 AM Central; a
+#: reading that fails then is tried again the minute it is back.
+SOIL_DOWN = ((0, 30), (0, 46))
 READ_ATTEMPTS = 3
 
 PAGE_TEXT = {
@@ -575,14 +578,27 @@ class App:
                 # "working": the flight's own finish sends everything together
                 return None
             if attempt < READ_ATTEMPTS:
-                send(text.say("reading_retry", lang, field=record.name,
-                              minutes=READ_RETRY_MINUTES))
-                return READ_RETRY_MINUTES * 60
+                wait = self.retry_seconds()
+                # A drone field's answer is on hold anyway: nothing to apologise for yet.
+                if drone_wait(self.settings, farmer, record) is None:
+                    send(text.say("reading_retry", lang, field=record.name,
+                                  minutes=max(1, round(wait / 60))))
+                return wait
             send(text.say("reading_gave_up", lang, field=record.name))
             log.warning("gave up reading %s after %s tries; see the server window", field_id,
                         attempt)
             self._read_as.pop(field_id, None)
             return None
+
+    def retry_seconds(self, local: datetime | None = None) -> float:
+        """Fifteen minutes, or less when the soil service is due back sooner."""
+        local = local or datetime.now(self.settings.tz)
+        (h0, m0), (h1, m1) = SOIL_DOWN
+        start = local.replace(hour=h0, minute=m0, second=0, microsecond=0)
+        back = local.replace(hour=h1, minute=m1, second=0, microsecond=0)
+        if start <= local < back:
+            return min(READ_RETRY_MINUTES * 60, (back - local).total_seconds())
+        return READ_RETRY_MINUTES * 60
 
     def _answer(self, conn, farmer, record, flight_id: str | None = None) -> bool:
         """The water answer, the page's link when a drone flew, and the menu.
