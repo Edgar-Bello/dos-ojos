@@ -441,6 +441,13 @@ T: dict[str, tuple[str, str]] = {
                            "a look ({stressed} stressed or dead, {missing} missing). In the "
                            "picture: yellow = stressed, hatched = missing. The whole story: "
                            "WHY."),
+    "flight_ready_trees_ai": (
+        "El vuelo de {field} está listo. Nuestro modelo de inteligencia artificial encontró "
+        "{trees} árboles: {look} necesitan una revisada (naranja) y hay {gaps} huecos donde "
+        "falta un árbol (X). Altura típica {height} m. Todo el detalle: PORQUE.",
+        "The flight over {field} is ready. Our AI model found {trees} trees: {look} need a "
+        "look (orange) and there are {gaps} gaps where a tree is missing (X). Typical height "
+        "{height} m. The whole story: WHY."),
     "flight_ready_3d": ("Con sus fotos hicimos {field} en 3D: {x} m por {y} m, las plantas más "
                         "altas a {top} m del suelo. Para girarlo con el dedo, mande PORQUE.",
                         "Your photos built {field} in 3D: {x} m by {y} m, the tallest plants "

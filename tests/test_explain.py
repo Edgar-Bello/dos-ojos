@@ -453,3 +453,42 @@ def test_no_model_no_3d_section(settings, farm) -> None:
     report = _terrain(settings)
     page = _built(settings, farm, terrain=report, flags=_summary(report))
     assert "Su campo en 3D" not in page and "<canvas" not in page
+
+
+def _trees_ai(settings, report: dict) -> None:
+    """The trained tree model's output, laid out the way 'trees-ai' writes it."""
+    folder = settings.drone_workspace / "out" / report["flight_id"]
+    (folder / "trees_ai.png").write_bytes(PNG)
+    (folder / "flag_overlay.png").write_bytes(PNG)
+    (folder / "trees_ai.json").write_text(json.dumps({
+        "trees": 424, "rows": 8, "needs_a_look": 32, "gaps": 44, "not_judged": 85,
+        "height_m": {"median": 1.8}, "model": {"scores": {
+            "high": {"trees_found": 0.98, "watershed_found": 0.68,
+                     "height_typical_miss_m": 0.11, "canopy_model_typical_miss_m": 0.33,
+                     "empty_spots_found_as_gaps": "6 of 7",
+                     "poor_living_trees_caught": "4 of 11"},
+            "medium": {"trees_found": 0.96, "watershed_found": 0.61,
+                       "height_typical_miss_m": 0.14, "canopy_model_typical_miss_m": 0.67,
+                       "empty_spots_found_as_gaps": "6 of 7",
+                       "poor_living_trees_caught": "3 of 11"}}}}), encoding="utf-8")
+
+
+def test_the_trained_tree_count_replaces_the_watershed_and_says_how_good_it_is(settings,
+                                                                               farm) -> None:
+    report = _terrain(settings)
+    _trees_ai(settings, report)
+    page = _built(settings, farm, terrain=report, flags=_summary(report, unit_type="crown"))
+    assert "contados por inteligencia artificial" in page
+    assert "encontró 424 árboles en 8 hileras. 32 necesitan una revisada" in page
+    assert "44 huecos" in page and "85 árboles a la orilla" in page
+    assert "encontró 96-98% de los árboles (el método anterior, 61-68%)" in page
+    assert "falla por 11-14 cm" in page and "atrapó 4/11 / 3/11" in page
+    assert "Sólo ha visto una huerta" in page
+    assert "Lo que encontró su vuelo" not in page          # not two counts that disagree
+
+
+def test_without_the_trained_model_the_watershed_count_stays(settings, farm) -> None:
+    report = _terrain(settings)
+    (settings.drone_workspace / "out" / report["flight_id"] / "flag_overlay.png").write_bytes(PNG)
+    page = _built(settings, farm, terrain=report, flags=_summary(report, unit_type="crown"))
+    assert "inteligencia artificial" not in page and "Lo que encontró su vuelo" in page

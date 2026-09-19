@@ -178,6 +178,10 @@ def three_d(workspace: Path, flight: str, crop: str | None) -> bool:
     run(workspace, "metrics", flight, *method)
     run(workspace, "flag", flight, *method, *segment)
     run(workspace, "report", flight, *method)
+    if method:
+        # Orchards: the trained model finds the trees the watershed merges, reads
+        # their real height and makes a short list of poor ones.
+        run(workspace, "trees-ai", flight, optional=True)
     run(workspace, "model3d", flight, optional=True)
     run(workspace, "terrain", flight, optional=True)
     return True

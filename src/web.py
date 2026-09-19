@@ -674,6 +674,13 @@ class App:
                 picture = out / "thermal.png"
                 extra = pest_line(json.loads((out / "thermal.json").read_text(encoding="utf-8")),
                                   lang, record.name)
+            elif (out / "trees_ai.json").exists() and (out / "trees_ai.png").exists():
+                s = json.loads((out / "trees_ai.json").read_text(encoding="utf-8"))
+                body = text.say("flight_ready_trees_ai", lang, field=record.name,
+                                trees=f"{s['trees']:,}", look=f"{s['needs_a_look']:,}",
+                                gaps=f"{s['gaps']:,}",
+                                height=f"{(s.get('height_m') or {}).get('median') or 0:.1f}")
+                picture = out / "trees_ai.png"
             elif (out / "block_summary.json").exists():
                 s = json.loads((out / "block_summary.json").read_text(encoding="utf-8"))
                 stressed = (s.get("n_stressed") or 0) + (s.get("n_dead") or 0)

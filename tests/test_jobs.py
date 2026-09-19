@@ -288,3 +288,21 @@ def test_a_drone_field_on_hold_hears_nothing_about_a_retry(app: App) -> None:
     read_now(app, field_id)
     assert app.jobs.held[0].done(False, 1) == 60
     assert not any("try again" in t for t in texts(app))
+
+
+def test_an_orchard_flight_reports_the_trained_models_count(app: App) -> None:
+    field_id = farmer_with_field(app, plan="drone")
+    summary = {"unit_type": "crown", "n_judged": 324, "n_stressed": 4, "n_dead": 19,
+               "n_missing": 0}
+    ai = {"trees": 424, "rows": 8, "needs_a_look": 32, "gaps": 44, "height_m": {"median": 1.8}}
+    flight(app, field_id, "F001-20260910", {"block_summary.json": json.dumps(summary),
+                                             "flag_overlay.png": "FLAGS",
+                                             "trees_ai.json": json.dumps(ai),
+                                             "trees_ai.png": "AI"})
+    app.jobs.finish()
+    with app.db() as conn:
+        last = store.messages(conn, "+19565550123")[-1]
+    assert "Our AI model found 424 trees: 32 need a look" in last["body"]
+    assert "44 gaps" in last["body"] and "1.8 m" in last["body"]
+    [url] = json.loads(last["media"])
+    assert app.picture(url.rsplit("/", 1)[1]) == b"AI"

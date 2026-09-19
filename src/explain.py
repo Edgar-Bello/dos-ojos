@@ -46,6 +46,41 @@ S = {
     "answer": ("La respuesta", "The answer"),
     "found": ("Lo que encontró su vuelo", "What your flight found"),
     "model3d": ("Su campo en 3D", "Your field in 3D"),
+    "trees_ai": ("Sus árboles, contados por inteligencia artificial",
+                 "Your trees, counted by artificial intelligence"),
+    "trees_ai_body": (
+        "Un modelo entrenado encontró {trees} árboles en {rows} hileras. {look} necesitan una "
+        "revisada (círculo naranja) y hay {gaps} huecos donde falta un árbol (X). Altura "
+        "típica: {height} m. Vuelo del {day}.",
+        "A trained model found {trees} trees in {rows} rows. {look} need a look (orange "
+        "ring) and there are {gaps} gaps where a tree is missing (X). Typical height: "
+        "{height} m. Flown {day}."),
+    "trees_ai_how": (
+        "Cómo funciona: tres redes neuronales pequeñas aprendieron de 206 árboles cítricos "
+        "que el USDA midió a mano en Florida (datos públicos). Una busca el centro de cada "
+        "árbol en la altura y el color de la foto; otra corrige la altura, porque el modelo 3D "
+        "lee las copas bajas; otra compara cada árbol con los de su hilera.",
+        "How it works: three small neural networks learned from 206 citrus trees the USDA "
+        "measured by hand in Florida (public data). One finds the middle of each tree from "
+        "the height and colour in the photos; one corrects the height, because the 3D model "
+        "reads crowns short; one compares each tree with the others in its row."),
+    "trees_ai_score": (
+        "Qué tan bien le fue en hileras que nunca vio al aprender: encontró {found} de los "
+        "árboles (el método anterior, {old}); la altura falla por {miss} cm típicamente "
+        "(antes {old_miss} cm); de los árboles muertos, {dead} aparecieron como huecos; de "
+        "los que estaban mal, atrapó {poor}. La lista naranja es para revisar, no un "
+        "diagnóstico.",
+        "How well it did on rows it never saw while learning: it found {found} of the trees "
+        "(the old method, {old}); height misses by {miss} cm typically (before, {old_miss} "
+        "cm); of the dead trees, {dead} showed up as gaps; of the trees in poor shape, it "
+        "caught {poor}. The orange list is for checking, not a diagnosis."),
+    "trees_ai_caution": (
+        "Sólo ha visto una huerta (mandarina Bingo de 3 años). En otra huerta los números "
+        "son una buena aproximación, no algo medido.",
+        "It has only seen one grove (3-year-old Bingo mandarins). On another orchard the "
+        "numbers are a good guess, not a measured one."),
+    "trees_ai_edge": (" {n} árboles a la orilla del modelo 3D se contaron pero no se juzgaron.",
+                      " {n} trees at the edge of the 3D model were counted but not judged."),
     "model3d_body": (
         "Hecho con sus {photos} fotos del dron: donde dos o más fotos vieron el mismo punto "
         "desde lugares distintos, se calcula a qué altura está. Mide {x} m por {y} m; las "
@@ -871,7 +906,8 @@ def build(settings: Settings, farmer: Farmer, item: FieldWater, events: list[Eve
     parts += _answer(item, lang, today)
     # A flight's picture of where to walk sits right under the answer: of
     # everything on this page it is the one a farmer acts on first.
-    parts += _found(settings, flags, lang, today)
+    ai = _trees_ai(settings, flags, lang, today)
+    parts += ai or _found(settings, flags, lang, today)
     parts += _model3d(settings, flags or terrain, lang, today)
     parts += _arithmetic(item, events, lang)
     parts += _charts(item, images, lang)
@@ -1047,6 +1083,51 @@ def _found(settings: Settings, summary: dict | None, lang: str, today: date) -> 
              f"<p>{_esc(_('found_key', lang))}</p>"]
     if unit == "cell":
         parts.append(f'<p class="note">{_esc(_("found_colour", lang))}</p>')
+    return parts
+
+
+def trees_ai_report(settings: Settings, report: dict | None) -> dict | None:
+    """The trained model's count for the flight a report came from, if it ran."""
+    if not report or not report.get("flight_id"):
+        return None
+    path = settings.drone_workspace / "out" / report["flight_id"] / "trees_ai.json"
+    if not path.exists():
+        return None
+    return {**json.loads(path.read_text("utf-8")), "flight_id": report["flight_id"],
+            "flown_on": report.get("flown_on")}
+
+
+def _trees_ai(settings: Settings, flags: dict | None, lang: str, today: date) -> list[str]:
+    """An orchard's trees as the trained model counted them, and how far to trust it."""
+    summary = trees_ai_report(settings, flags)
+    image = _drone_image(settings, summary, "trees_ai")
+    if not summary or not image:
+        return []
+    flown = summary.get("flown_on")
+    height = (summary.get("height_m") or {}).get("median")
+    body = _("trees_ai_body", lang, trees=f"{summary['trees']:,}", rows=summary["rows"],
+             look=f"{summary['needs_a_look']:,}", gaps=f"{summary['gaps']:,}",
+             height=f"{height:.1f}" if height else "?",
+             day=text.day(date.fromisoformat(flown), lang, today) if flown else "?")
+    if summary.get("not_judged"):
+        body += _("trees_ai_edge", lang, n=summary["not_judged"])
+    parts = [f"<h2>{_esc(_('trees_ai', lang))}</h2>", f"<p>{_esc(body)}</p>",
+             f'<figure><img src="{image}" alt=""></figure>',
+             f"<p>{_esc(_('trees_ai_how', lang))}</p>"]
+    scores = (summary.get("model") or {}).get("scores") or {}
+    if scores:
+        def span(key, scale=100, unit="%"):
+            values = [s[key] * scale for s in scores.values() if s.get(key) is not None]
+            low, high = min(values), max(values)
+            return (f"{low:.0f}{unit}" if round(low) == round(high)
+                    else f"{low:.0f}-{high:.0f}{unit}")
+
+        def fraction(key):
+            return " / ".join(dict.fromkeys(s[key].replace(" of ", "/") for s in scores.values()
+                                            if s.get(key)))
+
+        parts.append(f'<p class="note">{_esc(_("trees_ai_score", lang, found=span("trees_found"), old=span("watershed_found"), miss=span("height_typical_miss_m", 100, ""), old_miss=span("canopy_model_typical_miss_m", 100, ""), dead=fraction("empty_spots_found_as_gaps"), poor=fraction("poor_living_trees_caught")))}</p>')
+    parts.append(f'<p class="note">{_esc(_("trees_ai_caution", lang))}</p>')
     return parts
 
 
