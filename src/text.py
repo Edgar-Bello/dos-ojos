@@ -441,6 +441,18 @@ T: dict[str, tuple[str, str]] = {
                            "a look ({stressed} stressed or dead, {missing} missing). In the "
                            "picture: yellow = stressed, hatched = missing. The whole story: "
                            "WHY."),
+    "ai_thinking": ("Déjeme leer eso con la IA; le contesto en un momento.",
+                    "Let me read that with the AI; I'll answer in a moment."),
+    "ai_understood": ("La IA entendió: {what}", "The AI understood: {what}"),
+    "ai_advice": ("{field}: {message}{check} (IA local, revisada con las cuentas del agua. "
+                  "Detalle: PORQUE)",
+                  "{field}: {message}{check} (local AI, checked against the water numbers. "
+                  "Details: WHY)"),
+    "ai_check": (" Revise primero: {what}.", " Check first: {what}."),
+    "ai_reviewing": ("La IA está revisando todas las lecturas de {field}; le mando su "
+                     "recomendación en un momento.",
+                     "The AI is going over every reading of {field}; I'll send its "
+                     "recommendation in a moment."),
     "flight_ready_trees_ai": (
         "El vuelo de {field} está listo. Nuestro modelo de inteligencia artificial encontró "
         "{trees} árboles: {look} necesitan una revisada (naranja) y hay {gaps} huecos donde "

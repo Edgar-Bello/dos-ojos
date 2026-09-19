@@ -34,8 +34,8 @@ from shapely.validation import make_valid
 
 from dosojos_sat.fields import compute_acres, utm_epsg_for
 
-from . import explain, export, outbox, parse, store, text, twilio
-from .bot import Bot, Inbound, Media, link_token, map_token
+from . import ai, explain, export, outbox, parse, store, text, twilio
+from .bot import Bot, Inbound, Media, ai_text, link_token, map_token
 from .config import LINK_DAYS, Settings
 from .jobs import Jobs
 from .status import (Water, drone_wait, latest_flags, latest_terrain, latest_thermal,
@@ -168,6 +168,8 @@ class App:
         #: A pinned "now" for demos (``--as-of``); None means the real time.
         self.now: datetime | None = None
         self.jobs = Jobs()
+        #: The local AI's own thread: a farmer's question never waits behind a flight.
+        self.thinker = ai.Thinker()
         #: What each field looked like when it was last sent to be read, so a
         #: corrected map or planting date reads it again and nothing else does.
         self._read_as: dict[str, str] = {}
@@ -180,7 +182,108 @@ class App:
         return store.session(self.settings.db_path)
 
     def _bot(self, conn) -> Bot:
-        return Bot(conn, self.settings, now=self.now, resolve=self.resolve, water=self.water)
+        return Bot(conn, self.settings, now=self.now, resolve=self.resolve, water=self.water,
+                   think=self._think, advise=self._advise_later)
+
+    # ---- the local AI ----------------------------------------------------------------
+
+    def _think(self, farmer, message: Inbound) -> bool:
+        """Hand a text the rules could not place to the AI; answered when it has read it."""
+        if ai.ready(self.settings) is None:
+            return False
+        phone, body, lang = farmer.phone, message.body, farmer.language
+        return self.thinker.add(f"read:{phone}:{message.message_id}",
+                                lambda: self._read_words(phone, body, lang, message.channel))
+
+    def _read_words(self, phone: str, body: str, lang: str, channel: str) -> None:
+        model = ai.ready(self.settings)
+        today = self._today()
+        with self.db() as conn:
+            fields = [{"name": r.name, "summary": self._summary_for_ai(conn, r, today)}
+                      for r in store.fields_of(conn, phone)]
+        heard = None
+        if model is not None:
+            try:
+                heard = ai.understand(model, body, lang=lang, today=today, fields=fields)
+            except ai.AIError as exc:
+                log.warning("AI could not read a text: %s", exc)
+        with self.lock, self.db() as conn:
+            farmer = store.get_farmer(conn, phone)
+
+            def send(reply: str) -> None:
+                outbox.deliver(conn, self.settings, farmer, reply, now=self.now, urgent=True)
+
+            command = heard.command_text(body) if heard else None
+            if heard and heard.intent == "question" and heard.answer:
+                send(text.gsm_safe(heard.answer))
+                return
+            if not command:
+                send(text.say("not_understood", lang))
+                return
+            log.info("AI read %r as %r", body, command)
+            send(text.say("ai_understood", lang, what=command))
+            bot = self._bot(conn)
+            for reply in bot.handle(Inbound(phone, command, channel=channel, from_ai=True)):
+                send(reply)
+
+    def _summary_for_ai(self, conn, record, today) -> str:
+        """A line per field for the AI reading a text: crop, and days until water."""
+        crop = text.crop_name(record.crop, "en", record.crop_name) if record.crop else "?"
+        item = self.water.field(record, store.events_for(conn, record.id), today)
+        s = item.status
+        if s is None or s.days_left is None:
+            return crop
+        return f"{crop}, water in {s.days_left} days (by {s.water_by})"
+
+    def _advise_later(self, farmer, field_id: str) -> bool:
+        """Ask the AI for a field's recommendation and text it when it is written."""
+        if ai.ready(self.settings) is None:
+            return False
+        return self.thinker.add(f"advise:{field_id}",
+                                lambda: self._prepare_advice(field_id, send=True))
+
+    def _prepare_advice(self, field_id: str, *, send: bool = False) -> "ai.Advice | None":
+        """Write (or find) the AI's recommendation for a field's readings as they are now.
+
+        Runs without the app's lock: the model can take a minute on a laptop.
+        """
+        model = ai.ready(self.settings)
+        if model is None:
+            return None
+        today = self._today()
+        with self.db() as conn:
+            record = store.get_field(conn, field_id)
+            farmer = store.get_farmer(conn, record.phone)
+            events = store.events_for(conn, field_id)
+        item = self.water.field(record, events, today, full=True)
+        brief = ai.field_brief(self.settings, farmer, item, events, today)
+        if brief is None:
+            return None
+        key = ai.brief_key(brief, self.settings.ai_model)
+        advice = ai.kept(self.settings, field_id, key)
+        if advice is None:
+            advice = ai.recommend(model, brief, lang=farmer.language,
+                                  now=(self.now or self.settings.now()).isoformat(
+                                      timespec="minutes"))
+            if advice is None:
+                return None
+            ai.keep(self.settings, field_id, key, advice, brief)
+        if send:
+            with self.lock, self.db() as conn:
+                farmer = store.get_farmer(conn, record.phone)
+                outbox.deliver(conn, self.settings, farmer,
+                               ai_text(record.name, advice, farmer.language),
+                               now=self.now, urgent=True)
+        return advice
+
+    def _advice_now(self, record, farmer, item, events) -> "ai.Advice | None":
+        """The kept recommendation for these exact readings, without asking the model."""
+        if ai.for_settings(self.settings) is None:
+            return None
+        brief = ai.field_brief(self.settings, farmer, item, events, self._today())
+        if brief is None:
+            return None
+        return ai.kept(self.settings, record.id, ai.brief_key(brief, self.settings.ai_model))
 
     # ---- texts in ------------------------------------------------------------------
 
@@ -469,8 +572,9 @@ class App:
         settings = self.settings
         today = (self.now or settings.now()).date()
         item = self.water.field(record, events, today, full=True)
+        advice = self._advice_now(record, farmer, item, events)
         page = explain.build(
-            settings, farmer, item, events, today=today,
+            settings, farmer, item, events, today=today, advice=advice,
             terrain=latest_terrain(settings, record.id),
             thermal=(latest_thermal(settings, record.id)
                      if store.plan_of(farmer, record) == "thermal" else None),
@@ -559,6 +663,8 @@ class App:
     def _read_done(self, field_id: str, ok: bool, attempt: int) -> float | None:
         """Text the answer a reading came to, or say it will be tried again."""
         today = self._today()
+        if ok:
+            self._prepare_advice(field_id)
         with self.lock, self.db() as conn:
             record = store.get_field(conn, field_id)
             farmer = store.get_farmer(conn, record.phone)
@@ -607,15 +713,21 @@ class App:
         False when the satellite reading is not in yet.
         """
         today, lang = self._today(), farmer.language
-        item = self.water.field(record, store.events_for(conn, record.id), today)
+        events = store.events_for(conn, record.id)
+        with_ai = ai.for_settings(self.settings) is not None
+        item = self.water.field(record, events, today, full=with_ai)
         if item.status is None:
             return False
 
         def send(body: str) -> None:
             outbox.deliver(conn, self.settings, farmer, body, now=self.now, urgent=True)
 
-        send(status_message(item, lang, today, map_link=lambda r: self.settings.link(
-            f"f/{map_token(conn, r.id, self.now)}")))
+        advice = self._advice_now(record, farmer, item, events) if with_ai else None
+        if advice is not None:
+            send(ai_text(record.name, advice, lang))
+        else:
+            send(status_message(item, lang, today, map_link=lambda r: self.settings.link(
+                f"f/{map_token(conn, r.id, self.now)}")))
         if store.plan_of(farmer, record) in text.FLYING_PLANS:
             out = self.settings.drone_workspace / "out"
             found = latest_thermal(self.settings, record.id) or latest_flags(
@@ -656,6 +768,8 @@ class App:
     def _flight_done(self, field_id: str, flight_id: str, ok: bool) -> None:
         """Text what the flight found, with its picture."""
         out = self.settings.drone_workspace / "out" / flight_id
+        if ok:
+            self._prepare_advice(field_id)      # it reads the flight too
         with self.lock, self.db() as conn:
             record = store.get_field(conn, field_id)
             farmer = store.get_farmer(conn, record.phone)

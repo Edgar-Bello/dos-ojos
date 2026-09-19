@@ -25,10 +25,11 @@ import re
 import sqlite3
 from dataclasses import dataclass, field as dc_field
 from datetime import date, datetime, timedelta
+from typing import Callable
 
 from dosojos_sat import stages as sat_stages
 
-from . import parse, store, text
+from . import ai, parse, store, text
 from . import status as status_mod
 from .config import LINK_DAYS, Settings
 from .store import Farmer, FieldRow
@@ -83,6 +84,8 @@ class Inbound:
     lon: float | None = None
     channel: str = "sms"
     message_id: int | None = None
+    #: The AI's reading of an earlier text, run through the rules: never sent back to it.
+    from_ai: bool = False
 
 
 #: Forget everything about the sender, to test a conversation from the start. Only
@@ -96,13 +99,19 @@ class Bot:
 
     def __init__(self, conn: sqlite3.Connection, settings: Settings, *,
                  now: datetime | None = None, resolve: parse.Resolver | None = None,
-                 water: status_mod.Water | None = None):
+                 water: status_mod.Water | None = None,
+                 think: Callable[[Farmer, Inbound], bool] | None = None,
+                 advise: Callable[[Farmer, str], bool] | None = None):
         self.conn = conn
         self.settings = settings
         self.now = now or settings.now()
         self.today = self.now.date()
         self.resolve = resolve if resolve is not None else parse.resolve_link
         self.water = water or status_mod.Water(settings)
+        #: Hand a text the rules could not place to the AI; True when it took it.
+        self.think = think
+        #: Ask the AI for a field's recommendation, texted when ready; True when asked.
+        self.advise = advise
 
     def handle(self, message: Inbound) -> list[str]:
         """The replies to one text, in the farmer's language, ready for GSM."""
@@ -1013,6 +1022,10 @@ class Turn:
             return
         if self.norm.strip(" .,") in _THANKS or not self.body:
             return
+        if (not self.msg.from_ai and self.bot.think is not None
+                and self.bot.think(self.f, self.msg)):
+            self.say("ai_thinking")
+            return
         self._flag_for_team()
         self.say("not_understood")
 
@@ -1107,11 +1120,20 @@ class Turn:
             if waiting[record.id]:
                 self.say("water_wait_" + waiting[record.id], field=record.name)
         records = [r for r in records if not waiting[r.id]]
-        results = [self.bot.water.field(r, store.events_for(self.conn, r.id), self.today)
+        with_ai = ai.for_settings(self.bot.settings) is not None
+        results = [self.bot.water.field(r, store.events_for(self.conn, r.id), self.today,
+                                        full=with_ai)
                    for r in records]
         for item in sorted(results, key=status_mod.urgency):
-            self.out.append(status_mod.message(item, self.lang, self.today,
-                                               map_link=self._map_link))
+            advice = self._advice(item) if with_ai else None
+            if advice is not None:
+                self.out.append(ai_text(item.field.name, advice, self.lang))
+            else:
+                self.out.append(status_mod.message(item, self.lang, self.today,
+                                                   map_link=self._map_link))
+                if (with_ai and item.status is not None and self.bot.advise is not None
+                        and self.bot.advise(self.f, item.field.id)):
+                    self.say("ai_reviewing", field=item.field.name)
             s = item.status
             # How to water it matters when a watering is coming: then, and only then,
             # the drone's ground report follows in a text of its own. Not for rainfed.
@@ -1132,6 +1154,15 @@ class Turn:
         # only asked whether to water. They ask for it by replying PORQUE.
         if any(item.status is not None for item in results):
             self.say("explain_offer")
+
+    def _advice(self, item) -> "ai.Advice | None":
+        """The AI's checked recommendation for exactly today's readings, if written."""
+        events = store.events_for(self.conn, item.field.id)
+        brief = ai.field_brief(self.bot.settings, self.f, item, events, self.today)
+        if brief is None:
+            return None
+        return ai.kept(self.bot.settings, item.field.id,
+                       ai.brief_key(brief, self.bot.settings.ai_model))
 
     def _explain(self) -> None:
         """A link to the page showing how each field's answer was worked out.
@@ -1483,6 +1514,14 @@ class Turn:
             checked = self._field(self.ctx.get("checkin"))
             return say("checkin", lang, field=checked.name) if checked else None
         return None
+
+
+def ai_text(field_name: str, advice: "ai.Advice", lang: str) -> str:
+    """The AI's recommendation as the farmer gets it."""
+    check = say("ai_check", lang, what=advice.check_first.rstrip(".")) \
+        if advice.check_first else ""
+    return say("ai_advice", lang, field=field_name, message=advice.message.rstrip(),
+               check=check)
 
 
 def link_token(conn: sqlite3.Connection, kind: str, field_id: str,

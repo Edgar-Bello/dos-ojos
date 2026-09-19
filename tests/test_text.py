@@ -48,6 +48,11 @@ SAMPLE = {"link": "https://dosojos.example.com/f/AbCdEfGhIjKlMnOp", "field": "Ca
           "weather": "vie 11 sep", "x": "91", "y": "200", "top": "2.7",
           "extra": ", el campo en 3D (girelo con el dedo) y el mapa del dron",
           "trees": "424", "look": "32", "gaps": "44", "height": "1.8",
+          "message": ("Riegue en unos 4 dias, antes del jue 24 sep, con 2.1 pulgadas. El "
+                      "satelite ve el campo mas verde que lo normal y el dron no encontro "
+                      "problemas; no hay prisa, pero no lo deje pasar de esa fecha si no llueve. "
+                      "Los arboles marcados en naranja merecen una vuelta esta semana."),
+          "check": " Revise primero: los 32 arboles en naranja.",
           "more": (", ETAPA (como va el sorgo), PULGON (contar pulgon amarillo), DRON (mandar "
                    "las fotos de su vuelo)"), "midge": " y mosquita (el umbral es 1 por panoja)",
           "rest": (" Sigue grano masoso hacia el mar 3 jun. Revise mosquita cada 3 dias, de 10 "

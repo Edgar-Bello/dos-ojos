@@ -38,12 +38,30 @@ log = logging.getLogger(__name__)
 
 #: Events worth listing: what the farmer told us, which is what went into the sums.
 SHOWN_KINDS = ("planted", "irrigated", "rain", "harvested")
+#: How sure the AI said it was.
+AI_CONFIDENCE = {"high": ("alta", "high"), "medium": ("media", "medium"), "low": ("baja", "low")}
 
 S = {
     "title": ("Por qué: {field}", "Why: {field}"),
     "made": ("Hecho el {day} para {name}", "Made on {day} for {name}"),
     "save": ("Guardar este archivo", "Save this file"),
     "answer": ("La respuesta", "The answer"),
+    "ai_title": ("Lo que recomienda la IA", "What the AI recommends"),
+    "ai_first": ("Revise primero: {what}", "Check first: {what}"),
+    "ai_why": ("Por qué lo dice:", "Why it says so:"),
+    "ai_how": (
+        "Esta recomendación la escribió un modelo de lenguaje abierto ({model}) que corre en "
+        "la computadora de Dos Ojos, no en internet, después de leer todas las lecturas de este "
+        "campo: el balance de agua, el satélite, la etapa, el dron y lo que usted anotó. Antes "
+        "de mandarla se revisó que: {checks}. Si no pasa, le mandamos la respuesta de las "
+        "cuentas del agua en su lugar. Seguridad de la IA: {confidence}.",
+        "This recommendation was written by an open language model ({model}) running on the "
+        "Dos Ojos computer, not on the internet, after reading every reading of this field: the "
+        "water balance, the satellite, the stage, the drone and what you logged. Before it went "
+        "out it was checked that: {checks}. If it fails, you get the water numbers' answer "
+        "instead. The AI's confidence: {confidence}."),
+    "ai_book": ("Lo que dicen las cuentas del agua solas:", "What the water numbers alone say:"),
+
     "found": ("Lo que encontró su vuelo", "What your flight found"),
     "model3d": ("Su campo en 3D", "Your field in 3D"),
     "trees_ai": ("Sus árboles, contados por inteligencia artificial",
@@ -885,7 +903,8 @@ def _drone_image(settings: Settings, report: dict | None, name: str) -> str | No
 
 def build(settings: Settings, farmer: Farmer, item: FieldWater, events: list[Event], *,
           today: date, terrain: dict | None = None, thermal: dict | None = None,
-          flags: dict | None = None, download: str | None = None) -> str:
+          flags: dict | None = None, download: str | None = None,
+          advice=None) -> str:
     """One field's explanation as a single HTML page."""
     lang = farmer.language
     record, status = item.field, item.status
@@ -903,7 +922,8 @@ def build(settings: Settings, farmer: Farmer, item: FieldWater, events: list[Eve
         parts.append(f'<a class="save" href="{_esc(download)}" download>'
                      f"{_esc(_('save', lang))}</a>")
 
-    parts += _answer(item, lang, today)
+    parts += _ai_advice(item, advice, lang, today) if advice is not None else \
+        _answer(item, lang, today)
     # A flight's picture of where to walk sits right under the answer: of
     # everything on this page it is the one a farmer acts on first.
     ai = _trees_ai(settings, flags, lang, today)
@@ -938,6 +958,25 @@ def _answer(item: FieldWater, lang: str, today: date) -> list[str]:
     return [f"<h2>{_esc(_('answer', lang))}</h2>",
             f'<div class="answer{" now" if urgent else ""}">'
             f"{_esc(status_message(item, lang, today))}</div>"]
+
+
+def _ai_advice(item: FieldWater, advice, lang: str, today: date) -> list[str]:
+    """The AI's recommendation, why, how it was checked, then the checkbook's own answer."""
+    from .bot import ai_text
+    from .status import message as status_message
+
+    urgent = advice.action == "water_now"
+    parts = [f"<h2>{_esc(_('ai_title', lang))}</h2>",
+             f'<div class="answer{" now" if urgent else ""}">'
+             f"{_esc(ai_text(item.field.name, advice, lang).split(' (')[0])}</div>"]
+    if advice.reasons:
+        parts.append(f"<p>{_esc(_('ai_why', lang))}</p><ul>"
+                     + "".join(f"<li>{_esc(r)}</li>" for r in advice.reasons) + "</ul>")
+    confidence = text.pick(AI_CONFIDENCE.get(advice.confidence, AI_CONFIDENCE["medium"]), lang)
+    parts.append(f'<p class="note">{_esc(_("ai_how", lang, model=advice.model, checks="; ".join(advice.checked), confidence=confidence))}</p>')
+    parts.append(f"<p>{_esc(_('ai_book', lang))}</p>")
+    parts.append(f'<div class="answer">{_esc(status_message(item, lang, today))}</div>')
+    return parts
 
 
 def _arithmetic(item: FieldWater, events: list[Event], lang: str) -> list[str]:

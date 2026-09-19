@@ -24,6 +24,13 @@ PHONE = "+19565550123"
 SQUARE = [[-97.9990, 26.1470], [-97.9990, 26.1507], [-97.9949, 26.1507], [-97.9949, 26.1470]]
 
 
+@pytest.fixture(autouse=True)
+def no_real_ai(monkeypatch):
+    """No test talks to a model on this computer; the ones about the AI bring a fake."""
+    from dosojos_sms import ai
+    monkeypatch.setattr(ai, "for_settings", lambda settings: None)
+
+
 @pytest.fixture
 def settings(tmp_path: Path) -> Settings:
     loaded = Settings.load(tmp_path / "farm_data", env={})

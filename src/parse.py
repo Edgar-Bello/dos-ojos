@@ -582,10 +582,15 @@ def find_date(text: str | None, today: date, *, window: int | str = 400) -> Date
 
 
 def without(norm: str, span: tuple[int, int] | None) -> str:
-    """The normalized text with one stretch blanked out."""
+    """The normalized text with one stretch taken out, still normalized.
+
+    Spaces are collapsed again: the finders normalize what they are given, so a
+    double space left behind would shift every position after it, and a date's
+    span would then cut the wrong characters ("9/11 3" read as 11 inches).
+    """
     if not span:
         return norm
-    return norm[:span[0]] + " " + norm[span[1]:]
+    return re.sub(r"\s+", " ", norm[:span[0]] + " " + norm[span[1]:]).strip()
 
 
 # --------------------------------------------------------------------------- #

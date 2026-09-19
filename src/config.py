@@ -74,6 +74,10 @@ class Settings:
     reply_by_api: bool = False
     #: Phones (or Telegram chats, +0...) allowed the unlisted reset; see bot.RESET.
     testers: frozenset = frozenset()
+    #: The language model on this computer (Ollama): it reads farmers' own words
+    #: and writes the recommendation from every reading. See ai.py. Empty: off.
+    ai_url: str | None = "http://127.0.0.1:11434"
+    ai_model: str = "llama3.2:3b"
 
     @property
     def sms_dir(self) -> Path:
@@ -163,6 +167,9 @@ class Settings:
             reply_by_api=(get("DOSOJOS_REPLY_BY_API") or "").lower() in ("1", "yes", "true"),
             testers=frozenset(p.strip() for p in (get("DOSOJOS_TESTERS") or "").split(",")
                               if p.strip()),
+            ai_url=None if (get("DOSOJOS_AI") or "").lower() in ("0", "no", "off")
+            else (get("DOSOJOS_AI_URL") or "http://127.0.0.1:11434").rstrip("/"),
+            ai_model=get("DOSOJOS_AI_MODEL") or "llama3.2:3b",
         )
 
 

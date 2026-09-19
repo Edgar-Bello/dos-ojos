@@ -244,3 +244,12 @@ def test_mexico_is_outside_the_weather_grid() -> None:
 
 def test_words_are_not_a_place() -> None:
     assert parse.find_place("por la carretera 107 y milla 10") is None
+
+
+def test_a_field_name_taken_out_before_the_date_leaves_the_amount_alone() -> None:
+    """'watered Campo Norte 9/11 3' was once read as 11 inches: the name's gap
+    shifted the date's position, and the day of the month was left behind."""
+    norm = parse.without(parse.normalize("watered Campo Norte 9/11 3"), (8, 19))
+    found = parse.find_date(norm, date(2026, 9, 12), window="irrigated")
+    assert found.day == date(2026, 9, 11)
+    assert parse.find_amount(parse.without(norm, found.span)).inches == 3.0
