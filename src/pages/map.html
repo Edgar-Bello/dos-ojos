@@ -53,15 +53,20 @@ if (DATA.banner) { $("band").textContent = DATA.banner; $("band").hidden = false
 $("help").textContent = S.help;
 for (const key of ["undo", "clear", "me", "save"]) $(key).textContent = S[key];
 
-// Aerial imagery from the USGS National Map: public domain, no key needed.
-const usgs = name => L.tileLayer(
-  `https://basemap.nationalmap.gov/arcgis/rest/services/${name}/MapServer/tile/{z}/{y}/{x}`,
-  { maxNativeZoom: 16, maxZoom: 19, attribution: "USGS The National Map" });
-const roads = usgs("USGSImageryTopo"), imagery = usgs("USGSImageryOnly");
+// Aerial imagery the world over, no key needed. The USGS National Map is sharper,
+// but it stops at the US border: a farmer in Veracruz was handed a blank white map.
+const imagery = L.tileLayer(
+  "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+  { maxNativeZoom: 18, maxZoom: 19, attribution: "Esri, Maxar, Earthstar Geographics" });
+const roads = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+  { maxNativeZoom: 19, maxZoom: 19, attribution: "&copy; OpenStreetMap" });
 const center = DATA.pin || [26.16, -97.99];          // the pin, else the middle of the Valley
-const map = L.map("map", { layers: [roads], zoomControl: false }).setView(center, DATA.pin ? 16 : 10);
+const map = L.map("map", { layers: [imagery], zoomControl: false }).setView(center, DATA.pin ? 16 : 10);
 L.control.zoom({ position: "topright" }).addTo(map);
-L.control.layers({ [S.roads]: roads, [S.imagery]: imagery }, null, { position: "topright" }).addTo(map);
+L.control.layers({ [S.imagery]: imagery, [S.roads]: roads }, null, { position: "topright" }).addTo(map);
+// A tile that never arrives leaves white squares and no way to tell why.
+let missing = 0;
+imagery.on("tileerror", () => { if (++missing === 6) $("help").textContent = S.no_tiles; });
 if (DATA.pin) L.circleMarker(DATA.pin, { radius: 7, color: "#d7263d", weight: 3 }).addTo(map).bindTooltip(S.pin);
 
 const shape = L.polygon([], { color: "#ffd400", weight: 3, fillOpacity: 0.18 }).addTo(map);

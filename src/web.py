@@ -85,6 +85,10 @@ PAGE_TEXT = {
         "pin": ("Su pin", "Your pin"),
         "no_gps": ("No se pudo leer su ubicación.", "Couldn't read your location."),
         "imagery": ("Foto aérea", "Aerial photo"), "roads": ("Con caminos", "With roads"),
+        "no_tiles": ("No cargan las fotos del mapa. Revise su internet, o toque las esquinas "
+                     "guiándose por el punto rojo y guarde; nosotros lo revisamos.",
+                     "The map pictures aren't loading. Check your internet, or tap the corners "
+                     "using the red dot as a guide and save; we'll check it."),
     },
     "upload": {
         "title": ("Fotos del dron: {field}", "Drone photos: {field}"),

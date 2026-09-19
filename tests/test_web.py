@@ -190,6 +190,18 @@ def test_the_map_page_and_saving_the_corners(base: str, app: App, sent: list) ->
     assert "Usted dijo 40." in sent[0][1]
 
 
+def test_the_map_uses_imagery_that_covers_the_whole_world(base: str, app: App) -> None:
+    """The USGS National Map stops at the border: a farmer in Veracruz was shown a
+    blank white map and could not place a single corner."""
+    token = farmer_with_a_pin(app)
+    _, page = call(f"{base}/f/{token}")
+    page = page.decode("utf-8")
+    assert "nationalmap.gov" not in page
+    assert "World_Imagery/MapServer" in page and "tile.openstreetmap.org" in page
+    assert "Esri, Maxar, Earthstar Geographics" in page
+    assert "No cargan las fotos del mapa" in page          # when the tiles fail anyway
+
+
 def test_the_why_page_and_its_download(base: str, app: App) -> None:
     with app.db() as conn:
         farmer = store.add_farmer(conn, "+19565550123")
