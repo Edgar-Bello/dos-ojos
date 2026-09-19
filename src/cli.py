@@ -776,29 +776,33 @@ def weather_cmd(
             except stac.OfflineViolation as exc:
                 raise click.ClickException(str(exc)) from exc
             for field in fields:
-                cached = cache.weather_dates(conn, field.field_id, weather_mod.GRIDMET_SOURCE)
+                lon, lat = field.centroid_lonlat
+                source = weather_mod.source_for(lat, lon)
+                cached = cache.weather_dates(conn, field.field_id, source)
                 wanted = [window_start + timedelta(days=i)
                           for i in range((window_end - window_start).days + 1)]
                 stale = today - timedelta(days=WEATHER_REFRESH_DAYS)
                 needed = [d for d in wanted if force or d not in cached or d >= stale]
                 if not needed:
-                    rows.append((field.field_id, "gridmet", str(window_start), str(window_end),
+                    rows.append((field.field_id, source, str(window_start), str(window_end),
                                  "-", "-", "-", "cached"))
                     continue
-                lon, lat = field.centroid_lonlat
                 try:
-                    frame = weather_mod.fetch_gridmet(lat, lon, min(needed), window_end)
+                    frame, source = weather_mod.fetch(lat, lon, min(needed), window_end)
                 except weather_mod.WeatherError as exc:
                     raise click.ClickException(f"{field.field_id}: {exc}") from exc
-                written = cache.upsert_weather(conn, field.field_id, frame,
-                                               weather_mod.GRIDMET_SOURCE)
-                rows.append(_weather_row(field.field_id, "gridmet", frame, written))
+                written = cache.upsert_weather(conn, field.field_id, frame, source)
+                rows.append(_weather_row(field.field_id, source, frame, written))
 
     click.echo(_table(("FIELD", "SOURCE", "FROM", "TO", "DAYS", "ETO IN", "RAIN IN", "STORED"),
                       rows, "<<<<>>>>"))
     if station is None and rows:
-        click.echo("\ngridMET runs a day or two behind; the checkbook fills the gap with "
-                   "the week before it.")
+        click.echo("\nThe daily grids run a day or two behind; the checkbook fills the gap "
+                   "with the week before it.")
+        if any(row[1] == weather_mod.POWER_SOURCE for row in rows):
+            click.echo("NASA POWER (outside the contiguous US) is a 50 km grid and its ETo is "
+                       "worked out here with FAO-56; on US fields it comes within about 5% of "
+                       "gridMET's own.")
 
 
 def _weather_row(field_id: str, source: str, frame, written: int) -> tuple[str, ...]:
@@ -820,7 +824,7 @@ def _weather_row(field_id: str, source: str, frame, written: int) -> tuple[str, 
 @click.option("--force", is_flag=True, help="Re-read soils already cached.")
 @click.pass_obj
 def soil_cmd(settings: Settings, field_csv: str | None, force: bool) -> None:
-    """Read how much water each field's soil holds, from the USDA soil survey."""
+    """Read how much water each field's soil holds: USDA SSURGO, or SoilGrids abroad."""
     rows = []
     with cache.session(settings.db_path) as conn:
         try:
@@ -834,21 +838,24 @@ def soil_cmd(settings: Settings, field_csv: str | None, force: bool) -> None:
                 cache.upsert_soil(conn, field.field_id, field.geom_hash, "manual",
                                   profile.to_dict())
                 note = "from fields.geojson"
-            elif (cached and not force and cached["source"] == "ssurgo"
+            elif (cached and not force and cached["source"] in ("ssurgo", soils.SOILGRIDS_SOURCE)
                   and cached["geom_hash"] == field.geom_hash):
                 profile = soils.SoilProfile.from_dict(cached["profile"])
                 note = "cached"
             else:
+                lon, lat = field.centroid_lonlat
+                inside = weather_mod.source_for(lat, lon) == weather_mod.GRIDMET_SOURCE
                 try:
-                    stac.assert_online(settings, "read the soil survey")
-                    profile = soils.fetch_ssurgo(field.geometry)
+                    stac.assert_online(settings, "read the soil map")
+                    profile = (soils.fetch_ssurgo(field.geometry) if inside
+                               else soils.fetch_soilgrids(field.geometry))
                 except stac.OfflineViolation as exc:
                     raise click.ClickException(str(exc)) from exc
                 except soils.SoilError as exc:
                     raise click.ClickException(f"{field.field_id}: {exc}") from exc
-                cache.upsert_soil(conn, field.field_id, field.geom_hash, "ssurgo",
+                cache.upsert_soil(conn, field.field_id, field.geom_hash, profile.source,
                                   profile.to_dict())
-                note = "USDA SSURGO"
+                note = "USDA SSURGO" if inside else "ISRIC SoilGrids"
             rows.append((
                 field.field_id, profile.name[:40], f"{profile.awc_in_per_ft:.2f}",
                 f"{profile.taw_mm(1.2) / weather_mod.MM_PER_INCH:.1f}",

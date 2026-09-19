@@ -264,6 +264,23 @@ and was never flagged by the p10 rule alone.
 NDMI is a secondary signal. NDVI down *with* NDMI down reads as water stress;
 NDVI down alone points at disease, nutrient deficiency, or a harvest.
 
+## Fields outside the US
+
+gridMET and the USDA soil survey stop at the border, so a field in Mexico is read
+from world sources instead, picked per field by where it is (the border line, not a
+box: Reynosa and McAllen get different grids):
+
+| | Contiguous US | Anywhere else |
+| --- | --- | --- |
+| Satellite | Sentinel-2 | Sentinel-2 (already worldwide) |
+| Weather | gridMET, 4 km, ETo published | NASA POWER, 50 km; ETo worked out here with FAO-56 |
+| Soil | USDA SSURGO, per map unit | SoilGrids 250 m; water held worked out with Saxton & Rawls (2006) |
+
+Checked against the US sources where both exist: POWER's ETo came within 5% of
+gridMET's over 101 days in the Valley (correlation 0.93), and SoilGrids' available
+water within 0.1 to 0.3 in/ft of SSURGO's on three fields. A field on the world
+sources never reports high confidence, and its "why" page names them.
+
 ## Gotchas worth knowing
 
 **The BOA reflectance offset is already applied.** Every item declares

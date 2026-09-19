@@ -890,7 +890,7 @@ def get_weather(
         """
         SELECT date, source, eto_mm, rain_mm, tmax_c, tmin_c FROM weather
         WHERE field_id = ? AND date BETWEEN ? AND ?
-        ORDER BY date, CASE WHEN source = 'gridmet' THEN 1 ELSE 0 END
+        ORDER BY date, CASE source WHEN 'power' THEN 2 WHEN 'gridmet' THEN 1 ELSE 0 END
         """,
         conn, params=[field_id, start.isoformat(), end.isoformat()],
     )

@@ -525,6 +525,14 @@ def checkbook(
 
     days = [start + timedelta(days=i) for i in range((end - start).days + 1)]
     daily_weather, filled, through = _weather_for(weather, days, field_id, start)
+    world_grid = str(soil_note.get("source") or "") == "soilgrids" or (
+        "source" in weather.columns and (weather["source"] == "power").any())
+    if world_grid:
+        # A 50 km weather grid and a soil worked out from what the map says the soil
+        # is made of: a real answer, a step further from measurement than the US one.
+        medium_confidence.append("world grids")
+        notes.append("outside the US grids: weather from NASA POWER (50 km) and soil from "
+                     "SoilGrids, so treat the day count as a guide rather than a measurement")
     if filled:
         medium_confidence.append("weather filled")
         notes.append(f"weather published through {through.isoformat()}; the {filled} "

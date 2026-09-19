@@ -1,4 +1,4 @@
-"""How much water each field's soil can hold, from the USDA soil survey (SSURGO).
+"""How much water each field's soil can hold: the USDA survey, or SoilGrids abroad.
 
 The checkbook needs one number above all: available water, the water a soil
 holds between full (field capacity) and dry enough to wilt a plant. SSURGO
@@ -10,6 +10,13 @@ Queried through Soil Data Access with the field outline itself; where several
 soils share a field, each counts by the share of the field it covers. The
 surface texture and hydrologic group come along too, because how fast water
 soaks in decides how a field should be watered.
+
+SSURGO stops at the US border. A field in Mexico is read from **SoilGrids**
+instead (ISRIC, CC-BY 4.0): a 250 m global map of what the soil is made of, layer
+by layer. It does not publish available water, so the water each layer holds is
+worked out here from its sand, clay and organic matter with the Saxton & Rawls
+(2006) equations, the standard way to get it from a soil's make-up. That is a
+step further from measurement than SSURGO's own figure, and every page says so.
 """
 
 from __future__ import annotations
@@ -25,6 +32,21 @@ from shapely.geometry.base import BaseGeometry
 log = logging.getLogger(__name__)
 
 SDA_URL = "https://sdmdataaccess.sc.egov.usda.gov/Tabular/post.rest"
+SOILGRIDS_URL = "https://rest.isric.org/soilgrids/v2.0/properties/query"
+SOILGRIDS_SOURCE = "soilgrids"
+#: SoilGrids layers, top down, with the depth each one ends at, in metres.
+SOILGRIDS_DEPTHS: tuple[tuple[str, float], ...] = (
+    ("0-5cm", 0.05), ("5-15cm", 0.15), ("15-30cm", 0.30),
+    ("30-60cm", 0.60), ("60-100cm", 1.00), ("100-200cm", 2.00),
+)
+#: What each layer is made of: SoilGrids name -> what to divide its value by.
+SOILGRIDS_PROPERTIES: dict[str, float] = {
+    "sand": 10.0,      # g/kg -> %
+    "clay": 10.0,      # g/kg -> %
+    "soc": 10.0,       # dg/kg -> g/kg
+    "bdod": 100.0,     # cg/cm3 -> kg/dm3
+    "cfvo": 10.0,      # cm3/dm3 -> % of the volume that is stones
+}
 #: SSURGO's pre-summed available water storage, cm of water to each depth.
 STORAGE_DEPTHS_M: tuple[float, ...] = (0.25, 0.5, 1.0, 1.5)
 STORAGE_COLUMNS: tuple[str, ...] = ("aws025wta", "aws050wta", "aws0100wta", "aws0150wta")
@@ -310,3 +332,122 @@ def combine_map_units(
             for u in units
         ),
     )
+
+
+# --------------------------------------------------------------------------- #
+# SoilGrids, for fields outside the USDA survey
+# --------------------------------------------------------------------------- #
+
+
+def available_water_fraction(sand_pct: float, clay_pct: float, organic_pct: float) -> float:
+    """Water a soil holds between field capacity and wilting, as a fraction of its volume.
+
+    Saxton, K. E., and Rawls, W. J. (2006), *Soil water characteristic estimates by
+    texture and organic matter for hydrologic solutions*, Soil Science Society of
+    America Journal 70(5):1569-1578. Their equations 1 and 2, with the corrections
+    that follow them; organic matter is held to the 8% their fit covers.
+    """
+    sand, clay = sand_pct / 100.0, clay_pct / 100.0
+    organic = min(max(organic_pct, 0.0), 8.0)
+    wilt_t = (-0.024 * sand + 0.487 * clay + 0.006 * organic + 0.005 * sand * organic
+              - 0.013 * clay * organic + 0.068 * sand * clay + 0.031)
+    wilt = wilt_t + (0.14 * wilt_t - 0.02)
+    capacity_t = (-0.251 * sand + 0.195 * clay + 0.011 * organic + 0.006 * sand * organic
+                  - 0.027 * clay * organic + 0.452 * sand * clay + 0.299)
+    capacity = capacity_t + (1.283 * capacity_t ** 2 - 0.374 * capacity_t - 0.015)
+    return float(max(capacity - wilt, 0.0))
+
+
+def _soilgrids_layers(payload: dict) -> dict[str, dict[str, float]]:
+    """``{"0-5cm": {"sand": 46.2, "clay": 27.6, ...}, ...}`` from SoilGrids' JSON."""
+    layers: dict[str, dict[str, float]] = {}
+    for layer in (payload.get("properties") or {}).get("layers") or []:
+        name = layer.get("name")
+        divide = SOILGRIDS_PROPERTIES.get(name)
+        if divide is None:
+            continue
+        for depth in layer.get("depths") or []:
+            value = (depth.get("values") or {}).get("mean")
+            if value is not None:
+                layers.setdefault(depth.get("label"), {})[name] = float(value) / divide
+    return layers
+
+
+def profile_from_soilgrids(payload: dict, *, place: str = "") -> SoilProfile:
+    """A soil profile from one SoilGrids point answer."""
+    layers = _soilgrids_layers(payload)
+    usable = [(label, ends) for label, ends in SOILGRIDS_DEPTHS
+              if len(layers.get(label, {})) >= 4]
+    if not usable:
+        raise SoilError(
+            "SoilGrids has no soil at that point (it may be water, rock or city). Check the "
+            "field's map, or give the soil by hand: dosojos-sat soil --awc <inches per foot>")
+    storage, top = [], 0.0
+    running, edges = 0.0, []
+    for label, ends in usable:
+        made_of = layers[label]
+        awc = available_water_fraction(made_of.get("sand", 45.0), made_of.get("clay", 20.0),
+                                       made_of.get("soc", 10.0) / 10.0 * 1.724)
+        stones = min(max(made_of.get("cfvo", 0.0), 0.0), 90.0) / 100.0
+        running += awc * (1 - stones) * (ends - top) * 100.0      # cm of water
+        edges.append((ends, running))
+        top = ends
+    for depth in STORAGE_DEPTHS_M:
+        if depth <= edges[-1][0]:
+            storage.append(float(np.interp(depth, [0.0] + [e for e, _ in edges],
+                                           [0.0] + [c for _, c in edges])))
+        else:                                   # deeper than SoilGrids goes: keep the rate
+            last_depth, last_cm = edges[-1]
+            rate = last_cm / last_depth
+            storage.append(last_cm + rate * (depth - last_depth))
+    surface = layers[usable[0][0]]
+    clay, sand = surface.get("clay"), surface.get("sand")
+    profile = SoilProfile(
+        storage_cm=tuple(round(value, 2) for value in storage),
+        name="", source=SOILGRIDS_SOURCE, clay_pct=clay, sand_pct=sand,
+        map_units=({"label": label, **{k: round(v, 2) for k, v in layers[label].items()}}
+                   for label, _ in usable) and tuple(
+            {"layer": label, **{k: round(v, 2) for k, v in layers[label].items()}}
+            for label, _ in usable),
+    )
+    named = f"{profile.texture} soil" + (f" near {place}" if place else "")
+    return SoilProfile(**{**profile.to_dict(), "storage_cm": profile.storage_cm,
+                          "map_units": profile.map_units, "name": named})
+
+
+def fetch_soilgrids(geometry: BaseGeometry, *, get: Callable | None = None,
+                    attempts: int = QUERY_ATTEMPTS) -> SoilProfile:
+    """The soil under a field anywhere on Earth, from SoilGrids' 250 m maps.
+
+    Read at the field's middle: a 250 m cell is wider than most fields here, so
+    reading every corner would return the same numbers.
+
+    Raises:
+        SoilError: when SoilGrids cannot be reached or has no soil at that point.
+    """
+    if get is None:
+        import requests
+
+        get = requests.get
+    point = geometry.centroid
+    params = [("lat", f"{point.y:.5f}"), ("lon", f"{point.x:.5f}"), ("value", "mean")]
+    params += [("property", name) for name in SOILGRIDS_PROPERTIES]
+    params += [("depth", label) for label, _ in SOILGRIDS_DEPTHS]
+    last = ""
+    for attempt in range(1, attempts + 1):
+        try:
+            response = get(SOILGRIDS_URL, params=params, timeout=TIMEOUT_S)
+            if response.status_code == 429:               # ISRIC asks for five a minute
+                last = "SoilGrids asked us to slow down"
+                log.info("SoilGrids is rate limiting; waiting %s s", RETRY_WAIT_S)
+                time.sleep(RETRY_WAIT_S)
+                continue
+            payload = response.json()
+        except Exception as exc:                          # requests, JSON, anything
+            last = f"could not reach SoilGrids ({type(exc).__name__})"
+            log.info("%s; try %s of %s", last, attempt, attempts)
+            time.sleep(RETRY_WAIT_S if attempt < attempts else 0)
+            continue
+        return profile_from_soilgrids(payload)
+    raise SoilError(f"{last}. Try again, or give the soil by hand: "
+                    "dosojos-sat soil --awc <inches per foot>")
