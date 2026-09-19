@@ -173,6 +173,33 @@ shows it and `/r/<token>/file` downloads it; the link lasts 14 days like the
 others. Nothing on the page is new analysis — if the page and a text message
 ever disagree, the text message is the bug.
 
+## Where AI does the work
+
+Three parts of Dos Ojos are AI, and none of them needs the internet or a paid key.
+
+- **Finding and judging orchard trees** (`dosojos-drone trees-ai`). Small neural
+  networks trained on 206 citrus trees the USDA measured by hand (public data) find
+  each tree in the drone's 3D model and photo, read its real height, and list the
+  ones in poor shape. On rows they never saw while training they found 96-98% of the
+  trees against 61-68% for the old watershed, and missed heights by 10-14 cm against
+  33-67 cm. The flight's text and the WHY page carry their count.
+- **Reading farmers' own words.** A text the command words miss ("le dimos una regada
+  a la huerta antier como 2 pulgadas") goes to a language model running on the server
+  itself (Ollama with Llama 3.2 3B). It decides what the farmer means and which field;
+  the rules read the day and the amount; the usual YES/NO read-back guards the record.
+- **Writing the recommendation.** The model reads everything known about a field (the
+  water balance, satellite greenness against normal, the sorghum stage, drone, tree
+  and thermal findings, the farmer's log) and writes what to do and what to look at
+  first. The water balance fixes the decision; the text is checked before it goes out
+  (the decision's day is in it, every number and date comes from the readings, it fits
+  two texts) and the water numbers' own answer goes instead when it fails.
+
+To switch the model on, install Ollama (ollama.com) and run `ollama pull llama3.2:3b`.
+`DOSOJOS_AI=0` turns it off; `DOSOJOS_AI_MODEL` and `DOSOJOS_AI_URL` choose another.
+`examples\check_ai.py --data live_data` tries it on a set of texts and every field.
+On a laptop's processor an answer takes 5 to 50 seconds, so the farmer is told it is
+coming and gets it in its own text.
+
 ## The team's commands
 
 From any folder in PowerShell, `C:\Users\edgar\Projects\Dos_Ojos\dosojos_sms\sms.cmd <command>`:

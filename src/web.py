@@ -199,7 +199,8 @@ class App:
         model = ai.ready(self.settings)
         today = self._today()
         with self.db() as conn:
-            fields = [{"name": r.name, "summary": self._summary_for_ai(conn, r, today)}
+            fields = [{"name": r.name, "crop": r.crop,
+                       "summary": self._summary_for_ai(conn, r, today)}
                       for r in store.fields_of(conn, phone)]
         heard = None
         if model is not None:

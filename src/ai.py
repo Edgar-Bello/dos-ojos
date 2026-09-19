@@ -209,47 +209,51 @@ UNDERSTAND_SCHEMA = {
     "properties": {
         "intent": {"type": "string", "enum": list(INTENTS)},
         "field": {"type": "string"},
-        "date": {"type": "string"},
-        "inches": {"type": ["number", "null"]},
         "crop": {"type": "string", "enum": list(CROPS)},
         "answer": {"type": "string"},
     },
-    "required": ["intent", "field", "date", "inches", "crop", "answer"],
+    "required": ["intent", "field", "crop", "answer"],
 }
 
-UNDERSTAND_SYSTEM = """You read text messages that farmers in the Rio Grande Valley send \
-to Dos Ojos, a service that tells them when to water. Messages are in Spanish or English, \
-often short, misspelled or informal. Decide what the farmer means and answer in JSON.
+# Days and amounts are not the model's job: the rules read "antier", "anoche",
+# "media pulgada" and "9/11" exactly, and a 3B model does not. It says what the
+# farmer means and which field; the rules take the numbers from the farmer's text.
+UNDERSTAND_SYSTEM = """You sort text messages that farmers in the Rio Grande Valley send to Dos Ojos, a service that tells them when to water. Messages are Spanish or English, short, informal, often misspelled. Answer in JSON: intent, field, crop, answer.
 
-intent, pick one:
-- irrigated: they watered a field (regue, regamos, le echamos agua, watered)
-- rain: it rained (llovio, lluvia, rained); inches if said
-- harvested: they harvested or cut a field
-- planted: they planted or sowed a field
-- status: they ask how their fields are or whether to water, with no other detail
-- explain: they want the charts or the reasons (porque, why, graficas)
-- fields: they want the list of their fields
-- new_field: they want to add a field
-- map: they want to draw or fix a field's map
-- drone: they want to send drone photos
-- stage: how far along the sorghum is
-- aphid: sugarcane aphid (pulgon amarillo) counts or questions
-- plan: change what they use (satellite, drone, thermal)
-- crop: change which crop a field has
-- undo: remove the last thing they sent
-- help: they want the options
-- question: any other question about their fields you can answer from FIELDS below
-- other: anything else (greetings, thanks, unclear, off topic)
+intent is one of:
+irrigated = they watered (regar, regue, regamos, una regada, una mojada, le echamos agua, le dimos agua, watered, irrigated)
+rain = it rained (llovio, cayo agua del cielo, lluvia, aguacero, rained)
+harvested = they harvested or cut the crop (cosechamos, cortamos, trillamos, harvested, cut)
+planted = they planted or sowed (sembramos, plantamos, planted, sowed)
+status = they ask whether or when to water, or how the fields are doing
+explain = they want the charts, graphs or the reasons
+fields = they want the list of their fields
+new_field = they want to add another field
+map = they want to draw or fix a field's map
+drone = they want to send drone photos
+stage = how far along the sorghum is
+aphid = sugarcane aphid (pulgon amarillo) counts
+plan = change satellite, drone or thermal
+crop = change which crop a field has
+undo = remove the last thing they sent
+help = they want to know what they can send
+question = another question about their fields that FIELDS can answer
+other = thanks, greetings, jokes, unclear or off topic
 
-field: copy one name from FIELDS exactly, or "" when none is meant or you are unsure.
-date: YYYY-MM-DD for the day it happened, worked out from TODAY ("ayer" = yesterday, \
-"anoche" = last night = yesterday); "" when no day is said.
-inches: the inches of water or rain as a number, or null when not said. Do not guess.
-crop: for planted or crop, one of sorghum cotton corn sugarcane citrus soybean, else "".
-answer: only for question, a short reply (under 240 characters) in the farmer's \
-language using ONLY the facts in FIELDS; if FIELDS do not say, reply that you will pass \
-the question to the team. Otherwise "".
-Never invent a field, a date or an amount."""
+field: a name copied exactly from FIELDS when the message points to one, by its name or by its crop ("el citrico", "the sorghum", "la huerta" = the citrus); otherwise "".
+crop: only for planted or crop: sorghum, cotton, corn, sugarcane, citrus or soybean; else "".
+answer: only for question: under 240 characters, in the farmer's language, using only FIELDS; if FIELDS do not say, that you will pass it to the team. Otherwise "".
+
+Examples (FIELDS: Norte = sorghum, Huerta = citrus):
+"le dimos una mojada a la huerta ayer" -> irrigated, Huerta
+"anoche cayo como una pulgada" -> rain, ""
+"ya cortamos el sorgo" -> harvested, Norte
+"we planted corn in norte last week" -> planted, Norte, corn
+"cuanto le falta al sorgo pa regarlo" -> status, Norte
+"quiero ver las graficas de la huerta" -> explain, Huerta
+"gracias compa" -> other
+"buenos dias" -> other
+"cuando fue la ultima vez que regamos la huerta?" -> question, Huerta"""
 
 
 @dataclass
@@ -283,31 +287,43 @@ class Understood:
         return re.sub(r"\s+", " ", words).strip() if words else None
 
 
+#: Kinds of message where a day and an amount matter.
+_DATED = {"irrigated": "irrigated", "rain": "rain", "harvested": "harvested",
+          "planted": "planted"}
+
+
 def understand(model: LocalAI, message: str, *, lang: str, today: date,
                fields: list[dict]) -> Understood:
     """What a text the rules could not place is asking for."""
+    from . import parse
+
     listing = "\n".join(
         f"- {f['name']}: {f.get('summary') or ''}".rstrip(": ") for f in fields) or "(none)"
     prompt = (f"TODAY: {today.isoformat()} ({today.strftime('%A')})\n"
               f"FARMER'S LANGUAGE: {'Spanish' if lang == 'es' else 'English'}\n"
               f"FIELDS:\n{listing}\n\nMESSAGE: {message}")
-    raw = model.json(UNDERSTAND_SYSTEM, prompt, UNDERSTAND_SCHEMA, max_tokens=200)
+    raw = model.json(UNDERSTAND_SYSTEM, prompt, UNDERSTAND_SCHEMA, max_tokens=120)
     intent = raw.get("intent") if raw.get("intent") in INTENTS else "other"
     names = {f["name"].lower(): f["name"] for f in fields}
     named = names.get(str(raw.get("field") or "").strip().lower())
-    day = None
-    try:
-        day = date.fromisoformat(str(raw.get("date") or ""))
-        if not today - timedelta(days=400) <= day <= today:
-            day = None          # a day to come, or years ago: the rules ask again
-    except ValueError:
-        pass
-    inches = raw.get("inches")
-    inches = float(inches) if isinstance(inches, (int, float)) and 0 < inches <= 15 else None
     crop = raw.get("crop") if raw.get("crop") in CROPS[:-1] else None
     answer = str(raw.get("answer") or "").strip()[:MAX_MESSAGE_CHARS] or None
-    return Understood(intent, named, day, inches, crop,
-                      answer if intent == "question" else None)
+    if named is None:
+        # "a la huerta", "el sorgo": the one field with that crop, as the rules read it.
+        key, _ = parse.crop_word(message)
+        crops = {f["name"]: f.get("crop") for f in fields}
+        matches = [name for name, c in crops.items() if key and c == key]
+        named = matches[0] if len(matches) == 1 else None
+    heard = Understood(intent, named, crop=crop,
+                       answer=answer if intent == "question" else None)
+    if intent in _DATED:
+        norm = parse.normalize(message)
+        found = parse.find_date(norm, today, window=_DATED[intent])
+        heard.day = found.day
+        amount = parse.find_amount(parse.without(norm, found.span))
+        if amount and amount.inches and intent in ("irrigated", "rain"):
+            heard.inches = amount.inches
+    return heard
 
 
 # --------------------------------------------------------------------------- #
@@ -316,41 +332,30 @@ def understand(model: LocalAI, message: str, *, lang: str, today: date,
 
 ACTIONS = ("water_now", "water_soon", "no_water_yet", "not_irrigated", "harvested")
 
+# The water balance decides when and how much: that is arithmetic, and a 3B model
+# gets arithmetic wrong (it once told a rainfed field to water "now", in 27 days).
+# The model's job is the part arithmetic cannot do: read everything else there
+# is about the field and write what the farmer should do and look at, and why.
 ADVICE_SCHEMA = {
     "type": "object",
     "properties": {
-        "action": {"type": "string", "enum": list(ACTIONS)},
-        "water_in_days": {"type": "integer"},
         "message": {"type": "string"},
         "check_first": {"type": "string"},
         "reasons": {"type": "array", "items": {"type": "string"}},
         "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
     },
-    "required": ["action", "water_in_days", "message", "check_first", "reasons",
-                 "confidence"],
+    "required": ["message", "check_first", "reasons", "confidence"],
 }
 
-ADVICE_SYSTEM = """You are the farm advisor of Dos Ojos, writing to a farmer in the Rio \
-Grande Valley by text message. You get every reading about one field as JSON: the water \
-checkbook (a soil-water balance from the soil survey, daily weather and the crop), the \
-satellite's greenness against the field's own normal, the growth stage, what the drone and \
-the trained tree model found, thermal camera patches, and what the farmer logged.
+ADVICE_SYSTEM = """You are the farm advisor of Dos Ojos. You write one text message to a farmer in the Rio Grande Valley about one field. You get FACTS: first the DECISION from the field's water balance, then everything else known: soil, weather, satellite greenness, crop stage, drone and tree findings, thermal camera, and what the farmer logged.
 
-Write the recommendation. Rules:
-- The checkbook's days until water are the backbone: keep your action and day consistent \
-with it. Use the other readings to say what to check or to add a caution, not to override it.
-- Name the one thing to do first. Mention a drone, tree, thermal or satellite finding only \
-when it changes what the farmer should do or check.
-- Use only numbers that appear in the readings. Round them the way they appear.
-- message: at most 280 characters, in LANGUAGE, plain words a farmer uses, no jargon, no \
-emoji, do not start with the field's name.
-- action: water_now (0 days), water_soon (1-3 days), no_water_yet (more than 3 days), \
-not_irrigated (rainfed), harvested.
-- water_in_days: the day count your message gives, or -1 when not watering.
-- check_first: one short thing to go and look at in the field, in LANGUAGE, or "".
-- reasons: two to four short reasons in LANGUAGE, each naming the reading it comes from.
-- confidence: how sure you are, from the checkbook's own confidence and how much the \
-readings agree."""
+Write JSON:
+message: the recommendation, in LANGUAGE, at most 260 characters, plain words a farmer uses. Start with the DECISION, keeping its day and amount exactly. Then add the one other fact that most changes what the farmer should do or watch (a drone or tree finding, low greenness, a stage that cannot go dry, pests, a thermal patch). Do not repeat the field's name. No emoji.
+check_first: one short thing to go and look at in the field, in LANGUAGE, taken from the FACTS, or "" if nothing needs a look.
+reasons: two to four short reasons in LANGUAGE, each saying which fact it comes from.
+confidence: high, medium or low, from the water balance's confidence and whether the facts agree.
+
+Use only numbers written in FACTS, written the same way. Never change the DECISION."""
 
 
 @dataclass
@@ -374,7 +379,7 @@ class Advice:
 
 
 def expected_action(brief: dict) -> str | None:
-    """The action the checkbook alone calls for."""
+    """The action the water balance calls for."""
     book = brief.get("water_checkbook") or {}
     if book.get("status") == "harvested":
         return "harvested"
@@ -386,34 +391,169 @@ def expected_action(brief: dict) -> str | None:
     return "water_now" if days <= 0 else "water_soon" if days <= 3 else "no_water_yet"
 
 
-def check(advice: dict, brief: dict) -> list[str]:
-    """Why an answer cannot go out; empty when it can."""
-    problems = []
-    action = advice.get("action")
-    expected = expected_action(brief)
+_WEEKDAYS = {"en": ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday",
+                    "sunday"),
+             "es": ("lunes", "martes", "miercoles", "jueves", "viernes", "sabado", "domingo")}
+_NOW_WORDS = ("hoy", "ahora", "ya ", "cuanto antes", "today", "now", "right away")
+_WATER_WORDS = ("riegue", "regar", "riego", "irrigate", "water it", "water now", "water in",
+                "water the", "water by")
+
+
+def facts(brief: dict) -> list[str]:
+    """The brief as plain sentences, the decision first: a small model reads these far
+    better than nested JSON, and every number it may use is written here once."""
     book = brief.get("water_checkbook") or {}
-    days = book.get("days_until_water")
-    low, high = (book.get("days_range") or [days, days]) if days is not None else (None, None)
-    if expected and action != expected:
-        near = {expected, action} == {"water_soon", "no_water_yet"} and days in (3, 4)
-        if not near:
-            problems.append(f"action {action} disagrees with the checkbook ({expected})")
-    given = advice.get("water_in_days")
-    if action in ("water_now", "water_soon", "no_water_yet") and days is not None:
-        if not isinstance(given, int) or not (min(low, days) - 1 <= given <= max(high, days) + 1):
-            problems.append(f"water_in_days {given} is outside the checkbook's "
-                            f"{low}-{high} days")
+    info = brief.get("field") or {}
+    action = expected_action(brief)
+    days, rng = book.get("days_until_water"), book.get("days_range") or []
+    refill = book.get("refill_in")
+    by = book.get("water_by")
+    when = ""
+    if by:
+        d = date.fromisoformat(by)
+        when = f"{_WEEKDAYS['en'][d.weekday()].title()} {d.strftime('%B')} {d.day}"
+    give = f"; give about {refill:g} inches" if refill else ""
+    decision = {
+        "water_now": f"water now, today{give}.",
+        "water_soon": f"water in about {days} days, by {when}{give}.",
+        "no_water_yet": (f"no water needed yet: water in about {days} days"
+                         + (f" (between {rng[0]} and {rng[1]})" if len(rng) == 2 else "")
+                         + f", by {when}{give}."),
+        "not_irrigated": "this field is rainfed, so there is nothing to water; only watch it.",
+        "harvested": "the crop is harvested; nothing to water until the next planting.",
+    }.get(action, "no water decision yet.")
+    lines = [f"DECISION (from the water balance, do not change it): {decision}"]
+    lines.append(f"Field: {info.get('crop')}"
+                 + (f", {info['acres']:g} acres" if info.get("acres") else "")
+                 + f", {info.get('watered_by')}"
+                 + (f", planted {info['planted']}" if info.get("planted") else "") + ".")
+    soil = []
+    if book.get("soil"):
+        soil.append(f"soil {book['soil']}")
+    if book.get("soil_water_left_pct") is not None:
+        soil.append(f"{book['soil_water_left_pct']}% of the soil's water is left")
+    if book.get("crop_use_in_per_day"):
+        soil.append(f"the crop uses {book['crop_use_in_per_day']:g} inches a day")
+    if book.get("stressed_days_last_30"):
+        soil.append(f"{book['stressed_days_last_30']} days short of water in the last 30")
+    if soil:
+        lines.append("Water balance: " + "; ".join(soil) + f" (confidence {book.get('confidence')}).")
+    lines.append(f"Last watering: {book.get('last_irrigation') or 'none on record'}; "
+                 f"last rain: {book.get('last_rain') or 'none on record'}.")
+    stage = brief.get("sorghum_stage")
+    if stage:
+        lines.append(f"Sorghum stage: {stage.get('stage')}, {stage.get('days_after_planting')} "
+                     f"days after planting; next: {stage.get('next_stage')} around "
+                     f"{stage.get('next_date')}. Watch for: "
+                     f"{', '.join(w.replace('_', ' ') for w in stage.get('watch_for') or []) or 'nothing special'}."
+                     + (f" Sugarcane aphid threshold now: {stage['aphid_threshold_pct']}% of "
+                        f"plants." if stage.get("aphid_threshold_pct") else ""))
+    green = (brief.get("satellite_greenness") or {}).get("latest") or []
+    if green:
+        last = green[-1]
+        line = f"Satellite greenness (NDVI) {last['ndvi']:g} on {last['date']}"
+        if last.get("field_normal") is not None:
+            gap = last["ndvi"] - last["field_normal"]
+            word = ("about normal" if abs(gap) < 0.05 else
+                    "greener than normal" if gap > 0 else "less green than normal")
+            line += f", {word} for this field then ({last['field_normal']:g})"
+        if len(green) > 1:
+            trend = green[-1]["ndvi"] - green[0]["ndvi"]
+            line += (f"; {'rising' if trend > 0.03 else 'falling' if trend < -0.03 else 'steady'}"
+                     f" since {green[0]['date']}")
+        lines.append(line + ".")
+    trees = brief.get("drone_trees_ai")
+    if trees:
+        lines.append(f"Drone, trained tree model ({trees.get('flown')}): {trees.get('trees')} "
+                     f"trees, {trees.get('need_a_look')} need a look, "
+                     f"{trees.get('gaps_missing_trees')} gaps where a tree is missing, typical "
+                     f"height {trees.get('typical_height_m')} m.")
+    flags = brief.get("drone_flags")
+    if flags:
+        lines.append(f"Drone ({flags.get('flown')}): {flags.get('stressed')} of "
+                     f"{flags.get('judged')} parts of the field look stressed, "
+                     f"{flags.get('missing_plants')} have plants missing.")
+    for finding in brief.get("drone_ground") or []:
+        lines.append(f"Drone ground: {str(finding).rstrip('.')}.")
+    thermal = brief.get("thermal_camera")
+    if thermal:
+        for patch in thermal.get("warm_patches") or []:
+            lines.append(f"Thermal camera ({thermal.get('flown')}): a warm patch in the "
+                         f"{patch.get('where')}, {patch.get('area_m2')} m2, "
+                         f"{patch.get('hotter_than_canopy_c')} C hotter than the rest; "
+                         f"{patch.get('chance_pest_or_disease_pct')}% chance it is a pest or "
+                         f"disease.")
+    aphid = brief.get("last_aphid_count")
+    if stage and "sugarcane_aphid" in (stage.get("watch_for") or []) and not aphid:
+        lines.append("No sugarcane aphid count has been logged yet, so nobody knows if the "
+                     "threshold is reached.")
+    if aphid:
+        lines.append(f"Last sugarcane aphid count ({aphid.get('day')}): "
+                     f"{aphid.get('percent_infested')}% of plants, {aphid.get('verdict')}.")
+    if brief.get("farmer_log"):
+        lines.append("Farmer's log: " + "; ".join(brief["farmer_log"]) + ".")
+    return lines
+
+
+def check(advice: dict, brief: dict, lang: str = "en") -> list[str]:
+    """Why an answer cannot go out; empty when it can."""
+    from .parse import normalize
+
+    problems = []
     message = str(advice.get("message") or "").strip()
+    said = normalize(message) + " "
     if not message:
-        problems.append("no message")
+        return ["no message"]
     if len(message) > MAX_MESSAGE_CHARS:
         problems.append(f"message is {len(message)} characters; at most {MAX_MESSAGE_CHARS}")
-    known = _numbers(json.dumps(brief))
+    action = expected_action(brief)
+    book = brief.get("water_checkbook") or {}
+    days, by = book.get("days_until_water"), book.get("water_by")
+    if action == "water_now" and not any(w in said for w in _NOW_WORDS):
+        problems.append("the DECISION is to water now and the message does not say so")
+    if action in ("water_soon", "no_water_yet") and days is not None:
+        marks = {str(days)}
+        if by:
+            d = date.fromisoformat(by)
+            marks |= {str(d.day), _WEEKDAYS["en"][d.weekday()], _WEEKDAYS["es"][d.weekday()]}
+        if not any(re.search(rf"(?<![\w.]){re.escape(m)}(?![\w.])", said) for m in marks):
+            problems.append(f"the message does not give the DECISION's day ({days} days, by {by})")
+    if action == "not_irrigated" and any(w in said for w in _WATER_WORDS):
+        problems.append("the field is rainfed and the message says to water it")
+    written = " ".join(facts(brief))
+    known_days = _days_named(written)
+    for day in _days_named(message + " " + str(advice.get("check_first") or "")):
+        if day not in known_days:
+            problems.append(f"the date {day[0]}/{day[1]} is not in the FACTS")
+    known = _numbers(written)
     for number in _numbers(message + " " + str(advice.get("check_first") or "")):
         if (number.is_integer() and number <= 31) or _near_any(number, known):
             continue
-        problems.append(f"the number {number:g} is not in the readings")
+        problems.append(f"the number {number:g} is not in the FACTS")
     return problems
+
+
+_MONTHS = {name: number for number, names in enumerate((
+    ("january", "jan", "enero", "ene"), ("february", "feb", "febrero"),
+    ("march", "mar", "marzo"), ("april", "apr", "abril", "abr"), ("may", "mayo"),
+    ("june", "jun", "junio"), ("july", "jul", "julio"), ("august", "aug", "agosto", "ago"),
+    ("september", "sep", "sept", "septiembre", "setiembre"), ("october", "oct", "octubre"),
+    ("november", "nov", "noviembre"), ("december", "dec", "diciembre", "dic")), start=1)
+    for name in names}
+
+
+def _days_named(value: str) -> set[tuple[int, int]]:
+    """Every (month, day) a text names: 2026-09-23, 9/23, September 23, 23 de septiembre."""
+    from .parse import normalize
+
+    said = normalize(value)
+    days = {(int(m), int(d)) for m, d in re.findall(r"\b\d{4}-(\d{1,2})-(\d{1,2})\b", said)}
+    days |= {(int(m), int(d)) for m, d in re.findall(r"(?<![\d.-])(\d{1,2})/(\d{1,2})\b", said)}
+    month = "|".join(sorted(_MONTHS, key=len, reverse=True))
+    days |= {(_MONTHS[m], int(d)) for m, d in re.findall(rf"\b({month})\.? (\d{{1,2}})\b", said)}
+    days |= {(_MONTHS[m], int(d)) for d, m in
+             re.findall(rf"\b(\d{{1,2}}) (?:de )?({month})\b", said)}
+    return {(m, d) for m, d in days if 1 <= m <= 12 and 1 <= d <= 31}
 
 
 def _numbers(value: str) -> list[float]:
@@ -438,28 +578,29 @@ def brief_key(brief: dict, model: str) -> str:
 def recommend(model: LocalAI, brief: dict, *, lang: str, now: str) -> Advice | None:
     """The model's advice for one field, checked; None when it fails the checks twice."""
     prompt = (f"LANGUAGE: {'Spanish' if lang == 'es' else 'English'}\n"
-              f"READINGS:\n{json.dumps(brief, indent=1, ensure_ascii=False, default=str)}")
+              "FACTS:\n" + "\n".join(f"- {line}" for line in facts(brief)))
+    action = expected_action(brief)
+    days = (brief.get("water_checkbook") or {}).get("days_until_water")
     for attempt in (1, 2):
         try:
-            raw = model.json(ADVICE_SYSTEM, prompt, ADVICE_SCHEMA, max_tokens=450)
+            raw = model.json(ADVICE_SYSTEM, prompt, ADVICE_SCHEMA, max_tokens=300)
         except AIError as exc:
             log.warning("AI advice: %s", exc)
             return None
-        problems = check(raw, brief)
+        problems = check(raw, brief, lang)
         if not problems:
-            days = raw.get("water_in_days")
-            return Advice(raw["action"], days if isinstance(days, int) and days >= 0 else None,
+            return Advice(action or "", days if action in ("water_soon", "no_water_yet",
+                                                             "water_now") else None,
                           text.gsm_safe(str(raw["message"]).strip()),
                           text.gsm_safe(str(raw.get("check_first") or "").strip()),
                           [text.gsm_safe(str(r)) for r in (raw.get("reasons") or [])][:4],
                           raw.get("confidence") or "medium", model.model, now,
-                          checked=["action agrees with the checkbook",
-                                   "day within the checkbook's range",
+                          checked=["it keeps the water balance's decision and day",
                                    "every number comes from the readings",
-                                   "fits in two text messages"])
+                                   "it fits in two text messages"])
         log.info("AI advice attempt %s refused: %s", attempt, "; ".join(problems))
         prompt += ("\n\nYOUR LAST ANSWER WAS REFUSED: " + "; ".join(problems)
-                   + ". Answer again, fixing that.")
+                   + ". Write it again, fixing that.")
     return None
 
 

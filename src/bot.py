@@ -63,6 +63,7 @@ _NONE_WORDS = {"nada", "none", "no", "ninguno", "ninguna", "nunca", "never", "to
                "no se a regado", "aun no", "sin riego"}
 _THANKS = {"gracias", "muchas gracias", "thanks", "thank you", "ok", "okay", "ok gracias",
            "listo", "va", "sale", "bien", "perfecto", "great", "👍"}
+_THANKS_START = {"gracias", "thanks", "thank", "thx", "ty", "perfecto", "okay", "ok"}
 
 
 @dataclass
@@ -1022,6 +1023,9 @@ class Turn:
             return
         if self.norm.strip(" .,") in _THANKS or not self.body:
             return
+        said = parse.words(self.body)
+        if said and said[0] in _THANKS_START and len(said) <= 4:
+            return          # "gracias compa", "thanks a lot": nothing to answer
         if (not self.msg.from_ai and self.bot.think is not None
                 and self.bot.think(self.f, self.msg)):
             self.say("ai_thinking")
@@ -1516,10 +1520,14 @@ class Turn:
         return None
 
 
-def ai_text(field_name: str, advice: "ai.Advice", lang: str) -> str:
-    """The AI's recommendation as the farmer gets it."""
-    check = say("ai_check", lang, what=advice.check_first.rstrip(".")) \
-        if advice.check_first else ""
+def ai_text(field_name: str, advice: "ai.Advice", lang: str, *, note: bool = True) -> str:
+    """The AI's recommendation as the farmer gets it; ``note=False`` leaves out the
+    line saying it is the AI's, for a page that says so at length."""
+    first = advice.check_first.rstrip(". ")
+    repeated = parse.normalize(first) in parse.normalize(advice.message) if first else True
+    check = "" if repeated else say("ai_check", lang, what=first)
+    if not note:
+        return f"{field_name}: {advice.message.rstrip()}{check}"
     return say("ai_advice", lang, field=field_name, message=advice.message.rstrip(),
                check=check)
 

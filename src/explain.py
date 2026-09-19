@@ -968,7 +968,7 @@ def _ai_advice(item: FieldWater, advice, lang: str, today: date) -> list[str]:
     urgent = advice.action == "water_now"
     parts = [f"<h2>{_esc(_('ai_title', lang))}</h2>",
              f'<div class="answer{" now" if urgent else ""}">'
-             f"{_esc(ai_text(item.field.name, advice, lang).split(' (')[0])}</div>"]
+             f"{_esc(ai_text(item.field.name, advice, lang, note=False))}</div>"]
     if advice.reasons:
         parts.append(f"<p>{_esc(_('ai_why', lang))}</p><ul>"
                      + "".join(f"<li>{_esc(r)}</li>" for r in advice.reasons) + "</ul>")
