@@ -66,15 +66,26 @@ const PIECE = 4 * 1024 * 1024;
 const AT_ONCE = 5;
 const TRIES = 6;
 const PIECE_TIMEOUT_MS = 90 * 1000;
+const FILES_AT_ONCE = 6;
 
-async function put(file) {
-  if (file.size <= PIECE) return putPiece(file, file, null, loaded => onProgress(loaded));
+async function put(file, report) {
+  if (file.size <= PIECE) {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await putPiece(file, file, null, report);
+      } catch (error) {
+        report(0);
+        if (attempt >= TRIES) throw error;
+        await new Promise(wait => setTimeout(wait, 3000 * attempt));
+      }
+    }
+  }
   const starts = [];
   for (let start = 0; start < file.size; start += PIECE) starts.push(start);
   const moving = new Map();                   // bytes on the way, per piece
   let arrived = 0;
   let result = {};
-  const show = () => onProgress(arrived + [...moving.values()].reduce((a, b) => a + b, 0));
+  const show = () => report(arrived + [...moving.values()].reduce((a, b) => a + b, 0));
   async function worker() {
     while (starts.length) {
       const start = starts.shift();
@@ -119,7 +130,6 @@ function putPiece(file, body, start, progress) {
   });
 }
 
-let onProgress = () => {};
 
 // A drone map (orthophoto) is often 1-2 cm a pixel and hundreds of MB. Dos Ojos
 // judges it in 1 m squares, where 5 cm a pixel sees the same, so a big map is
@@ -303,18 +313,35 @@ async function send(input) {
       .replace("{mb}", ((sent + extra) / 1e6).toFixed(0));
   };
   show(0);
-  for (const file of todo) {
-    onProgress = show;
+  // Each trip through the tunnel costs a moment before a byte moves, which adds
+  // up over a folder of thousands of small files: send several at once. A big
+  // file already goes in pieces several at a time, so those go one by one.
+  const moving = new Map();
+  const update = () => show([...moving.values()].reduce((a, b) => a + b, 0));
+  const queue = todo.filter(f => f.size <= PIECE);
+  const big = todo.filter(f => f.size > PIECE);
+  let failed = null;
+  async function one(file) {
     try {
-      await put(file);
+      await put(file, loaded => { moving.set(file, loaded); update(); });
+      moving.delete(file);
       sent += file.size; count += 1; uploaded += 1;
       $("finish").disabled = false;
-      show(0);
+      update();
     } catch (error) {
-      $("error").textContent = S.failed.replace("{name}", file.name).replace("{error}", error.message);
-      break;
+      moving.delete(file);
+      failed = failed || S.failed.replace("{name}", file.name).replace("{error}", error.message);
     }
   }
+  async function worker() {
+    while (queue.length && !failed) await one(queue.shift());
+  }
+  await Promise.all(Array.from({ length: FILES_AT_ONCE }, worker));
+  for (const file of big) {
+    if (failed) break;
+    await one(file);
+  }
+  if (failed) $("error").textContent = failed;
   $("chooseLabel").style.opacity = 1;
   input.value = "";
 }
