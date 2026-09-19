@@ -1979,8 +1979,8 @@ def _format_water_plan(joined: dict) -> str:
     for entry in entries:
         w = entry["water"]
         name = str(entry.get("name") or "")[:24]
-        if w["status"] == "harvested":
-            when = "harvested, nothing needed"
+        if w["status"] in ("harvested", "mature"):
+            when = f"{w['status']}, nothing needed"
         elif w["days_left"] == 0:
             when = "WATER NOW"
         elif w["days_left"] is None:
@@ -2032,8 +2032,8 @@ def _water_cell(water: dict | None) -> str:
     """The water column: now, days left, or harvested."""
     if not water:
         return "-"
-    if water["status"] == "harvested":
-        return "harvested"
+    if water["status"] in ("harvested", "mature"):
+        return water["status"]
     if water["days_left"] == 0:
         return "NOW"
     if water["days_left"] is None:
