@@ -93,11 +93,7 @@ def test_answers_go_out_through_telegram(settings: Settings, calls: list) -> Non
 
 def test_our_own_pictures_go_as_files_not_links(settings: Settings, monkeypatch, tmp_path) -> None:
     picture = tmp_path / "flag_overlay.png"
-    picture.write_bytes(b"\x89PNG fake")
-    with store.session(settings.db_path) as conn:
-        store.add_farmer(conn, "+042", channel="telegram")
-        field = store.add_field(conn, "+042", "Campo Norte")
-        token = store.new_link(conn, "picture", field.id, days=14, meta={"path": str(picture)})
+    picture.write_bytes(b"PNG fake")
     made = []
 
     def post(url, data, timeout, files=None):
@@ -105,7 +101,14 @@ def test_our_own_pictures_go_as_files_not_links(settings: Settings, monkeypatch,
         return Response({"ok": True, "result": {"message_id": 1}})
 
     monkeypatch.setattr(telegram.requests, "post", post)
-    telegram.send(settings, "+042", "listo", media=[settings.link(f"p/{token}")])
+    with store.session(settings.db_path) as conn:
+        farmer = store.add_farmer(conn, "+042", channel="telegram")
+        field = store.add_field(conn, "+042", "Campo Norte")
+        token = store.new_link(conn, "picture", field.id, days=14, meta={"path": str(picture)})
+        # Still inside this unfinished write, as the server is when a flight is done:
+        # the picture must be found without a second connection ("database is locked").
+        outbox.deliver(conn, settings, farmer, "listo", urgent=True,
+                       media=[settings.link(f"p/{token}")])
     method, data, files = made[-1]
     assert method == "sendPhoto" and "photo" not in data
-    assert files["photo"] == ("flag_overlay.png", b"\x89PNG fake")
+    assert files["photo"] == ("flag_overlay.png", b"PNG fake")

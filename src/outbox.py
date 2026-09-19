@@ -74,7 +74,8 @@ def _send(conn: sqlite3.Connection, settings: Settings, phone: str, body: str,
           message_id: int, media: list[str] | None = None) -> str:
     try:
         if telegram.is_telegram(phone):
-            sid = telegram.send(settings, phone, body, media=media)
+            local = [_our_picture(conn, settings, url) or url for url in media or ()]
+            sid = telegram.send(settings, phone, body, media=local)
         else:
             sid = (twilio.send(settings, phone, body, media=media) if media
                    else twilio.send(settings, phone, body))
@@ -89,6 +90,22 @@ def _send(conn: sqlite3.Connection, settings: Settings, phone: str, body: str,
         return "failed"
     store.mark_message(conn, message_id, status="sent", provider_id=sid)
     return "sent"
+
+
+def _our_picture(conn: sqlite3.Connection, settings: Settings, url: str) -> str | None:
+    """The file behind one of this server's own picture links (/p/<token>), if any.
+
+    Read on the connection already open: a second one would wait on this one's
+    unfinished write and fail with "database is locked".
+    """
+    prefix = settings.link("p/")
+    if not url.startswith(prefix):
+        return None
+    link = store.get_link(conn, url[len(prefix):], "picture")
+    if link is None:
+        return None
+    path = json.loads(link["meta"] or "{}").get("path")
+    return path or None
 
 
 def flush(conn: sqlite3.Connection, settings: Settings, *, now: datetime | None = None) -> int:

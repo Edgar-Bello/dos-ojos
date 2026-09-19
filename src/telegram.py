@@ -80,7 +80,10 @@ def _call(settings: Settings, method: str, data: dict, *, timeout: float = 20,
 
 def send(settings: Settings, phone: str, body: str, *, media: list[str] | None = None,
          post: Callable[..., requests.Response] | None = None) -> str:
-    """Send one message (and its pictures); returns Telegram's id of the last one."""
+    """Send one message (and its pictures); returns Telegram's id of the last one.
+
+    A picture is a file on this computer, sent as it is, or a public https link.
+    """
     chat = chat_of(phone)
     sent = None
     for start in range(0, max(len(body), 1), LIMIT):
@@ -88,31 +91,16 @@ def send(settings: Settings, phone: str, body: str, *, media: list[str] | None =
                      {"chat_id": chat, "text": body[start:start + LIMIT],
                       "disable_web_page_preview": "true"}, post=post)
     # Telegram fetches a picture itself, so only a public link can carry one.
-    for url in media or ():
-        local = _our_picture(settings, url)
-        if local is not None:
+    for item in media or ():
+        local = Path(item) if not item.startswith(("http://", "https://")) else None
+        if local is not None and local.is_file() and local.stat().st_size <= PHOTO_MAX:
             # Handed over directly: fetching it back through a slow tunnel can take
             # longer than Telegram waits for a link.
             sent = _call(settings, "sendPhoto", {"chat_id": chat}, post=post, timeout=60,
                          files={"photo": (local.name, local.read_bytes())})
-        elif url.startswith("https://"):
-            sent = _call(settings, "sendPhoto", {"chat_id": chat, "photo": url}, post=post)
+        elif item.startswith("https://"):
+            sent = _call(settings, "sendPhoto", {"chat_id": chat, "photo": item}, post=post)
     return str(sent["message_id"]) if sent else ""
-
-
-def _our_picture(settings: Settings, url: str) -> Path | None:
-    """The file behind one of this server's own picture links (/p/<token>), if any."""
-    prefix = settings.link("p/")
-    if not url.startswith(prefix):
-        return None
-    from . import store
-
-    with store.session(settings.db_path) as conn:
-        link = store.get_link(conn, url[len(prefix):], "picture")
-    if link is None:
-        return None
-    path = Path(json.loads(link["meta"] or "{}").get("path", ""))
-    return path if path.is_file() and path.stat().st_size <= PHOTO_MAX else None
 
 
 def _save_file(settings: Settings, file_id: str, folder: Path, stem: str) -> Path:
