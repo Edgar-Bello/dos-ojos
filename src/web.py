@@ -518,7 +518,7 @@ class App:
     def _maybe_read(self, conn, record) -> None:
         """Read a field from the satellite the moment it has all it needs.
 
-        That is a map, a crop and a planting date, from a farmer who has finished
+        That is a map, a crop and (for all but trees) a planting date, from a farmer who has finished
         answering questions (the waterings they give last count too). Only with
         ``DOSOJOS_READ_NOW``; otherwise the daily run does it overnight.
         """
@@ -530,8 +530,8 @@ class App:
         events = store.events_for(conn, record.id)
         planted = sorted(e.day.isoformat() for e in events
                          if e.kind == "planted" and e.voided_at is None)
-        if not planted:
-            return
+        if not planted and record.crop != "citrus":
+            return          # trees are never asked a planting date: the season is the year
         shape_now = json.dumps([record.outline, record.crop, planted], sort_keys=True)
         seen = self._read_as.get(record.id)
         if seen == shape_now:

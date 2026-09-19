@@ -651,6 +651,16 @@ T: dict[str, tuple[str, str]] = {
                      "agua y el terreno. El enlace dura {days} días.",
                      "Why {field}: {link} . It has the satellite charts, the water arithmetic "
                      "and the ground. The link lasts {days} days."),
+    "explain_link_drone": ("Por qué {field}: {link} . Trae lo que encontró su vuelo del dron, "
+                           "en 3D si lo hay. La parte del satélite llega con su primera "
+                           "lectura. El enlace dura {days} días.",
+                           "Why {field}: {link} . It has what your drone flight found, in 3D "
+                           "where there is one. The satellite part comes with its first "
+                           "reading. The link lasts {days} days."),
+    "explain_waiting": ("{fields}: todavía no hay nada que explicar; el satélite aún no lo "
+                        "mira. Mande PORQUE otra vez más tarde.",
+                        "{fields}: nothing to explain yet; the satellite hasn't read it. "
+                        "Text WHY again later."),
     "explain_none": ("Todavía no puedo explicar nada: falta que el satélite mire sus campos. "
                      "Mande AGUA en unos días.",
                      "I can't explain anything yet: the satellite hasn't looked at your fields. "

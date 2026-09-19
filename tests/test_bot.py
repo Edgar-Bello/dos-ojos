@@ -518,3 +518,48 @@ def test_a_location_sent_later_places_the_field_that_had_none(phone: Phone) -> N
     assert "tap the corners" in replies[0]
     record = store.fields_of(phone.bot.conn, PHONE)[0]
     assert (record.lat, record.lon) == (40.47744, -86.98959)
+
+
+def test_why_names_the_fields_it_cannot_explain_yet(phone: Phone) -> None:
+    onboard(phone, lang="2")
+    register_field(phone, "Dan Field")
+    phone("NEW")
+    register_field(phone, "Citrus Grove")
+    draw(phone.bot.conn, "F001")                        # only Dan Field has a map
+    replies = phone("WHY")
+    assert any(r.startswith("Why Dan Field:") for r in replies)
+    assert "Citrus Grove: nothing to explain yet" in replies[-1]
+
+
+def test_why_with_a_name_sends_only_that_field(phone: Phone) -> None:
+    onboard(phone, lang="2")
+    register_field(phone, "Dan Field")
+    phone("NEW")
+    register_field(phone, "Citrus Grove")
+    draw(phone.bot.conn, "F001")
+    draw(phone.bot.conn, "F002")
+    replies = phone("why Citrus Field")                 # "field" says nothing; "citrus" does
+    assert [r.split(":")[0] for r in replies] == ["Why Citrus Grove"]
+
+
+def test_a_drone_flight_alone_is_worth_a_why_page(phone: Phone, monkeypatch) -> None:
+    from dosojos_sms import status as status_mod
+    onboard(phone, lang="2")
+    register_field(phone, "Citrus Grove")               # no map, so no satellite yet
+    monkeypatch.setattr(status_mod, "latest_flags",
+                        lambda settings, field_id: {"flight_id": "F001-1"} if field_id == "F001"
+                        else None)
+    replies = phone("WHY")
+    assert replies[0].startswith("Why Citrus Grove:") and "drone flight found" in replies[0]
+
+
+def test_a_command_at_the_other_crop_question_is_a_command(phone: Phone) -> None:
+    onboard(phone, lang="2")
+    phone("UTRGV")
+    phone("NOT SURE")
+    phone("26.1484, -97.9940")
+    phone("7")                                           # Other: what is it?
+    phone("NEW")
+    record = store.fields_of(phone.bot.conn, PHONE)[0]
+    assert record.crop_name != "NEW"
+    assert phone.state == "field_name"                  # asking the new field's name

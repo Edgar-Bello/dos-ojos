@@ -489,6 +489,10 @@ class Turn:
 
     def _on_f_crop_other(self) -> None:
         record = self._field()
+        command = parse.command(self.body)
+        if command:        # "NUEVO" here is a new field, not a crop called NEW
+            self._interrupt(command)
+            return
         name = parse.name(self.body, limit=30)
         if not name:
             self._retry()
@@ -1020,18 +1024,34 @@ class Turn:
     def _explain(self) -> None:
         """A link to the page showing how each field's answer was worked out.
 
-        One link per field with a real checkbook, since the working is per field.
+        One link per field that has something to show: a satellite checkbook, or
+        what a drone flight found. A field named in the text ("WHY citrus") gets
+        only its own link; a field with nothing yet is named, not left out.
         """
-        explained = [r for r in self.fields()
-                     if self.bot.water.field(r, store.events_for(self.conn, r.id),
-                                             self.today).status is not None]
-        if not explained:
+        settings = self.bot.settings
+        records = self.fields()
+        named = _named_fields(self.body, records)
+        if named:
+            records = named
+        ready, waiting = [], []
+        for record in records:
+            checked = self.bot.water.field(record, store.events_for(self.conn, record.id),
+                                           self.today).status is not None
+            flown = any(find(settings, record.id) for find in (
+                status_mod.latest_flags, status_mod.latest_terrain, status_mod.latest_thermal))
+            if checked or flown:
+                ready.append((record, checked))
+            else:
+                waiting.append(record)
+        if not ready:
             self.say("explain_none")
             return
-        for record in explained:
+        for record, checked in ready:
             token = link_token(self.conn, "explain", record.id, self.bot.now)
-            self.say("explain_link", field=record.name,
-                     link=self.bot.settings.link(f"r/{token}"), days=LINK_DAYS)
+            self.say("explain_link" if checked else "explain_link_drone", field=record.name,
+                     link=settings.link(f"r/{token}"), days=LINK_DAYS)
+        if waiting:
+            self.say("explain_waiting", fields=text.listing([r.name for r in waiting], self.lang))
 
     def _list_fields(self) -> None:
         records = self.fields()
@@ -1358,3 +1378,18 @@ def link_token(conn: sqlite3.Connection, kind: str, field_id: str,
 def map_token(conn: sqlite3.Connection, field_id: str, now: datetime | None = None) -> str:
     """The field's map link token."""
     return link_token(conn, "map", field_id, now)
+
+
+#: Words in a field's name that say nothing about which field it is.
+_GENERIC = {"field", "fields", "campo", "campos", "the", "el", "la", "los", "las", "de", "del",
+            "my", "mi", "why", "porque", "por", "que"}
+
+
+def _named_fields(body: str, records: list) -> list:
+    """The fields a text names, by the distinctive words of their names ("WHY citrus")."""
+    said = set(parse.words(body)) - _GENERIC
+    if not said:
+        return []
+    scored = [(len(said & (set(parse.words(r.name)) - _GENERIC)), r) for r in records]
+    best = max((score for score, _ in scored), default=0)
+    return [r for score, r in scored if score and score == best]
