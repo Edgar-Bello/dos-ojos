@@ -43,7 +43,12 @@ DAILY_AT = 6
 TUNNEL_WAIT_S = 60
 #: `dosojos-sms webhook` exits with this when the number must be pointed by hand.
 NOT_OWNED_EXIT = 3
-QUICK_TUNNEL = re.compile(r"https://[a-z0-9-]+\.trycloudflare\.com")
+#: A quick tunnel's address is several words joined by hyphens
+#: (https://sie-reasons-prominent-valued.trycloudflare.com). cloudflared also names
+#: its own API host, api.trycloudflare.com, while it starts: taking that one put
+#: Cloudflare's "Method Not Allowed" page in farmers' map and upload links.
+QUICK_TUNNEL = re.compile(
+    r"https://(?!api\.)[a-z0-9]+(?:-[a-z0-9]+)+\.trycloudflare\.com")
 
 TELEGRAM = """\
 # Or instead: a Telegram bot. In Telegram, message @BotFather, send /newbot, and
@@ -116,6 +121,30 @@ def find_cloudflared() -> Path | None:
     return None
 
 
+def tunnel_reaches_us(address: str, timeout: float = 20.0) -> bool:
+    """True when that address answers as this server, not as something of Cloudflare's.
+
+    A tunnel takes a moment to come up, so this keeps asking until it answers or
+    the time runs out.
+    """
+    import urllib.error
+    import urllib.request
+
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            with urllib.request.urlopen(f"{address}/sim", timeout=10) as answer:
+                if "DosOjos" in (answer.headers.get("Server") or ""):
+                    return True
+        except urllib.error.HTTPError as exc:      # our own 404 is still our server
+            if "DosOjos" in (exc.headers.get("Server") or ""):
+                return True
+        except OSError:
+            pass
+        time.sleep(2)
+    return False
+
+
 def open_tunnel(cloudflared: Path) -> tuple[subprocess.Popen, str]:
     """Start a quick tunnel to the server's port and wait for its address."""
     process = subprocess.Popen(
@@ -141,6 +170,16 @@ def open_tunnel(cloudflared: Path) -> tuple[subprocess.Popen, str]:
         raise SystemExit("The tunnel did not give an address. Check the internet connection "
                          "and run live.cmd again.")
     return process, found[0]
+
+
+def check_tunnel(address: str) -> None:
+    """Say plainly whether farmers' links will work, before any go out."""
+    if tunnel_reaches_us(address):
+        say(f"  links checked   {address}/f/... opens this server")
+        return
+    say(f"\nWARNING: {address} did not answer as this server. Map and upload links sent to "
+        f"farmers may not open. Stop live.cmd (Ctrl+C) and start it again to get a new "
+        f"address.")
 
 
 def sms(*arguments: str, env: dict | None = None) -> int:
@@ -189,6 +228,8 @@ def start() -> int:
             say("The Twilio number could not be pointed at the tunnel; see the message above.")
             return 1
         threading.Thread(target=every_morning, args=(env,), daemon=True).start()
+        # Once the server is up, make sure the address in farmers' links really opens it.
+        threading.Thread(target=check_tunnel, args=(address,), daemon=True).start()
         say(f"\nMessage the Telegram bot, or text the Twilio number from a verified phone. The pretend phone still works "
             f"here: http://localhost:{PORT}/sim\nCtrl+C stops it all.\n")
         return sms("serve", "--port", str(PORT), "--sim", env=env)
