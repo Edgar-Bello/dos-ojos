@@ -35,7 +35,7 @@ SAMPLE = {"link": "https://dosojos.example.com/f/AbCdEfGhIjKlMnOp", "field": "Ca
           "method": "surcos", "days": "12", "low": "9", "high": "16", "acres": "38.6",
           "said": "40", "raw": "10 af", "hours": "6", "n": "412", "size": "3.1 GB",
           "lat": "26.14840", "lon": "-97.99400", "what": "riego Campo Norte mar 18 ago",
-          "options": "1 Campo Norte, 2 La Loma, 3 Todos", "a": "mié 4 mar", "b": "vie 3 abr",
+          "options": "1 Campo Norte\n2 La Loma\n3 Todos", "a": "mié 4 mar", "b": "vie 3 abr",
           "stage": "embuche y floración", "where": "en el lado oeste", "yd": "147",
           "contact": "Edgar 956-555-0100", "amount": ", 4 pulgadas",
           "about": "unos 12 días", "year": "2019", "plan": "satélite y dron",

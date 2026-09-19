@@ -190,7 +190,7 @@ def test_only_sorghum_fields_are_offered(phone: Phone, conn, water) -> None:
         draw(conn, field_id)
     water.status = FakeStatus(stage=stage())
     menu = phone("PULGON")[0]
-    assert menu == g("¿Cuál campo de sorgo? 1 Sorgo Norte, 2 Sorgo Sur")
+    assert menu == g("¿Cuál campo de sorgo?\n1 Sorgo Norte\n2 Sorgo Sur")
     assert "Sorgo Sur" in phone("2")[0]
     assert phone.state == "aphid:count"
 

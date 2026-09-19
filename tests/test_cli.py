@@ -145,7 +145,7 @@ def test_say_texts_a_farmer(farm: Path) -> None:
 def test_the_chat_command(tmp_path: Path) -> None:
     result = run(tmp_path / "farm_data", "chat", "--phone", "9565550160", input="hola\n1\n\n")
     assert "Texting as +19565550160" in result.output
-    assert "Responda 1 para español" in result.output and "¿Como se llama?" in result.output
+    assert "1 Español" in result.output and "¿Como se llama?" in result.output
 
 
 def test_remind_lists_before_it_sends(farm: Path, monkeypatch) -> None:

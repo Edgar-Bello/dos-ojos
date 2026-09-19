@@ -106,7 +106,7 @@ def test_crop_with_two_fields_asks_which(phone: Phone, conn) -> None:
     register_field(phone)
     phone("NUEVO")
     register_field(phone, "La Loma", last="9/1 3")
-    assert "1 Campo Norte, 2 La Loma" in phone("CROP")[0]
+    assert "1 Campo Norte\n2 La Loma" in phone("CROP")[0]
     phone("2")
     phone("3")
     assert store.get_field(conn, "F002").crop == "corn"

@@ -253,3 +253,16 @@ def test_a_field_name_taken_out_before_the_date_leaves_the_amount_alone() -> Non
     found = parse.find_date(norm, date(2026, 9, 12), window="irrigated")
     assert found.day == date(2026, 9, 11)
     assert parse.find_amount(parse.without(norm, found.span)).inches == 3.0
+
+
+def test_a_pin_with_one_decimal_is_still_a_pin() -> None:
+    """A tester in Veracruz typed 19.5, -96.9 and was told it was not coordinates."""
+    place = parse.find_place("19.5, -96.9")
+    assert isinstance(place, parse.Place)
+    assert (place.lat, place.lon) == (19.5, -96.9) and place.covered
+
+
+def test_plain_numbers_are_still_not_a_pin() -> None:
+    assert not isinstance(parse.find_place("40"), parse.Place)
+    assert not isinstance(parse.find_place("9/2 4"), parse.Place)
+    assert not isinstance(parse.find_place("-8698959"), parse.Place)

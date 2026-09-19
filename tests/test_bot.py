@@ -84,7 +84,7 @@ def test_a_date_that_could_be_two_is_asked(phone: Phone, conn) -> None:
     # register_field stopped at the planting question
     assert phone.state == "a:day"
     pick = phone("3/4")
-    assert pick == ["¿Qué fecha es? 1) mié 4 mar 2) vie 3 abr. Responda 1 o 2."]
+    assert pick == ["¿Qué fecha es?\n1 mié 4 mar\n2 vie 3 abr\nResponda 1 o 2."]
     readback = phone("2")
     assert "vie 3 abr" in readback[0]
     phone("si")
@@ -235,7 +235,7 @@ def two_fields(phone: Phone, conn, *, plan: str = "1") -> None:
 def test_watered_with_two_fields_asks_which(phone: Phone, conn) -> None:
     two_fields(phone, conn)
     pick = phone("REGUE 4")
-    assert pick == ["¿Cual campo? 1 Campo Norte, 2 La Loma, 3 Todos"]
+    assert pick == ["¿Cual campo?\n1 Campo Norte\n2 La Loma\n3 Todos"]
     readback = phone("1")
     assert readback == ["Anoté: riego en Campo Norte el sab 12 sep (hoy), 4 pulgadas. ¿Correcto? "
                         "Responda SI o NO."]
@@ -586,7 +586,7 @@ def test_a_tester_can_make_the_bot_forget_everything(phone: Phone) -> None:
     conn = phone.bot.conn
     assert store.get_farmer(conn, PHONE) is None and store.fields_of(conn, PHONE) == []
     assert conn.execute("SELECT COUNT(*) FROM events").fetchone()[0] == 0
-    assert "Reply 2 for English" in phone("hola")[0]         # a stranger again
+    assert "2 English" in phone("hola")[0]                  # a stranger again
     phone.all("2", "Dan", "yes", "1")
     phone("Dan Field")
     assert store.fields_of(conn, PHONE)[0].id == "F002"       # F001's cache stays F001's

@@ -143,7 +143,8 @@ def test_the_simulator_talks(base: str) -> None:
     status, body = call(f"{base}/sim/messages?phone=%2B19565550150&after=0")
     messages = json.loads(body)["messages"]
     assert [m["direction"] for m in messages] == ["in", "out"]
-    assert messages[1]["segments"] == 2 and messages[1]["status"] == "kept"
+    # The welcome is one text now that the two languages are a list.
+    assert messages[1]["segments"] == 1 and messages[1]["status"] == "kept"
 
 
 def test_the_simulator_refuses_tunnels(base: str) -> None:

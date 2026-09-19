@@ -238,9 +238,10 @@ def listing(names: list[str], lang: str) -> str:
 # --------------------------------------------------------------------------- #
 
 #: The first reply to a new number, before a language is known.
-WELCOME = ("Dos Ojos: le decimos cuándo regar sus campos. Responda 1 para español. "
-           "Reply 2 for English. Pueden aplicar cargos / Msg&data rates may apply. "
-           "ALTO/STOP para salir.")
+WELCOME = ("Dos Ojos: le decimos cuándo regar sus campos.\n"
+           "1 Español\n"
+           "2 English\n"
+           "Pueden aplicar cargos / Msg&data rates may apply. ALTO/STOP para salir.")
 
 T: dict[str, tuple[str, str]] = {
     # --- getting to know the farmer ------------------------------------------
@@ -294,19 +295,19 @@ T: dict[str, tuple[str, str]] = {
                        "(ej. 26.15, -97.99) o describa el lugar con caminos o millas.",
                        "I couldn't find a location. Send a Google Maps pin, the coordinates "
                        "(e.g. 26.15, -97.99), or describe the place with roads or mile lines."),
-    "crop": ("¿Qué tiene sembrado en {field}? 1 Sorgo 2 Algodón 3 Maíz 4 Caña 5 Cítricos "
-             "6 Soya 7 Otro 8 Nada ahorita",
-             "What's growing in {field}? 1 Sorghum 2 Cotton 3 Corn 4 Sugarcane 5 Citrus "
-             "6 Soybeans 7 Other 8 Nothing now"),
+    "crop": ("¿Qué tiene sembrado en {field}?\n1 Sorgo\n2 Algodón\n3 Maíz\n"
+             "4 Caña\n5 Cítricos\n6 Soya\n7 Otro\n8 Nada ahorita",
+             "What's growing in {field}?\n1 Sorghum\n2 Cotton\n3 Corn\n"
+             "4 Sugarcane\n5 Citrus\n6 Soybeans\n7 Other\n8 Nothing now"),
     "crop_other": ("¿Qué cultivo es?", "Which crop is it?"),
     "planted": ("¿Qué día sembró el {crop} en {field}? (ej. 3/15 o 15 marzo)",
                 "What day was the {crop} planted in {field}? (e.g. 3/15 or March 15)"),
     "planted_cane": ("¿Cuándo se sembró o se cortó por última vez la caña de {field}? (ej. 1/20)",
                      "When was the cane in {field} planted or last cut? (e.g. 1/20)"),
-    "method": ("¿Cómo riega {field}? 1 Surcos 2 Inundación o melgas 3 Goteo 4 Aspersión "
-               "5 Pivote 6 No se riega (temporal)",
-               "How is {field} watered? 1 Furrows 2 Flood or borders 3 Drip 4 Sprinklers "
-               "5 Pivot 6 Not irrigated (rainfed)"),
+    "method": ("¿Cómo riega {field}?\n1 Surcos\n2 Inundación o melgas\n"
+               "3 Goteo\n4 Aspersión\n5 Pivote\n6 No se riega (temporal)",
+               "How is {field} watered?\n1 Furrows\n2 Flood or borders\n"
+               "3 Drip\n4 Sprinklers\n5 Pivot\n6 Not irrigated (rainfed)"),
     "side": ("¿Por qué lado entra el agua a {field}? Responda N, S, E u O (norte, sur, este, "
              "oeste), o NO SE.",
              "Which side does the water come into {field} from? Reply N, S, E or W, or "
@@ -348,8 +349,8 @@ T: dict[str, tuple[str, str]] = {
                          "Got it: {crop} planted in {fields} {day}. Correct? YES or NO"),
     "readback_undo": ("¿Quito esto: {what}? SI o NO", "Remove this: {what}? YES or NO"),
     "saved": ("Anotado.", "Saved."),
-    "date_pick": ("¿Qué fecha es? 1) {a} 2) {b}. Responda 1 o 2.",
-                  "Which date? 1) {a} 2) {b}. Reply 1 or 2."),
+    "date_pick": ("¿Qué fecha es?\n1 {a}\n2 {b}\nResponda 1 o 2.",
+                  "Which date?\n1 {a}\n2 {b}\nReply 1 or 2."),
     "date_future": ("El {day} todavía no llega. ¿Qué día fue?",
                     "{day} hasn't come yet. Which day was it?"),
     "date_old": ("El {day} fue hace más de un año. ¿Qué día fue?",
@@ -369,7 +370,7 @@ T: dict[str, tuple[str, str]] = {
     "yes_no": ("Responda SI o NO.", "Reply YES or NO."),
     "menu_number": ("Responda con el número.", "Reply with the number."),
     # --- things to do --------------------------------------------------------
-    "pick_field": ("¿Cuál campo? {options}", "Which field? {options}"),
+    "pick_field": ("¿Cuál campo?\n{options}", "Which field?\n{options}"),
     "all_fields": ("Todos", "All"),
     "no_fields": ("Todavía no tiene campos registrados.", "You don't have any fields yet."),
     "ask_irrigation_day": ("¿Qué día regó {fields} y cuántas pulgadas? (ej. hoy 4, o 9/12)",
@@ -387,10 +388,10 @@ T: dict[str, tuple[str, str]] = {
                    "9/2 4). If it's acre-feet: 9/2 10 af"),
     "ask_bare": ("Cuando voló, ¿el suelo de {fields} estaba sin cultivo (pelón)? SI o NO",
                  "When you flew, was {fields} bare, with no crop? YES or NO"),
-    "photo_kind": ("Recibimos su foto. ¿Qué es? 1 Ticket de agua 2 Un problema en el campo "
-                   "3 Otra cosa",
-                   "Got your photo. What is it? 1 Water ticket 2 A problem in the field "
-                   "3 Something else"),
+    "photo_kind": ("Recibimos su foto. ¿Qué es?\n1 Ticket de agua\n"
+                   "2 Un problema en el campo\n3 Otra cosa",
+                   "Got your photo. What is it?\n1 Water ticket\n"
+                   "2 A problem in the field\n3 Something else"),
     "photo_saved": ("Gracias, se la pasamos al equipo.", "Thanks, we passed it to the team."),
     "upload_link": ("Suba las fotos del vuelo aquí, mejor con WiFi: {link} . Puede subirlas "
                     "por partes; el enlace dura {days} días.",
@@ -415,13 +416,14 @@ T: dict[str, tuple[str, str]] = {
                       "try again in {minutes} minutes."),
     "reading_gave_up": ("No pude leer {field}; se lo pasé al equipo. Mande AGUA más tarde.",
                         "I couldn't read {field}; I passed it to the team. Text WATER later."),
-    "ready_menu": ("También puede mandar: PORQUE (las gráficas y las cuentas){more}, AYUDA "
-                   "(todo lo demás).",
-                   "You can also text: WHY (the charts and the arithmetic){more}, HELP "
-                   "(everything else)."),
-    "menu_sorghum": (", ETAPA (cómo va el sorgo), PULGON (contar pulgón amarillo)",
-                     ", STAGE (how the sorghum is doing), APHID (count sugarcane aphid)"),
-    "menu_drone": (", DRON (mandar las fotos de su vuelo)", ", DRONE (send your flight)"),
+    "ready_menu": ("También puede mandar:\nPORQUE - las gráficas y las cuentas"
+                   "{more}\nAYUDA - todo lo demás",
+                   "You can also text:\nWHY - the charts and the arithmetic"
+                   "{more}\nHELP - everything else"),
+    "menu_sorghum": ("\nETAPA - cómo va el sorgo\nPULGON - contar pulgón amarillo",
+                     "\nSTAGE - how the sorghum is doing\nAPHID - count sugarcane aphid"),
+    "menu_drone": ("\nDRON - mandar las fotos de su vuelo",
+                   "\nDRONE - send your flight"),
     "flight_working": ("Estoy procesando el vuelo de {field}. Le aviso cuando esté listo.",
                        "I'm processing the flight over {field}. I'll text you when it's "
                        "ready."),
@@ -503,15 +505,40 @@ T: dict[str, tuple[str, str]] = {
                    "pueda.",
                    "Thanks. By our numbers {field} needs water now; water it as soon as you "
                    "can."),
-    "help": ("Dos Ojos. Mande: AGUA (cómo van), PORQUE (archivo con gráficas), REGUE fecha "
-             "pulgadas, LLUVIA pulgadas, SEMBRE, COSECHA, ETAPA (cómo va el sorgo), PULGON "
-             "(anotar pulgón amarillo), DRON (fotos del dron), PLAN (qué usa), CULTIVO, CAMPOS, NUEVO "
-             "(otro campo), MAPA, BORRAR (quitar lo último), ALTO (no recibir más).{contact}",
-             "Dos Ojos. Text: WATER (how they're doing), WHY (file with the charts), WATERED "
-             "date inches, RAIN inches, PLANTED, HARVESTED, STAGE (how the sorghum is doing), "
-             "APHID (log sugarcane aphid), DRONE (drone photos), PLAN (what you use), CROP, FIELDS, "
-             "NEW (another field), MAP, UNDO (remove the last entry), STOP (no more "
-             "texts).{contact}"),
+    "help": ("Dos Ojos. Mande:\n"
+             "AGUA - cómo van sus campos\n"
+             "PORQUE - archivo con gráficas\n"
+             "REGUE fecha pulgadas\n"
+             "LLUVIA pulgadas\n"
+             "SEMBRE - anotar la siembra\n"
+             "COSECHA - anotar la cosecha\n"
+             "ETAPA - cómo va el sorgo\n"
+             "PULGON - anotar pulgón amarillo\n"
+             "DRON - fotos del dron\n"
+             "PLAN - qué usa en un campo\n"
+             "CULTIVO - cambiar el cultivo\n"
+             "CAMPOS - su lista\n"
+             "NUEVO - otro campo\n"
+             "MAPA - marcar las esquinas\n"
+             "BORRAR - quitar lo último\n"
+             "ALTO - no recibir más{contact}",
+             "Dos Ojos. Text:\n"
+             "WATER - how your fields are\n"
+             "WHY - file with the charts\n"
+             "WATERED date inches\n"
+             "RAIN inches\n"
+             "PLANTED - log the planting\n"
+             "HARVESTED - log the harvest\n"
+             "STAGE - how the sorghum is doing\n"
+             "APHID - log sugarcane aphid\n"
+             "DRONE - drone photos\n"
+             "PLAN - what a field uses\n"
+             "CROP - change the crop\n"
+             "FIELDS - your list\n"
+             "NEW - another field\n"
+             "MAP - mark the corners\n"
+             "UNDO - remove the last entry\n"
+             "STOP - no more texts{contact}"),
     "contact": (" Dudas: {contact}", " Questions: {contact}"),
     "not_understood": ("No entendí; se lo pasé al equipo. Mande AYUDA para ver las opciones.",
                        "I didn't get that; I passed it to the team. Text HELP for the options."),
@@ -639,17 +666,21 @@ T: dict[str, tuple[str, str]] = {
                       "check pests, disease, nutrients or salt."),
     # --- what they signed up for -----------------------------------------------
     "plan": (
-        "¿Qué quiere usar en su primer campo? 1 Sólo satélite (no necesita nada) 2 Satélite "
-        "y su dron 3 Satélite, dron y cámara térmica (plagas). Cada campo puede ser distinto; "
-        "cambie con PLAN.",
-        "What would you like to use on your first field? 1 Satellite only (you need nothing) "
-        "2 Satellite and your drone 3 Satellite, drone and thermal camera (pests). Each field "
-        "can be different; change with PLAN."),
+        "¿Qué quiere usar en su primer campo?\n"
+        "1 Sólo satélite (no necesita nada)\n"
+        "2 Satélite y su dron\n"
+        "3 Satélite, dron y cámara térmica (plagas)\n"
+        "Cada campo puede ser distinto; cambie con PLAN.",
+        "What would you like to use on your first field?\n"
+        "1 Satellite only (you need nothing)\n"
+        "2 Satellite and your drone\n"
+        "3 Satellite, drone and thermal camera (pests)\n"
+        "Each field can be different; change with PLAN."),
     "field_plan": (
-        "¿Qué quiere usar en {field}? 1 Sólo satélite 2 Satélite y su dron 3 Satélite, dron "
-        "y cámara térmica (plagas)",
-        "What would you like to use on {field}? 1 Satellite only 2 Satellite and your drone "
-        "3 Satellite, drone and thermal camera (pests)"),
+        "¿Qué quiere usar en {field}?\n1 Sólo satélite\n"
+        "2 Satélite y su dron\n3 Satélite, dron y cámara térmica (plagas)",
+        "What would you like to use on {field}?\n1 Satellite only\n"
+        "2 Satellite and your drone\n3 Satellite, drone and thermal camera (pests)"),
     "plan_field_set": ("Listo: {field} con {plan}.", "Done: {field} gets {plan}."),
     "plan_satellite": (
         "Listo: {plan}. No necesita dron ni nada más; el satélite pasa cada 5 días.",
@@ -681,7 +712,7 @@ T: dict[str, tuple[str, str]] = {
         "escoja {field} y luego 2.",
         "{field} is on satellite only. To send drone photos for it: PLAN, pick {field}, "
         "then 2."),
-    "pick_field_plan": ("¿Qué campo? {options}", "Which field? {options}"),
+    "pick_field_plan": ("¿Qué campo?\n{options}", "Which field?\n{options}"),
     # --- a field with a drone: one answer, once everything is in -----------------
     "drone_next": (
         "Ahora las fotos del dron de {field}: cuando las tenga, mande DRON. Le mando la "
@@ -750,10 +781,12 @@ T: dict[str, tuple[str, str]] = {
     "pest_more": (" Hay {n} manchas más; vienen en el archivo de PORQUE.",
                   " There are {n} more patches; they're in the WHY file."),
     # --- sorghum -------------------------------------------------------------------
-    "maturity": ("¿El sorgo de {field} es de ciclo corto, mediano o largo? Lo dice la bolsa de "
-                 "la semilla. 1 Corto (temprano) 2 Mediano 3 Largo (tardío) 4 No sé",
-                 "Is the sorghum in {field} a short, medium or long season hybrid? The seed "
-                 "bag says. 1 Short (early) 2 Medium 3 Long (late) 4 Not sure"),
+    "maturity": ("¿El sorgo de {field} es de ciclo corto, mediano o largo? Lo dice la "
+                 "bolsa de la semilla.\n1 Corto (temprano)\n2 Mediano\n"
+                 "3 Largo (tardío)\n4 No sé",
+                 "Is the sorghum in {field} a short, medium or long season hybrid? The "
+                 "seed bag says.\n1 Short (early)\n2 Medium\n"
+                 "3 Long (late)\n4 Not sure"),
     "maturity_saved": ("Anotado: {field} es de {maturity}.", "Saved: {field} is {maturity}."),
     "maturity_unknown": ("Está bien: lo calculo como ciclo mediano. Si lo averigua, mande CICLO.",
                          "That's fine: I'll work it out as medium season. If you find out, "
@@ -761,7 +794,8 @@ T: dict[str, tuple[str, str]] = {
     "sorghum_none": ("Esto es para sorgo, y no tiene campos de sorgo registrados. Para agregar "
                      "uno: NUEVO.",
                      "This is for sorghum, and you have no sorghum fields. To add one: NEW."),
-    "pick_sorghum": ("¿Cuál campo de sorgo? {options}", "Which sorghum field? {options}"),
+    "pick_sorghum": ("¿Cuál campo de sorgo?\n{options}",
+                     "Which sorghum field?\n{options}"),
     "stage_report": ("{field}: va en {stage}, día {day} desde la siembra.{rest}",
                      "{field}: at {stage}, day {day} after planting.{rest}"),
     "stage_next": (" Sigue {stage} hacia el {date}.", " Next: {stage} around {date}."),

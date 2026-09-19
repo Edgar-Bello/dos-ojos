@@ -118,7 +118,7 @@ def test_the_answer_comes_with_the_flight_all_together(app: App) -> None:
     assert answer.startswith("North Field")
     assert "Everything for North Field is ready" in ready and "in 3D" in ready
     assert "/r/" in ready
-    assert "DRONE (send your flight)" in menu
+    assert "DRONE - send your flight" in menu
     with app.db() as conn:
         assert store.get_field(conn, field_id).answers["flight"] == "done"
 

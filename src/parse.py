@@ -700,7 +700,9 @@ _PLACE_PATTERNS = (
     rf"\bgeo:{_COORD},{_COORD}",
     rf"/(?:place|search|dir)/{_COORD},\s*\+?{_COORD}",
     rf"@{_COORD},{_COORD}",
-    r"(?<![\d.])(-?\d{1,2}\.\d{2,})\s*[,;/\s]\s*(-?\d{1,3}\.\d{2,})(?![\d.])",
+    # One decimal place is enough ("19.5, -96.9" is a real pin, about 10 km across);
+    # the farmer marks the corners on the map afterwards anyway.
+    r"(?<![\d.])(-?\d{1,2}\.\d+)\s*[,;/\s]\s*(-?\d{1,3}\.\d+)(?![\d.])",
 )
 _DMS = re.compile(
     r"(\d{1,2})\s*[°º]\s*(\d{1,2})\s*['′]\s*(\d{1,2}(?:\.\d+)?)\s*(?:\"|″|'')?\s*([NS])"

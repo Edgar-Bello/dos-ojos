@@ -1479,12 +1479,12 @@ class Turn:
             return say("field_plan", lang, field=name)
         if state == "field:pick":
             options = [f"{i} {f.name}" for i, f in enumerate(self.fields(), start=1)]
-            return say("pick_field_plan", lang, options=", ".join(options))
+            return say("pick_field_plan", lang, options="\n".join(options))
         if state == "a:fields":
             options = [f"{i} {f.name}" for i, f in enumerate(self.fields(), start=1)]
             if action.get("kind") in MULTI and len(options) > 1:
                 options.append(f"{len(options) + 1} {say('all_fields', lang)}")
-            return say("pick_field", lang, options=", ".join(options))
+            return say("pick_field", lang, options="\n".join(options))
         if state == "a:day":
             key = action.get("prompt") or "date_missing"
             if key in ("planted", "planted_cane"):
@@ -1510,7 +1510,7 @@ class Turn:
             return say("photo_kind", lang)
         if state == "sorghum:field":
             options = [f"{i} {f.name}" for i, f in enumerate(self._sorghum_fields(), start=1)]
-            return say("pick_sorghum", lang, options=", ".join(options))
+            return say("pick_sorghum", lang, options="\n".join(options))
         if state == "aphid:count":
             target = self._field((self.ctx.get("aphid") or {}).get("field"))
             return self._aphid_howto(target) if target else None
