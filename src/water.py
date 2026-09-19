@@ -708,6 +708,18 @@ def _weather_for(weather: pd.DataFrame, days: Sequence[date], field_id: str, sta
     table = weather.set_index("date")[["eto_mm", "rain_mm"]]
     frame = pd.DataFrame(index=pd.Index(list(days), name="date")).join(table)
     have = frame["eto_mm"].notna().to_numpy()
+    published = table.index[table["eto_mm"].notna()]
+    latest = max(published) if len(published) else None
+    if not have.any() and latest is not None and latest < days[0] \
+            and (days[-1] - latest).days <= 10:
+        # The whole balance is in the unpublished tail: a field watered (or
+        # planted) today or yesterday. Same fill as any tail, from the week
+        # before it, instead of refusing to answer until gridMET catches up.
+        week = table.loc[[d for d in published if (latest - d).days < PROJECTION_WEATHER_DAYS]]
+        frame["eto_mm"] = float(week["eto_mm"].mean())
+        frame["rain_mm"] = 0.0
+        frame["filled"] = True
+        return frame.reset_index(), len(days), latest
     if not have.any():
         raise WaterError(
             f"no weather cached for {field_id} from {start.isoformat()}. Run "

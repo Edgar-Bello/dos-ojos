@@ -238,6 +238,28 @@ def test_missing_weather_names_the_command_to_run() -> None:
         _checkbook(weather=_weather(30, start=DAY0 + timedelta(days=10)))
 
 
+def test_a_field_watered_today_is_answered_before_the_weather_catches_up() -> None:
+    """A grove watered today starts its balance today, a day past the last published
+    weather: the whole balance is the unpublished tail, filled from the week before."""
+    today = DAY0 + timedelta(days=60)
+    status, daily, _ = _checkbook(crop_text="citrus", method="sprinkler", as_of=today,
+                                  weather=_weather(60, eto=5.0),       # through yesterday
+                                  ndvi=_ndvi({k: 0.6 for k in range(0, 61, 5)}),
+                                  events=[_event(today, "irrigated", 2.0)])
+    assert daily["filled_weather"].all() and daily["eto_mm"].iloc[0] == pytest.approx(5.0)
+    assert status.days_left is not None
+    assert status.weather_through == (today - timedelta(days=1)).isoformat()
+
+
+def test_old_weather_is_still_not_stretched_over_weeks() -> None:
+    today = DAY0 + timedelta(days=60)
+    with pytest.raises(water.WaterError, match="dosojos-sat weather"):
+        _checkbook(crop_text="citrus", method="sprinkler", as_of=today,
+                   weather=_weather(40),                                # ends 20 days back
+                   ndvi=_ndvi({k: 0.6 for k in range(0, 61, 5)}),
+                   events=[_event(today, "irrigated", 2.0)])
+
+
 def test_a_grove_that_reads_as_bare_ground_is_doubted() -> None:
     status, _, _ = _checkbook(crop_text="citrus", method="flood",
                               ndvi=_ndvi({k: 0.15 for k in range(0, 61, 5)}),
