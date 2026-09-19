@@ -302,6 +302,27 @@ def test_a_cool_spring_holds_the_warning_back() -> None:
     assert status.sensitive is None
 
 
+def test_sorghum_at_black_layer_needs_no_more_water() -> None:
+    """Past physiological maturity the grain is made: the checkbook stops asking for
+    water, however dry the soil, and says why."""
+    events = [_event(DAY0, "planted"), _event(DAY0 + timedelta(days=38), "irrigated")]
+    # 30 heat units a day for 100 days: 3,000, past a short hybrid's black layer (2,673).
+    status, _, _ = _checkbook(weather=_hot_weather(120, 35.0, 18.3333), events=events,
+                              as_of=DAY0 + timedelta(days=100), maturity="short")
+    assert status.stage["stage"] == "black_layer"
+    assert status.status == water.STATUS_MATURE
+    assert (status.days_left, status.water_by, status.refill_net_in) == (None, None, None)
+    assert "black layer reached about" in status.notes[0] and "stop watering" in status.notes[0]
+    assert water.rank([status])[0].rank == 1
+
+
+def test_hard_dough_still_gets_water() -> None:
+    events = [_event(DAY0, "planted"), _event(DAY0 + timedelta(days=38), "irrigated")]
+    status, _, _ = _checkbook(weather=_hot_weather(120, 35.0, 18.3333), events=events,
+                              as_of=DAY0 + timedelta(days=80), maturity="short")
+    assert status.stage["stage"] != "black_layer" and status.status != water.STATUS_MATURE
+
+
 def test_other_crops_carry_no_sorghum_stage() -> None:
     status, _, _ = _checkbook(crop_text="corn", weather=_hot_weather(90, 35.0, 18.3333))
     assert status.stage is None

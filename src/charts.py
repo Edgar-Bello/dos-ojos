@@ -282,6 +282,8 @@ def water_verdict(status: dict) -> tuple[str, str]:
     word, days = status["status"], status["days_left"]
     if word == "harvested":
         return "Harvested: no water needed until the next crop", MEDIAN_COLOR
+    if word == "mature":
+        return "Mature (black layer): the grain is made, no more water needed", MEDIAN_COLOR
     if days == 0:
         return "WATER NOW: the crop is already short of water", FLAG_COLOR
     if days is None:

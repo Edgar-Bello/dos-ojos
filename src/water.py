@@ -72,6 +72,11 @@ STATUS_SOON = "water within 3 days"
 STATUS_WEEK = "water this week"
 STATUS_OK = "ok for now"
 STATUS_HARVESTED = "harvested"
+#: Grain sorghum past black layer: the grain is made and more water adds no yield
+#: (Texas A&M AgriLife: irrigation can stop at physiological maturity).
+STATUS_MATURE = "mature"
+#: Statuses that ask for no water at all.
+NO_WATER = (STATUS_HARVESTED, STATUS_MATURE)
 
 
 class WaterError(RuntimeError):
@@ -608,6 +613,15 @@ def checkbook(
         notes.insert(0, f"harvested {harvested[-1].day.isoformat()}: no water needed until "
                         "the next crop")
         sensitive = None
+    elif stage is not None and stage.stage == "black_layer":
+        status_word, days_left, days_range, water_by = STATUS_MATURE, None, None, None
+        until, refill = None, None
+        reached = next((d for key, _, d in stage.milestones if key == "black_layer" and d),
+                       None)
+        notes.insert(0, "black layer" + (f" reached about {reached.isoformat()}" if reached
+                                         else "") + ": the grain is made, more water adds "
+                        "no yield; stop watering and harvest when the grain is dry")
+        sensitive = None
     else:
         actual = daily[~daily["filled_weather"]].tail(PROJECTION_WEATHER_DAYS)
         eto_next = float((actual if not actual.empty else daily.tail(7))["eto_mm"].mean())
@@ -762,7 +776,7 @@ def rank(statuses: Iterable[WaterStatus]) -> list[WaterStatus]:
     go last.
     """
     def key(s: WaterStatus):
-        if s.status == STATUS_HARVESTED:
+        if s.status in NO_WATER:
             return (2, 0, 0, s.field_id)
         days = s.days_left if s.days_left is not None else MAX_PROJECTION_DAYS + 1
         return (0 if s.days_left is not None else 1, days, 0 if s.sensitive else 1, s.field_id)

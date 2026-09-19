@@ -979,7 +979,7 @@ def _format_water(ranked: Sequence[water_mod.WaterStatus]) -> str:
             "now" if s.days_left == 0 else
             f"{s.days_left} ({s.days_range[0]}-{s.days_range[1]})" if s.days_range else str(s.days_left)
         )
-        harvested = s.status == water_mod.STATUS_HARVESTED
+        harvested = s.status in water_mod.NO_WATER
         if harvested:
             days = "-"
         refill = "-" if s.refill_net_in is None else (
