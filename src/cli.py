@@ -690,6 +690,46 @@ def model3d_cmd(settings: Settings, flight_id: str, cloud: Path | None,
         click.echo(f"  {out / name}")
 
 
+@cli.command("trees-ai")
+@click.argument("flight_id")
+@click.pass_obj
+def trees_ai_cmd(settings: Settings, flight_id: str) -> None:
+    """Find and judge an orchard's trees with the trained model (needs chm first).
+
+    Reads the flight's chm.tif and ODM orthophoto. Writes trees_ai.geojson (every
+    tree: learned height, chance it is in poor shape), trees_ai.json (the counts,
+    and what the model scored on trees it was never trained on) and trees_ai.png.
+    """
+    from . import treeml
+
+    out = settings.flight_out(flight_id)
+    ortho = settings.flight_odm(flight_id) / "odm_orthophoto" / "odm_orthophoto.tif"
+    flight = None
+    try:
+        flight = get_flight(settings.manifest_path, flight_id)
+    except ManifestError:
+        pass
+    try:
+        model = treeml.TreeModel.load()
+        grids = treeml.load_grids(out / "chm.tif", ortho)
+        found = treeml.find_trees(model, grids)
+        summary = treeml.write(found, grids, out, model, banner=_public_banner(flight))
+    except treeml.TreeModelError as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(f"  trees found      {summary['trees']:,} in {summary['rows']} rows"
+               + (f", {summary['spacing_m']:.2f} m apart" if summary["spacing_m"] else "")
+               + (f" (+{summary['outside_rows']} plants outside the rows)"
+                  if summary["outside_rows"] else ""))
+    click.echo(f"  needs a look     {summary['needs_a_look']:,}")
+    click.echo(f"  gaps in the rows {summary['gaps']:,}")
+    if summary["height_m"]:
+        click.echo(f"  height           {summary['height_m']['median']:.2f} m typical "
+                   f"(canopy model alone {summary['canopy_model_median_m']:.2f} m)")
+    click.echo("  NOTE: " + model.card.get("caution", ""))
+    for name in ("trees_ai.geojson", "trees_ai.json", "trees_ai.png"):
+        click.echo(f"  {out / name}")
+
+
 def _format_stitched(stitched) -> str:
     """How the placing went, as an aligned block."""
     lines = [
