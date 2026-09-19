@@ -72,6 +72,8 @@ class Settings:
     #: Answer texts through Twilio's sending API instead of in the webhook's reply:
     #: the console's "Try out SMS" number drops webhook replies (error 12300).
     reply_by_api: bool = False
+    #: Phones (or Telegram chats, +0...) allowed the unlisted reset; see bot.RESET.
+    testers: frozenset = frozenset()
 
     @property
     def sms_dir(self) -> Path:
@@ -159,6 +161,8 @@ class Settings:
             read_now=(get("DOSOJOS_READ_NOW") or "").lower() in ("1", "yes", "true"),
             on_upload=get("DOSOJOS_ON_UPLOAD"),
             reply_by_api=(get("DOSOJOS_REPLY_BY_API") or "").lower() in ("1", "yes", "true"),
+            testers=frozenset(p.strip() for p in (get("DOSOJOS_TESTERS") or "").split(",")
+                              if p.strip()),
         )
 
 

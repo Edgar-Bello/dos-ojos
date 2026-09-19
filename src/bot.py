@@ -85,6 +85,12 @@ class Inbound:
     message_id: int | None = None
 
 
+#: Forget everything about the sender, to test a conversation from the start. Only
+#: for DOSOJOS_TESTERS, and deliberately in no help text or menu.
+RESET = "/reset"
+RESET_DONE = "Listo, olvide todo. Mande hola para empezar. / Done, all forgotten. Text hello to start."
+
+
 class Bot:
     """Answers texts, one at a time, against the SMS database."""
 
@@ -100,6 +106,10 @@ class Bot:
 
     def handle(self, message: Inbound) -> list[str]:
         """The replies to one text, in the farmer's language, ready for GSM."""
+        if (parse.normalize(message.body).strip() == RESET
+                and message.phone in self.settings.testers):
+            store.forget(self.conn, message.phone)
+            return [text.gsm_safe(RESET_DONE)]
         farmer = (store.get_farmer(self.conn, message.phone)
                   or store.add_farmer(self.conn, message.phone, channel=message.channel))
         replies = Turn(self, farmer, message).run()

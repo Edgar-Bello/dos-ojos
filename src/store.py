@@ -314,10 +314,18 @@ def _field(row: sqlite3.Row) -> FieldRow:
 
 
 def add_field(conn: sqlite3.Connection, phone: str, name: str) -> FieldRow:
-    """A new field with the next free id, F001 onwards."""
+    """A new field with the next free id, F001 onwards, never one used before.
+
+    An id names the field's satellite cache and drone flights too, so a field
+    that was forgotten must not hand its id, and its imagery, to a new one.
+    """
     numbers = [int(r["id"][1:]) for r in conn.execute("SELECT id FROM fields")
                if re.fullmatch(r"F\d+", r["id"])]
-    field_id = f"F{(max(numbers) + 1 if numbers else 1):03d}"
+    used = conn.execute("SELECT value FROM meta WHERE key = 'last_field'").fetchone()
+    top = max(numbers + ([int(used["value"])] if used else []), default=0)
+    field_id = f"F{top + 1:03d}"
+    conn.execute("INSERT INTO meta(key, value) VALUES('last_field', ?) "
+                 "ON CONFLICT(key) DO UPDATE SET value = excluded.value", (str(top + 1),))
     stamp = now_iso()
     conn.execute("INSERT INTO fields(id, phone, name, created_at, updated_at) VALUES (?,?,?,?,?)",
                  (field_id, phone, name, stamp, stamp))
@@ -574,3 +582,24 @@ def last_alert(conn: sqlite3.Connection, field_id: str, kind: str) -> datetime |
 def record_alert(conn: sqlite3.Connection, field_id: str, kind: str, key: str) -> None:
     conn.execute("INSERT OR REPLACE INTO alerts(field_id, kind, key, sent_at) VALUES (?,?,?,?)",
                  (field_id, kind, key, now_iso()))
+
+
+def forget(conn: sqlite3.Connection, phone: str) -> int:
+    """Erase one person and everything they told us; returns how many fields went.
+
+    For testing a conversation from the start. Their field ids are not reused.
+    """
+    ids = [r["id"] for r in conn.execute("SELECT id FROM fields WHERE phone = ?", (phone,))]
+    marks = ",".join("?" * len(ids))
+    if ids:
+        tokens = [r["token"] for r in conn.execute(
+            f"SELECT token FROM links WHERE field_id IN ({marks})", ids)]
+        if tokens:
+            conn.execute(f"DELETE FROM uploads WHERE token IN ({','.join('?' * len(tokens))})",
+                         tokens)
+        for table in ("links", "alerts", "events"):
+            conn.execute(f"DELETE FROM {table} WHERE field_id IN ({marks})", ids)
+        conn.execute(f"DELETE FROM fields WHERE id IN ({marks})", ids)
+    conn.execute("DELETE FROM messages WHERE phone = ?", (phone,))
+    conn.execute("DELETE FROM farmers WHERE phone = ?", (phone,))
+    return len(ids)

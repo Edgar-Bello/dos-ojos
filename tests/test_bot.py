@@ -563,3 +563,27 @@ def test_a_command_at_the_other_crop_question_is_a_command(phone: Phone) -> None
     record = store.fields_of(phone.bot.conn, PHONE)[0]
     assert record.crop_name != "NEW"
     assert phone.state == "field_name"                  # asking the new field's name
+
+
+def test_a_tester_can_make_the_bot_forget_everything(phone: Phone) -> None:
+    from dataclasses import replace
+    phone.bot.settings = replace(phone.bot.settings, testers=frozenset({PHONE}))
+    onboard(phone, lang="2")
+    register_field(phone, "Dan Field")
+    replies = phone("/reset")
+    assert "all forgotten" in replies[0]
+    conn = phone.bot.conn
+    assert store.get_farmer(conn, PHONE) is None and store.fields_of(conn, PHONE) == []
+    assert conn.execute("SELECT COUNT(*) FROM events").fetchone()[0] == 0
+    assert "Reply 2 for English" in phone("hola")[0]         # a stranger again
+    phone.all("2", "Dan", "yes", "1")
+    phone("Dan Field")
+    assert store.fields_of(conn, PHONE)[0].id == "F002"       # F001's cache stays F001's
+
+
+def test_nobody_else_can_reset(phone: Phone) -> None:
+    onboard(phone, lang="2")
+    register_field(phone, "Dan Field")
+    phone("/reset")
+    assert store.get_farmer(phone.bot.conn, PHONE) is not None
+    assert len(store.fields_of(phone.bot.conn, PHONE)) == 1
