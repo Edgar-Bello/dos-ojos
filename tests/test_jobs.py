@@ -91,12 +91,46 @@ def test_a_finished_field_is_read_straight_away(app: App) -> None:
     assert "DRONE" not in menu                 # a satellite-only farmer has no flight
 
 
-def test_a_flying_farmer_is_told_about_drone(app: App) -> None:
+def test_a_drone_field_waits_for_its_photos(app: App) -> None:
+    field_id = farmer_with_field(app, plan="drone")
+    read_now(app, field_id)
+    assert not texts(app)                      # "field done" already said what comes next
+    app.water.reason = None
+    app.jobs.finish()
+    [held] = texts(app)
+    assert "satellite part of North Field is ready" in held and "text DRONE" in held
+
+
+def test_the_answer_comes_with_the_flight_all_together(app: App) -> None:
     field_id = farmer_with_field(app, plan="drone")
     read_now(app, field_id)
     app.water.reason = None
     app.jobs.finish()
-    assert "DRONE (send your flight)" in texts(app)[-1]
+    summary = {"unit_type": "crown", "n_judged": 324, "n_stressed": 4, "n_dead": 19,
+               "n_missing": 0}
+    flight(app, field_id, "F001-20260910", {"block_summary.json": json.dumps(summary),
+                                             "flag_overlay.png": "PNG",
+                                             "model3d.json": json.dumps({"size_m": [91, 200]}),
+                                             "model3d.png": "PNG"})
+    app.jobs.finish()
+    trees, three_d, answer, ready, menu = texts(app)[-5:]
+    assert "trees need a look" in trees and "in 3D" in three_d
+    assert answer.startswith("North Field")
+    assert "Everything for North Field is ready" in ready and "in 3D" in ready
+    assert "/r/" in ready
+    assert "DRONE (send your flight)" in menu
+    with app.db() as conn:
+        assert store.get_field(conn, field_id).answers["flight"] == "done"
+
+
+def test_a_flight_that_fails_still_sends_the_satellite_answer(app: App) -> None:
+    field_id = farmer_with_field(app, plan="drone")
+    app.water.reason = None
+    app.jobs = Held(result=1)
+    app._process_flight(field_id, "F001-20260910")
+    app.jobs.finish()
+    failed, answer, menu = texts(app)[-3:]
+    assert "couldn't process the flight" in failed and answer.startswith("North Field")
 
 
 @pytest.mark.parametrize("change", [

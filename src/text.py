@@ -486,11 +486,11 @@ T: dict[str, tuple[str, str]] = {
                    "can."),
     "help": ("Dos Ojos. Mande: AGUA (cómo van), PORQUE (archivo con gráficas), REGUE fecha "
              "pulgadas, LLUVIA pulgadas, SEMBRE, COSECHA, ETAPA (cómo va el sorgo), PULGON "
-             "(anotar pulgón amarillo), DRON (fotos del dron), PLAN (qué usa), CAMPOS, NUEVO "
+             "(anotar pulgón amarillo), DRON (fotos del dron), PLAN (qué usa), CULTIVO, CAMPOS, NUEVO "
              "(otro campo), MAPA, BORRAR (quitar lo último), ALTO (no recibir más).{contact}",
              "Dos Ojos. Text: WATER (how they're doing), WHY (file with the charts), WATERED "
              "date inches, RAIN inches, PLANTED, HARVESTED, STAGE (how the sorghum is doing), "
-             "APHID (log sugarcane aphid), DRONE (drone photos), PLAN (what you use), FIELDS, "
+             "APHID (log sugarcane aphid), DRONE (drone photos), PLAN (what you use), CROP, FIELDS, "
              "NEW (another field), MAP, UNDO (remove the last entry), STOP (no more "
              "texts).{contact}"),
     "contact": (" Dudas: {contact}", " Questions: {contact}"),
@@ -614,10 +614,18 @@ T: dict[str, tuple[str, str]] = {
                       "check pests, disease, nutrients or salt."),
     # --- what they signed up for -----------------------------------------------
     "plan": (
-        "¿Qué quiere usar? 1 Sólo satélite (no necesita nada) 2 Satélite y su dron "
-        "3 Satélite, dron y cámara térmica (plagas). Siempre puede cambiar con PLAN.",
-        "What would you like to use? 1 Satellite only (you need nothing) 2 Satellite and "
-        "your drone 3 Satellite, drone and thermal camera (pests). Change any time with PLAN."),
+        "¿Qué quiere usar en su primer campo? 1 Sólo satélite (no necesita nada) 2 Satélite "
+        "y su dron 3 Satélite, dron y cámara térmica (plagas). Cada campo puede ser distinto; "
+        "cambie con PLAN.",
+        "What would you like to use on your first field? 1 Satellite only (you need nothing) "
+        "2 Satellite and your drone 3 Satellite, drone and thermal camera (pests). Each field "
+        "can be different; change with PLAN."),
+    "field_plan": (
+        "¿Qué quiere usar en {field}? 1 Sólo satélite 2 Satélite y su dron 3 Satélite, dron "
+        "y cámara térmica (plagas)",
+        "What would you like to use on {field}? 1 Satellite only 2 Satellite and your drone "
+        "3 Satellite, drone and thermal camera (pests)"),
+    "plan_field_set": ("Listo: {field} con {plan}.", "Done: {field} gets {plan}."),
     "plan_satellite": (
         "Listo: {plan}. No necesita dron ni nada más; el satélite pasa cada 5 días.",
         "Done: {plan}. You need no drone and nothing else; the satellite passes every 5 days."),
@@ -637,12 +645,56 @@ T: dict[str, tuple[str, str]] = {
         "sólo con el satélite.",
         "Note: to fly a drone over your farm the law asks for an FAA Part 107 licence "
         "($175 exam). Up to you whether to get it, hire someone, or stay on satellite only."),
-    "plan_now": ("Ahora tiene: {plan}.", "Right now you have: {plan}."),
+    "plan_now": ("Ahora {field} tiene: {plan}.", "Right now {field} has: {plan}."),
     "drone_not_in_plan": (
-        "Usted está en sólo satélite. Si ya tiene fotos de un dron, mande PLAN y escoja 2 "
-        "para subirlas.",
-        "You're on satellite only. If you already have drone photos, text PLAN and pick 2 "
-        "to upload them."),
+        "Ninguno de sus campos tiene dron. Si ya tiene fotos de un dron, mande PLAN y escoja "
+        "2 para subirlas.",
+        "None of your fields has a drone. If you already have drone photos, text PLAN and "
+        "pick 2 to upload them."),
+    "drone_field_not_in_plan": (
+        "{field} está en sólo satélite. Para mandar fotos de dron de ese campo: PLAN, "
+        "escoja {field} y luego 2.",
+        "{field} is on satellite only. To send drone photos for it: PLAN, pick {field}, "
+        "then 2."),
+    "pick_field_plan": ("¿Qué campo? {options}", "Which field? {options}"),
+    # --- a field with a drone: one answer, once everything is in -----------------
+    "drone_next": (
+        "Ahora las fotos del dron de {field}: cuando las tenga, mande DRON. Le mando la "
+        "respuesta del agua cuando el satélite y las fotos estén listos, todo junto.",
+        "Next, the drone photos of {field}: when you have them, text DRONE. I'll send the "
+        "water answer once the satellite and the photos are both done, all together."),
+    "drone_next_thermal": (
+        "Ahora las fotos del dron y de la cámara térmica de {field}: cuando las tenga, mande "
+        "DRON. Le mando la respuesta del agua cuando el satélite y las fotos estén listos, "
+        "todo junto.",
+        "Next, the drone and thermal photos of {field}: when you have them, text DRONE. I'll "
+        "send the water answer once the satellite and the photos are both done, all "
+        "together."),
+    "water_wait_photos": (
+        "{field}: la respuesta del agua llega junto con sus fotos del dron. Para mandarlas: "
+        "DRON.",
+        "{field}: the water answer comes together with your drone photos. To send them: "
+        "DRONE."),
+    "water_wait_working": (
+        "{field}: todavía estoy procesando sus fotos del dron. Le mando la respuesta del agua "
+        "cuando todo esté listo.",
+        "{field}: I'm still processing your drone photos. I'll text you the water answer when "
+        "everything is ready."),
+    "sat_ready_wait": (
+        "El satélite de {field} ya está listo. Faltan las fotos del dron: mande DRON. Luego le "
+        "mando todo junto.",
+        "The satellite part of {field} is ready. The drone photos are still missing: text "
+        "DRONE. Then I'll send everything together."),
+    "all_ready": (
+        "¡Todo listo para {field}! Arriba va la respuesta del agua. La página con las "
+        "gráficas{extra}: {link}",
+        "Everything for {field} is ready! The water answer is above. The page with the "
+        "charts{extra}: {link}"),
+    "all_ready_3d": (", el campo en 3D (gírelo con el dedo) y el mapa del dron",
+                     ", your field in 3D (turn it with your finger) and the drone map"),
+    "all_ready_heat": (" y el mapa de la cámara térmica", " and the thermal map"),
+    "all_ready_drone": (" y el mapa del dron", " and the drone map"),
+    "crop_saved": ("Guardado: {field} tiene {crop}.", "Saved: {field} has {crop}."),
     # --- the explanation file ----------------------------------------------------
     "explain_offer": ("¿Quiere saber por qué? Responda PORQUE y le mando un archivo con las "
                       "gráficas.",

@@ -23,7 +23,7 @@ from . import telegram as telegram_mod
 from . import twilio as twilio_mod
 from .bot import Bot, Inbound, Media, Turn, map_token
 from .config import DEFAULT_PORT, LINK_DAYS, ConfigError, Settings, setup_logging
-from .status import Water, latest_terrain
+from .status import Water, drone_wait, latest_terrain
 from .web import SIM_PHONE, App, make_server, start_flusher
 
 log = logging.getLogger(__name__)
@@ -580,7 +580,8 @@ def plan_reminders(conn, settings: Settings, bot: Bot, today: date) -> list[Plan
         lang = farmer.language
         for record in store.fields_of(conn, farmer.phone):
             item = bot.water.field(record, store.events_for(conn, record.id), today)
-            s = item.status
+            # A drone field's first answer comes with its photos, not in an alert before them.
+            s = None if drone_wait(settings, farmer, record) else item.status
             if s is not None and s.status != STATUS_HARVESTED and s.method != "none":
                 cycle = s.last_irrigation or s.start
                 gross = text.inches(round(s.refill_gross_in or s.refill_net_in or 0, 1))

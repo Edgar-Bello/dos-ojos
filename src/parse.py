@@ -130,6 +130,7 @@ COMMANDS: dict[str, tuple[str, ...]] = {
     "map": ("mapa", "map"),
     "drone": ("dron", "drone", "vuelo", "flight", "volamos"),
     "plan": ("plan", "planes", "paquete", "servicio", "nivel"),
+    "crop": ("cultivo", "cultivos", "crop", "crops", "cambiar cultivo", "change crop"),
     # Not "info" or "opciones": those already mean HELP, and a farmer who wants
     # the menu should never get a file instead.
     "explain": ("porque", "por que", "detalle", "detalles", "explicacion", "explique",

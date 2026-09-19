@@ -23,7 +23,7 @@ from dosojos_sat import water as sat_water
 
 from . import text
 from .config import Settings
-from .store import Event, FieldRow
+from .store import Event, Farmer, FieldRow, plan_of
 from .text import say
 
 log = logging.getLogger(__name__)
@@ -299,6 +299,23 @@ def latest_flags(settings: Settings, field_id: str) -> dict | None:
 def latest_thermal(settings: Settings, field_id: str) -> dict | None:
     """The most recent flight's thermal.json, for farmers who flew a thermal camera."""
     return latest_report(settings, field_id, "thermal")
+
+
+def drone_wait(settings: Settings, farmer: Farmer | None, record: FieldRow) -> str | None:
+    """Why a field's water answer is held back for its drone photos, or None.
+
+    A farmer who picked a drone for a field gets one answer with everything in
+    it, not a satellite answer now and a different story later. ``photos``: none
+    sent yet. ``working``: sent and being processed. A flight that failed lets
+    the satellite answer go out on its own.
+    """
+    if plan_of(farmer, record) not in text.FLYING_PLANS:
+        return None
+    state = record.answers.get("flight")
+    if state in ("done", "failed") or any(
+            find(settings, record.id) for find in (latest_flags, latest_terrain, latest_thermal)):
+        return None
+    return "working" if state == "working" else "photos"
 
 
 #: Below this the score says little worth a text message; it still shows on the

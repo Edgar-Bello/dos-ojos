@@ -35,10 +35,11 @@ from shapely.validation import make_valid
 from dosojos_sat.fields import compute_acres, utm_epsg_for
 
 from . import explain, export, outbox, parse, store, text, twilio
-from .bot import Bot, Inbound, Media, map_token
+from .bot import Bot, Inbound, Media, link_token, map_token
 from .config import LINK_DAYS, Settings
 from .jobs import Jobs
-from .status import Water, latest_flags, latest_terrain, latest_thermal, pest_line
+from .status import (Water, drone_wait, latest_flags, latest_terrain, latest_thermal,
+                     pest_line)
 from .status import message as status_message
 
 log = logging.getLogger(__name__)
@@ -443,6 +444,8 @@ class App:
             flight_id = export.register_flight(self.settings, store.get_upload(conn, token),
                                                record)
             if first_time:
+                record.answers["flight"] = "working"
+                store.save_field(conn, record)
                 body = text.say("upload_done", farmer.language, n=upload["files"],
                                 size=text.size(upload["bytes"]), field=record.name)
                 outbox.deliver(conn, self.settings, farmer, body, now=self.now, urgent=True)
@@ -466,8 +469,10 @@ class App:
         page = explain.build(
             settings, farmer, item, events, today=today,
             terrain=latest_terrain(settings, record.id),
-            thermal=latest_thermal(settings, record.id) if farmer.plan == "thermal" else None,
-            flags=latest_flags(settings, record.id) if farmer.plan in text.FLYING_PLANS else None,
+            thermal=(latest_thermal(settings, record.id)
+                     if store.plan_of(farmer, record) == "thermal" else None),
+            flags=(latest_flags(settings, record.id)
+                   if store.plan_of(farmer, record) in text.FLYING_PLANS else None),
             download=None if download else f"{token}/file",
         )
         return page.encode("utf-8")
@@ -542,7 +547,8 @@ class App:
         command = self._sms_command("daily", "--fields", record.id, "--since-planting",
                                     "--skip-baseline")
         if self.jobs.add(f"read:{record.id}", command,
-                         lambda ok, attempt: self._read_done(record.id, ok, attempt)):
+                         lambda ok, attempt: self._read_done(record.id, ok, attempt)) \
+                and drone_wait(self.settings, farmer, record) is None:
             outbox.deliver(conn, self.settings, farmer,
                            text.say("reading_now", farmer.language, field=record.name),
                            now=self.now, urgent=True)
@@ -561,9 +567,12 @@ class App:
             item = (self.water.field(record, store.events_for(conn, record.id), today)
                     if ok else None)
             if item is not None and item.status is not None:
-                send(status_message(item, lang, today, map_link=lambda r: self.settings.link(
-                    f"f/{map_token(conn, r.id, self.now)}")))
-                send(self._menu(farmer, record))
+                wait = drone_wait(self.settings, farmer, record)
+                if wait == "photos":
+                    send(text.say("sat_ready_wait", lang, field=record.name))
+                elif wait is None:
+                    self._answer(conn, farmer, record)
+                # "working": the flight's own finish sends everything together
                 return None
             if attempt < READ_ATTEMPTS:
                 send(text.say("reading_retry", lang, field=record.name,
@@ -575,11 +584,43 @@ class App:
             self._read_as.pop(field_id, None)
             return None
 
+    def _answer(self, conn, farmer, record, flight_id: str | None = None) -> bool:
+        """The water answer, the page's link when a drone flew, and the menu.
+
+        Sent once the satellite, and for a drone field its photos too, are done.
+        False when the satellite reading is not in yet.
+        """
+        today, lang = self._today(), farmer.language
+        item = self.water.field(record, store.events_for(conn, record.id), today)
+        if item.status is None:
+            return False
+
+        def send(body: str) -> None:
+            outbox.deliver(conn, self.settings, farmer, body, now=self.now, urgent=True)
+
+        send(status_message(item, lang, today, map_link=lambda r: self.settings.link(
+            f"f/{map_token(conn, r.id, self.now)}")))
+        if store.plan_of(farmer, record) in text.FLYING_PLANS:
+            out = self.settings.drone_workspace / "out"
+            found = latest_thermal(self.settings, record.id) or latest_flags(
+                self.settings, record.id) or latest_terrain(self.settings, record.id)
+            folder = out / (flight_id or (found or {}).get("flight_id") or "-")
+            extra = ("all_ready_3d" if (folder / "model3d.json").exists() else
+                     "all_ready_heat" if (folder / "thermal.json").exists() else
+                     "all_ready_drone" if found or flight_id else None)
+            if extra:
+                token = link_token(conn, "explain", record.id, self.now)
+                send(text.say("all_ready", lang, field=record.name,
+                              extra=text.say(extra, lang),
+                              link=self.settings.link(f"r/{token}")))
+        send(self._menu(farmer, record))
+        return True
+
     def _menu(self, farmer, record) -> str:
         """What else there is to ask, for this farmer's crop and plan."""
         lang = farmer.language
         more = text.say("menu_sorghum", lang) if record.crop == "sorghum" else ""
-        if farmer.plan in text.FLYING_PLANS:
+        if store.plan_of(farmer, record) in text.FLYING_PLANS:
             more += text.say("menu_drone", lang)
         return text.say("ready_menu", lang, more=more)
 
@@ -603,10 +644,13 @@ class App:
             record = store.get_field(conn, field_id)
             farmer = store.get_farmer(conn, record.phone)
             lang = farmer.language
+            record.answers["flight"] = "done" if ok else "failed"
+            store.save_field(conn, record)
             if not ok:
                 outbox.deliver(conn, self.settings, farmer,
                                text.say("flight_failed", lang, field=record.name),
                                now=self.now, urgent=True)
+                self._answer(conn, farmer, record)     # the satellite answer, on its own
                 return None
             extra, picture = None, None
             if (out / "thermal.json").exists():
@@ -642,6 +686,9 @@ class App:
                                         top=f"{model.get('plants_top_m') or 0:.1f}"),
                                now=self.now, urgent=True,
                                media=[self._picture_link(conn, record.id, out / "model3d.png")])
+            # Everything is in: the water answer and the page, all together. A reading
+            # still under way sends them itself when it ends.
+            self._answer(conn, farmer, record, flight_id)
         return None
 
     def _picture_link(self, conn, field_id: str, path: Path) -> str:

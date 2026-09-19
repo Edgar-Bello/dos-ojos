@@ -427,8 +427,8 @@ def test_a_problem_photo(phone: Phone, conn, tmp_path) -> None:
 
 def test_drone_photos_get_an_upload_link(phone: Phone, conn) -> None:
     two_fields(phone, conn, plan="2")
-    phone("DRON")
-    assert "sin cultivo" in phone("1")[0]
+    # Only Campo Norte has a drone (La Loma is satellite only), so it is not asked which.
+    assert "sin cultivo" in phone("DRON")[0]
     phone("si")
     reply = phone("hoy")
     assert "/u/" in reply[0] and "14 dias" in reply[0]

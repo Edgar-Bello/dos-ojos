@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS fields (
     irrigation   TEXT,
     water_enters TEXT,                         -- N | S | E | W
     answers      TEXT NOT NULL DEFAULT '{}',   -- questions answered "don't know" or "none"
+    plan         TEXT,                         -- satellite | drone | thermal; NULL: the farmer's
     created_at   TEXT NOT NULL,
     updated_at   TEXT NOT NULL
 );
@@ -131,6 +132,7 @@ EVENT_KINDS = ("planted", "irrigated", "rain", "harvested", "photo", "scouting")
 #: everything the farmers said; it is migrated, never rebuilt.
 ADDED_COLUMNS: dict[str, dict[str, str]] = {
     "farmers": {"plan": "TEXT NOT NULL DEFAULT 'satellite'"},
+    "fields": {"plan": "TEXT"},
 }
 
 
@@ -298,12 +300,15 @@ class FieldRow:
     irrigation: str | None = None
     water_enters: str | None = None
     answers: dict = dc_field(default_factory=dict)
+    #: What this field gets: satellite only, plus drone photos, or plus thermal.
+    #: None for fields made before plans were per field: the farmer's plan holds.
+    plan: str | None = None
     created_at: str = ""
 
 
 _FIELD_COLUMNS = ("phone", "name", "acres_said", "lat", "lon", "place", "outline", "acres",
                   "outline_by", "outline_at", "crop", "crop_name", "irrigation",
-                  "water_enters", "answers")
+                  "water_enters", "answers", "plan")
 
 
 def _field(row: sqlite3.Row) -> FieldRow:
@@ -340,6 +345,11 @@ def save_field(conn: sqlite3.Connection, record: FieldRow) -> None:
     assignments = ", ".join(f"{k} = ?" for k in _FIELD_COLUMNS)
     conn.execute(f"UPDATE fields SET {assignments}, updated_at = ? WHERE id = ?",
                  (*values, now_iso(), record.id))
+
+
+def plan_of(farmer: Farmer | None, record: FieldRow) -> str:
+    """The field's own plan, else its farmer's."""
+    return record.plan or (farmer.plan if farmer else None) or "satellite"
 
 
 def get_field(conn: sqlite3.Connection, field_id: str) -> FieldRow | None:

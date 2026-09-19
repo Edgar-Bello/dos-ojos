@@ -190,7 +190,7 @@ class Turn:
     def _to_idle(self) -> None:
         self.f.state = "idle"
         for key in ("action", "pick", "photos", "checkin", "field", "first", "aphid",
-                    "sorghum", "maturity_only"):
+                    "sorghum", "maturity_only", "plan_only", "crop_only", "for"):
             self.ctx.pop(key, None)
 
     def _flag_for_team(self) -> None:
@@ -396,6 +396,8 @@ class Turn:
         self.say("field_done", field=record.name)
         if record.outline is None and record.lat is not None:
             self.say("field_done_map", link=self._map_link(record))
+        if self._drone_wait(record) == "photos":
+            self.say(self._drone_next_key(record), field=record.name)
         if self.ctx.get("resume") == record.id:
             self.ctx.pop("resume")
         self._to_idle()
@@ -433,10 +435,48 @@ class Turn:
         if not name or (parse.command(self.body) and len(parse.words(self.body)) == 1):
             self._retry()
             return
+        first = len(self.fields()) == 0
         record = store.add_field(self.conn, self.f.phone, name)
         self._fields = None
         self.ctx["field"] = record.id
+        if first:
+            # The plan asked at sign-up was for this field.
+            record.plan = self.f.plan
+            self._save(record)
+            self._next_question()
+            return
+        self._ask("f:plan")
+
+    def _on_f_plan(self) -> None:
+        record = self._field()
+        chosen = parse.plan(self.body)
+        if chosen is None:
+            command = parse.command(self.body)
+            if command and command != "plan":
+                self._interrupt(command)
+                return
+            self._retry("menu_number")
+            return
+        flew_before = any(store.plan_of(self.f, r) in text.FLYING_PLANS
+                          for r in self.fields() if r.id != record.id)
+        record.plan = self.f.plan = chosen
+        self._save(record)
+        self.say("plan_field_set", field=record.name, plan=text.plan_name(chosen, self.lang))
+        if chosen in text.FLYING_PLANS and not flew_before:
+            self.say("plan_license")
+        if self.ctx.pop("plan_only", False):
+            if not self._missing(record) and self._drone_wait(record) == "photos":
+                self.say(self._drone_next_key(record), field=record.name)
+            self._to_idle()
+            return
         self._next_question()
+
+    def _drone_wait(self, record: FieldRow) -> str | None:
+        return status_mod.drone_wait(self.bot.settings, self.f, record)
+
+    def _drone_next_key(self, record: FieldRow) -> str:
+        thermal = store.plan_of(self.f, record) == "thermal"
+        return "drone_next_thermal" if thermal else "drone_next"
 
     def _on_f_acres(self) -> None:
         record = self._field()
@@ -490,11 +530,23 @@ class Turn:
     def _on_f_crop(self) -> None:
         record = self._field()
         key, other = parse.crop(self.body)
+        command = parse.command(self.body)
+        if (key is None or key == "other") and command and command != "crop":
+            self._interrupt(command)        # "MAP" here is the map, not a crop called MAP
+            return
         if key is None:
             self._retry("menu_number")
             return
         record.crop, record.crop_name = key, other
+        if key != "sorghum":
+            record.answers.pop("maturity", None)
         self._save(record)
+        if self.ctx.pop("crop_only", False):
+            self.say("crop_saved", field=record.name,
+                     crop=text.crop_name(key, self.lang, other))
+            if not self._missing(record):
+                self._to_idle()
+                return
         self._next_question()
 
     def _on_f_crop_other(self) -> None:
@@ -689,7 +741,11 @@ class Turn:
             self._flag_for_team()
             self.say("photo_saved")
         elif kind == "drone":
-            self._upload_link(record, date.fromisoformat(action["day"]), action.get("bare"))
+            if store.plan_of(self.f, record) not in text.FLYING_PLANS:
+                self.say("drone_field_not_in_plan", field=record.name)
+            else:
+                self._upload_link(record, date.fromisoformat(action["day"]),
+                                  action.get("bare"))
         self._to_idle()
         self._resume()
 
@@ -977,13 +1033,15 @@ class Turn:
         elif command == "planted":
             self._start("planted", prompt="planted", then="idle")
         elif command == "drone":
-            if self.f.plan not in text.FLYING_PLANS:
+            flying = [r for r in self.fields() if store.plan_of(self.f, r) in text.FLYING_PLANS]
+            if self.fields() and not flying:
                 self.say("drone_not_in_plan")
                 return
-            self._start("drone", window="flight", prompt="ask_flight_day")
-        elif command == "plan":
-            self.say("plan_now", plan=text.plan_name(self.f.plan, self.lang))
-            self._ask("plan")
+            ids, _ = self._named_fields(self.norm, multi=False)
+            preset = {"fields": [flying[0].id]} if len(flying) == 1 and not ids else {}
+            self._start("drone", window="flight", prompt="ask_flight_day", **preset)
+        elif command in ("plan", "crop"):
+            self._for_field(command)
         elif command == "explain":
             self._explain()
         elif command == "map":
@@ -1000,11 +1058,55 @@ class Turn:
         else:
             self._help()
 
+    def _for_field(self, then: str) -> None:
+        """PLAN or CROP: for the field the text names, the only one, or the one picked."""
+        records = self.fields()
+        if not records:
+            self.say("no_fields")
+            return
+        ids, _ = self._named_fields(self.norm, multi=False)
+        chosen = next((r for r in records if r.id in ids), None)
+        if chosen is None and len(records) == 1:
+            chosen = records[0]
+        if chosen is None:
+            self.ctx["for"] = then
+            self._ask("field:pick")
+            return
+        self._for_field_then(then, chosen)
+
+    def _on_field_pick(self) -> None:
+        records = self.fields()
+        choice = parse.menu_choice(self.body, len(records))
+        chosen = records[choice - 1] if choice else None
+        if chosen is None:
+            ids, _ = self._named_fields(self.norm, multi=False)
+            chosen = next((r for r in records if r.id in ids), None)
+        if chosen is None:
+            self._retry("menu_number")
+            return
+        self._for_field_then(self.ctx.pop("for", "plan"), chosen)
+
+    def _for_field_then(self, then: str, record: FieldRow) -> None:
+        self.ctx["field"] = record.id
+        if then == "crop":
+            self.ctx["crop_only"] = True
+            self._ask("f:crop")
+            return
+        self.ctx["plan_only"] = True
+        self.say("plan_now", field=record.name,
+                 plan=text.plan_name(store.plan_of(self.f, record), self.lang))
+        self._ask("f:plan")
+
     def _status(self) -> None:
         records = self.fields()
         if not records:
             self.say("no_fields")
             return
+        waiting = {r.id: self._drone_wait(r) for r in records}
+        for record in records:
+            if waiting[record.id]:
+                self.say("water_wait_" + waiting[record.id], field=record.name)
+        records = [r for r in records if not waiting[r.id]]
         results = [self.bot.water.field(r, store.events_for(self.conn, r.id), self.today)
                    for r in records]
         for item in sorted(results, key=status_mod.urgency):
@@ -1020,7 +1122,7 @@ class Turn:
                 if lines:
                     self.out.append(say("ground_label", self.lang) + " ".join(lines))
             # A thermal camera is the farmer's own, and only they have one.
-            if self.f.plan == "thermal":
+            if store.plan_of(self.f, item.field) == "thermal":
                 pest = status_mod.pest_line(
                     status_mod.latest_thermal(self.bot.settings, item.field.id),
                     self.lang, item.field.name)
@@ -1045,6 +1147,9 @@ class Turn:
             records = named
         ready, waiting = [], []
         for record in records:
+            if self._drone_wait(record):
+                waiting.append(record)
+                continue
             checked = self.bot.water.field(record, store.events_for(self.conn, record.id),
                                            self.today).status is not None
             flown = any(find(settings, record.id) for find in (
@@ -1054,7 +1159,11 @@ class Turn:
             else:
                 waiting.append(record)
         if not ready:
-            self.say("explain_none")
+            held = [r for r in waiting if self._drone_wait(r)]
+            for record in held:
+                self.say("water_wait_" + self._drone_wait(record), field=record.name)
+            if not held:
+                self.say("explain_none")
             return
         for record, checked in ready:
             token = link_token(self.conn, "explain", record.id, self.bot.now)
@@ -1331,6 +1440,11 @@ class Turn:
         if state in ("f:acres", "f:location", "f:crop", "f:crop_other", "f:maturity",
                      "f:method", "f:side"):
             return say(state[2:], lang, field=name)
+        if state == "f:plan":
+            return say("field_plan", lang, field=name)
+        if state == "field:pick":
+            options = [f"{i} {f.name}" for i, f in enumerate(self.fields(), start=1)]
+            return say("pick_field_plan", lang, options=", ".join(options))
         if state == "a:fields":
             options = [f"{i} {f.name}" for i, f in enumerate(self.fields(), start=1)]
             if action.get("kind") in MULTI and len(options) > 1:

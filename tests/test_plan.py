@@ -86,10 +86,10 @@ def test_plan_shows_the_current_one_and_offers_the_menu(phone: Phone, conn) -> N
     register_field(phone)
     replies = phone("PLAN")
     # GSM keeps the e-acute and drops the o-acute, so "sólo satélite" goes out like this.
-    assert "solo satélite" in replies[0]
-    assert phone.state == "plan"
+    assert "solo satélite" in replies[0] and "Campo Norte" in replies[0]
+    assert phone.state == "f:plan"
     phone("3")
-    assert phone.farmer.plan == "thermal"
+    assert store.get_field(conn, "F001").plan == "thermal"
 
 
 def test_changing_the_plan_does_not_start_the_fields_over(phone: Phone, conn) -> None:
