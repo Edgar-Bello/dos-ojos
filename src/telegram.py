@@ -150,10 +150,17 @@ def inbound(settings: Settings, update: dict):
                    "telegram")
 
 
+#: How long to wait before asking Telegram again after it could not be reached.
+RETRY_S = 10
+
+
 def listen(app: "App", *, stop: threading.Event | None = None) -> None:
     """Take new messages from Telegram and answer them, until ``stop`` is set."""
     stop = stop or threading.Event()
     offset = None
+    # A dropped connection is ordinary on a laptop's wifi: say it once, keep trying,
+    # and say when it comes back, so a warning on the screen is never left hanging.
+    missed = 0
     while not stop.is_set():
         try:
             data = {"timeout": POLL_S, "allowed_updates": '["message"]'}
@@ -161,11 +168,23 @@ def listen(app: "App", *, stop: threading.Event | None = None) -> None:
                 data["offset"] = offset
             updates = _call(app.settings, "getUpdates", data, timeout=POLL_S + 10)
         except TelegramError as exc:
-            log.warning("Telegram: %s", exc)
+            missed += 1
             if exc.code == 401:
+                log.warning("Telegram: %s", exc)
                 return
-            stop.wait(10)
+            if missed == 1:
+                log.warning("Telegram: %s. Trying again every %s s; messages sent meanwhile "
+                            "arrive when it is back.", exc, RETRY_S)
+            elif missed % 12 == 0:
+                log.warning("Telegram: still out of reach after %s tries (%s). The bot cannot "
+                            "hear farmers until this clears; check this computer's internet.",
+                            missed, exc)
+            stop.wait(RETRY_S)
             continue
+        if missed:
+            log.info("Telegram: back after %s failed %s; listening again.", missed,
+                     "try" if missed == 1 else "tries")
+            missed = 0
         for update in updates:
             offset = update["update_id"] + 1
             try:

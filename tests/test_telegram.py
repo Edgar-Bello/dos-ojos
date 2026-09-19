@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import replace
+from types import SimpleNamespace
 
 import pytest
 from conftest import NOW, FakeWater, resolver_to
@@ -112,3 +114,40 @@ def test_our_own_pictures_go_as_files_not_links(settings: Settings, monkeypatch,
     method, data, files = made[-1]
     assert method == "sendPhoto" and "photo" not in data
     assert files["photo"] == ("flag_overlay.png", b"PNG fake")
+
+
+def test_a_dropped_connection_is_said_once_and_the_return_is_said_too(settings, monkeypatch,
+                                                                      caplog) -> None:
+    """A laptop's wifi drops: the bot keeps asking, and the screen says when it is back."""
+    import threading
+
+    stop = threading.Event()
+    tries = []
+
+    def call(_settings, method, data, **kwargs):
+        tries.append(method)
+        if len(tries) <= 3:
+            raise telegram.TelegramError("could not reach Telegram (ConnectTimeout)")
+        stop.set()
+        return []
+
+    monkeypatch.setattr(telegram, "_call", call)
+    monkeypatch.setattr(telegram, "RETRY_S", 0)
+    app = SimpleNamespace(settings=settings)
+    with caplog.at_level(logging.INFO, logger="dosojos_sms.telegram"):
+        telegram.listen(app, stop=stop)
+    said = [r.getMessage() for r in caplog.records]
+    assert sum("could not reach" in m for m in said) == 1       # not once per try
+    assert "Trying again every 0 s" in said[0]
+    assert any("back after 3 failed tries" in m for m in said)
+    assert len(tries) == 4
+
+
+def test_a_wrong_token_stops_the_listener(settings, monkeypatch, caplog) -> None:
+    def call(*_args, **_kwargs):
+        raise telegram.TelegramError("Telegram refused to getUpdates (code 401)", 401)
+
+    monkeypatch.setattr(telegram, "_call", call)
+    with caplog.at_level(logging.WARNING, logger="dosojos_sms.telegram"):
+        telegram.listen(SimpleNamespace(settings=settings))        # returns, does not spin
+    assert "401" in caplog.records[-1].getMessage()
