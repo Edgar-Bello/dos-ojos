@@ -155,6 +155,12 @@ def test_remind_lists_before_it_sends(farm: Path, monkeypatch) -> None:
         record = store.get_field(conn, "F001")
         record.outline = {"type": "Polygon", "coordinates": [SQUARE + [SQUARE[0]]]}
         store.save_field(conn, record)
+    # Juan picked a drone: no alert until his photos are in and processed.
+    assert "No alerts or reminders due." in run(farm, "remind").output
+    with store.session(farm / "sms" / "sms.sqlite") as conn:
+        record = store.get_field(conn, "F001")
+        record.answers["flight"] = "done"
+        store.save_field(conn, record)
 
     listed = run(farm, "remind").output
     assert "water_soon" in listed and "not sent (add --send)" in listed
