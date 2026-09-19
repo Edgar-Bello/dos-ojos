@@ -46,24 +46,34 @@ def test_only_a_quick_tunnels_own_name_counts(line, address) -> None:
     assert (match.group(0) if match else None) == address
 
 
-def test_an_address_that_is_not_our_server_is_called_out(monkeypatch, capsys) -> None:
-    monkeypatch.setattr(live_demo, "tunnel_reaches_us", lambda address, **kw: False)
+def test_an_address_that_answers_as_a_stranger_is_a_warning(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(live_demo, "tunnel_answers", lambda address, **kw: "no")
     live_demo.check_tunnel("https://api.trycloudflare.com")
     printed = capsys.readouterr().out
-    assert "did not answer as this server" in printed and "start it again" in printed
+    assert "not as this server" in printed and "start it again" in printed
+
+
+def test_a_name_this_computer_cannot_look_up_is_not_alarming(monkeypatch, capsys) -> None:
+    """This PC often remembers a brand-new tunnel name as missing; phones do not."""
+    monkeypatch.setattr(live_demo, "tunnel_answers", lambda address, **kw: "dns")
+    live_demo.check_tunnel("https://witch-clicks-tiffany-structural.trycloudflare.com")
+    printed = capsys.readouterr().out
+    assert "cannot look up" in printed and "phones normally open it" in printed
+    assert "WARNING" not in printed
 
 
 def test_an_address_that_reaches_us_is_confirmed(monkeypatch, capsys) -> None:
-    monkeypatch.setattr(live_demo, "tunnel_reaches_us", lambda address, **kw: True)
+    monkeypatch.setattr(live_demo, "tunnel_answers", lambda address, **kw: "ok")
     live_demo.check_tunnel("https://sie-reasons.trycloudflare.com")
     assert "opens this server" in capsys.readouterr().out
 
 
-def test_the_check_knows_our_server_by_its_own_header(monkeypatch) -> None:
+def test_the_check_knows_our_server_by_its_own_front_page(monkeypatch) -> None:
     import urllib.request
 
     class Answer:
-        headers = {"Server": "DosOjosSMS/0.1 Python/3.11"}
+        def read(self, n=None):
+            return b"Dos Ojos SMS is running."
 
         def __enter__(self):
             return self
@@ -72,14 +82,28 @@ def test_the_check_knows_our_server_by_its_own_header(monkeypatch) -> None:
             return False
 
     monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **kw: Answer())
-    assert live_demo.tunnel_reaches_us("https://x.trycloudflare.com", timeout=1)
+    assert live_demo.tunnel_answers("https://x.trycloudflare.com", timeout=1) == "ok"
 
 
-def test_a_stranger_answering_is_not_us(monkeypatch) -> None:
+def test_a_name_that_does_not_resolve_says_dns(monkeypatch) -> None:
+    import socket
+    import urllib.error
+    import urllib.request
+
+    def refuse(*args, **kwargs):
+        raise urllib.error.URLError(socket.gaierror(11001, "getaddrinfo failed"))
+
+    monkeypatch.setattr(urllib.request, "urlopen", refuse)
+    monkeypatch.setattr(live_demo.time, "sleep", lambda seconds: None)
+    assert live_demo.tunnel_answers("https://new.trycloudflare.com", timeout=0.1) == "dns"
+
+
+def test_someone_elses_page_is_not_us(monkeypatch) -> None:
     import urllib.request
 
     class Answer:
-        headers = {"Server": "cloudflare"}
+        def read(self, n=None):
+            return b"<html>Cloudflare</html>"
 
         def __enter__(self):
             return self
@@ -89,4 +113,4 @@ def test_a_stranger_answering_is_not_us(monkeypatch) -> None:
 
     monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **kw: Answer())
     monkeypatch.setattr(live_demo.time, "sleep", lambda seconds: None)
-    assert not live_demo.tunnel_reaches_us("https://api.trycloudflare.com", timeout=0.1)
+    assert live_demo.tunnel_answers("https://api.trycloudflare.com", timeout=0.1) == "no"

@@ -41,6 +41,10 @@ PORT = 8100
 #: The daily run: satellite, weather, soil and the alerts that go out.
 DAILY_AT = 6
 TUNNEL_WAIT_S = 60
+#: How long to keep asking the new address for this server before saying anything.
+TUNNEL_CHECK_S = 90
+#: What this server says on its front page, through the tunnel or not.
+SERVER_SAYS = "Dos Ojos SMS is running."
 #: `dosojos-sms webhook` exits with this when the number must be pointed by hand.
 NOT_OWNED_EXIT = 3
 #: A quick tunnel's address is several words joined by hyphens
@@ -121,28 +125,36 @@ def find_cloudflared() -> Path | None:
     return None
 
 
-def tunnel_reaches_us(address: str, timeout: float = 20.0) -> bool:
-    """True when that address answers as this server, not as something of Cloudflare's.
+def tunnel_answers(address: str, timeout: float = TUNNEL_CHECK_S) -> str:
+    """Whether farmers' links will open this server: ``ok``, ``dns`` or ``no``.
 
-    A tunnel takes a moment to come up, so this keeps asking until it answers or
-    the time runs out.
+    ``dns``: this computer cannot even look the name up. That is usually this
+    computer, not the tunnel: a brand-new quick tunnel name is often remembered as
+    missing here for a few minutes, while phones and Twilio resolve it at once.
+
+    The tunnel is asked for the server's front page, not the simulator (which only
+    answers on this computer) and not by its Server header (Cloudflare replaces it
+    with its own on the way through).
     """
+    import socket
     import urllib.error
     import urllib.request
 
     deadline = time.time() + timeout
+    looked_up = False
     while time.time() < deadline:
         try:
-            with urllib.request.urlopen(f"{address}/sim", timeout=10) as answer:
-                if "DosOjos" in (answer.headers.get("Server") or ""):
-                    return True
-        except urllib.error.HTTPError as exc:      # our own 404 is still our server
-            if "DosOjos" in (exc.headers.get("Server") or ""):
-                return True
+            with urllib.request.urlopen(f"{address}/", timeout=10) as answer:
+                looked_up = True
+                if SERVER_SAYS in answer.read(200).decode("utf-8", "replace"):
+                    return "ok"
+        except urllib.error.URLError as exc:
+            if not isinstance(getattr(exc, "reason", None), socket.gaierror):
+                looked_up = True
         except OSError:
-            pass
-        time.sleep(2)
-    return False
+            looked_up = True
+        time.sleep(3)
+    return "no" if looked_up else "dns"
 
 
 def open_tunnel(cloudflared: Path) -> tuple[subprocess.Popen, str]:
@@ -174,12 +186,18 @@ def open_tunnel(cloudflared: Path) -> tuple[subprocess.Popen, str]:
 
 def check_tunnel(address: str) -> None:
     """Say plainly whether farmers' links will work, before any go out."""
-    if tunnel_reaches_us(address):
-        say(f"  links checked   {address}/f/... opens this server")
-        return
-    say(f"\nWARNING: {address} did not answer as this server. Map and upload links sent to "
-        f"farmers may not open. Stop live.cmd (Ctrl+C) and start it again to get a new "
-        f"address.")
+    answered = tunnel_answers(address)
+    if answered == "ok":
+        say(f"\n  links checked   {address} opens this server, so map and upload links work")
+    elif answered == "dns":
+        say(f"\nNOTE: this computer cannot look up {address} yet, so the links could not be "
+            f"checked from here. That is usually this computer's own DNS remembering the new "
+            f"name as missing; phones normally open it straight away. Ask a tester to open a "
+            f"map link before trusting it.")
+    else:
+        say(f"\nWARNING: {address} answered, but not as this server. Map and upload links "
+            f"sent to farmers may not open. Stop live.cmd (Ctrl+C) and start it again to get "
+            f"a new address.")
 
 
 def sms(*arguments: str, env: dict | None = None) -> int:
