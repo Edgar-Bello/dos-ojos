@@ -53,15 +53,6 @@ def test_an_address_that_answers_as_a_stranger_is_a_warning(monkeypatch, capsys)
     assert "not as this server" in printed and "start it again" in printed
 
 
-def test_a_name_this_computer_cannot_look_up_is_not_alarming(monkeypatch, capsys) -> None:
-    """This PC often remembers a brand-new tunnel name as missing; phones do not."""
-    monkeypatch.setattr(live_demo, "tunnel_answers", lambda address, **kw: "dns")
-    live_demo.check_tunnel("https://witch-clicks-tiffany-structural.trycloudflare.com")
-    printed = capsys.readouterr().out
-    assert "cannot look up" in printed and "phones normally open it" in printed
-    assert "WARNING" not in printed
-
-
 def test_an_address_that_reaches_us_is_confirmed(monkeypatch, capsys) -> None:
     monkeypatch.setattr(live_demo, "tunnel_answers", lambda address, **kw: "ok")
     live_demo.check_tunnel("https://sie-reasons.trycloudflare.com")
@@ -114,3 +105,53 @@ def test_someone_elses_page_is_not_us(monkeypatch) -> None:
     monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **kw: Answer())
     monkeypatch.setattr(live_demo.time, "sleep", lambda seconds: None)
     assert live_demo.tunnel_answers("https://api.trycloudflare.com", timeout=0.1) == "no"
+
+
+def test_a_name_only_this_network_cannot_see_is_reported_as_working(monkeypatch, capsys) -> None:
+    """Campus DNS here does not carry trycloudflare.com names; the internet does."""
+    monkeypatch.setattr(live_demo, "tunnel_answers", lambda address, **kw: "dns")
+    monkeypatch.setattr(live_demo, "known_to_the_internet", lambda address, **kw: True)
+    live_demo.check_tunnel("https://beyond-pot-striking-roy.trycloudflare.com")
+    printed = capsys.readouterr().out
+    assert "exists on the internet" in printed and "farmers' links work" in printed
+    assert "WARNING" not in printed
+
+
+def test_a_name_nobody_can_see_is_worth_saying(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(live_demo, "tunnel_answers", lambda address, **kw: "dns")
+    monkeypatch.setattr(live_demo, "known_to_the_internet", lambda address, **kw: False)
+    live_demo.check_tunnel("https://nobody-knows-this.trycloudflare.com")
+    printed = capsys.readouterr().out
+    assert "not even a public DNS server" in printed and "start it again" in printed
+
+
+def test_the_public_dns_answer_is_read(monkeypatch) -> None:
+    import json as json_mod
+    import urllib.request
+
+    class Answer:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def read(self):
+            return json_mod.dumps(self.payload).encode()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    asked = {}
+
+    def get(request, timeout=None):
+        asked["url"] = request.full_url
+        return Answer({"Answer": [{"type": 1, "data": "104.16.0.1"}]})
+
+    monkeypatch.setattr(urllib.request, "urlopen", get)
+    assert live_demo.known_to_the_internet("https://some-tunnel.trycloudflare.com")
+    assert "name=some-tunnel.trycloudflare.com" in asked["url"]
+
+    monkeypatch.setattr(urllib.request, "urlopen",
+                        lambda request, timeout=None: Answer({"Status": 3}))
+    assert not live_demo.known_to_the_internet("https://gone.trycloudflare.com")

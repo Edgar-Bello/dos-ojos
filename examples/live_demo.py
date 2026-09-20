@@ -24,6 +24,7 @@ from __future__ import annotations
 import os
 import re
 import shutil
+import json
 import subprocess
 import sys
 import threading
@@ -43,6 +44,8 @@ DAILY_AT = 6
 TUNNEL_WAIT_S = 60
 #: How long to keep asking the new address for this server before saying anything.
 TUNNEL_CHECK_S = 90
+#: A DNS server outside this network, asked over HTTPS when the local one cannot help.
+PUBLIC_DNS = "https://cloudflare-dns.com/dns-query"
 #: What this server says on its front page, through the tunnel or not.
 SERVER_SAYS = "Dos Ojos SMS is running."
 #: `dosojos-sms webhook` exits with this when the number must be pointed by hand.
@@ -157,6 +160,27 @@ def tunnel_answers(address: str, timeout: float = TUNNEL_CHECK_S) -> str:
     return "no" if looked_up else "dns"
 
 
+def known_to_the_internet(address: str, timeout: float = 10.0) -> bool:
+    """True when a public DNS server knows the name this computer cannot look up.
+
+    Asked over HTTPS (Cloudflare's DNS-over-HTTPS), so a network that filters or
+    does not carry the name locally cannot answer for the whole internet.
+    """
+    import urllib.parse
+    import urllib.request
+
+    host = urllib.parse.urlsplit(address).hostname or address
+    request = urllib.request.Request(
+        f"{PUBLIC_DNS}?name={urllib.parse.quote(host)}&type=A",
+        headers={"Accept": "application/dns-json"})
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as answer:
+            found = json.loads(answer.read().decode("utf-8"))
+    except (OSError, ValueError):
+        return False
+    return any(entry.get("type") == 1 for entry in found.get("Answer") or [])
+
+
 def open_tunnel(cloudflared: Path) -> tuple[subprocess.Popen, str]:
     """Start a quick tunnel to the server's port and wait for its address."""
     process = subprocess.Popen(
@@ -189,11 +213,14 @@ def check_tunnel(address: str) -> None:
     answered = tunnel_answers(address)
     if answered == "ok":
         say(f"\n  links checked   {address} opens this server, so map and upload links work")
+    elif answered == "dns" and known_to_the_internet(address):
+        say(f"\n  links checked   {address} exists on the internet (a public DNS server knows "
+            f"it), so farmers' links work. This computer's own DNS does not carry the name, "
+            f"which is why the page will not open here.")
     elif answered == "dns":
-        say(f"\nNOTE: this computer cannot look up {address} yet, so the links could not be "
-            f"checked from here. That is usually this computer's own DNS remembering the new "
-            f"name as missing; phones normally open it straight away. Ask a tester to open a "
-            f"map link before trusting it.")
+        say(f"\nNOTE: nobody can look up {address} yet, not even a public DNS server. A new "
+            f"tunnel name usually takes a minute to spread. Ask a tester to open a map link, "
+            f"and if it fails, stop live.cmd (Ctrl+C) and start it again.")
     else:
         say(f"\nWARNING: {address} answered, but not as this server. Map and upload links "
             f"sent to farmers may not open. Stop live.cmd (Ctrl+C) and start it again to get "
