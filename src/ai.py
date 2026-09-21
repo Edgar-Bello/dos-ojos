@@ -55,6 +55,9 @@ TIMEOUT_S = 240
 AVAILABLE_FOR_S = 30
 #: What an answer may cost the farmer: two text messages.
 MAX_MESSAGE_CHARS = 300
+#: How long a farmer's note is still worth weighing. A field cut in half in
+#: August still reads short in September, so this outlives the week's weather.
+NOTE_DAYS = 60
 
 
 class AIError(RuntimeError):
@@ -201,7 +204,7 @@ class Thinker:
 
 INTENTS = ("irrigated", "rain", "harvested", "planted", "status", "explain", "fields",
            "new_field", "map", "drone", "stage", "aphid", "plan", "crop", "undo", "help",
-           "question", "other")
+           "note", "question", "other")
 CROPS = ("sorghum", "cotton", "corn", "sugarcane", "citrus", "soybean", "")
 
 UNDERSTAND_SCHEMA = {
@@ -237,6 +240,7 @@ plan = change satellite, drone or thermal
 crop = change which crop a field has
 undo = remove the last thing they sent
 help = they want to know what they can send
+note = they tell us something about a field that is none of the above and that no camera could see: part of it cut or picked, a corner replanted, cattle or a storm in it, a pump or a valve out, a part they know is bad. A whole harvest is harvested, not note.
 question = another question about their fields that FIELDS can answer
 other = thanks, greetings, jokes, unclear or off topic
 
@@ -253,7 +257,10 @@ Examples (FIELDS: Norte = sorghum, Huerta = citrus):
 "quiero ver las graficas de la huerta" -> explain, Huerta
 "gracias compa" -> other
 "buenos dias" -> other
-"cuando fue la ultima vez que regamos la huerta?" -> question, Huerta"""
+"cuando fue la ultima vez que regamos la huerta?" -> question, Huerta
+"solo cortamos la mitad del norte, la otra mitad sigue" -> note, Norte
+"se quebro la bomba del pozo" -> note, ""
+"metieron las vacas a la huerta" -> note, Huerta"""
 
 
 @dataclass
@@ -283,6 +290,10 @@ class Understood:
             "new_field": "new", "map": f"map {name}", "drone": f"drone {name}",
             "stage": "stage", "aphid": f"aphid {original}", "plan": f"plan {name}",
             "crop": f"crop {name}", "undo": "undo", "help": "help",
+            # The farmer's own sentence is the note. The field goes in front of it,
+            # where the rules read it and then take it back off the words kept, and
+            # the read-back puts the whole thing to the farmer before anything is.
+            "note": f"note {name} {original}".replace("  ", " "),
         }.get(self.intent)
         return re.sub(r"\s+", " ", words).strip() if words else None
 
@@ -356,6 +367,8 @@ check_first: one short thing to go and look at in the field, in LANGUAGE, taken 
 reasons: two to four short reasons in LANGUAGE, each saying which fact it comes from.
 confidence: high, medium or low, from the water balance's confidence and whether the facts agree.
 
+When FACTS carry WHAT THE FARMER TOLD US, that is the farmer's own word about their field and it outranks every reading: it explains things no camera can see, such as part of the field being cut, a corner replanted, or a pump out. Read the other facts in its light, say so in reasons when it changes what you write, and never tell the farmer something it contradicts.
+
 Use only numbers written in FACTS, written the same way. Never change the DECISION."""
 
 
@@ -426,6 +439,12 @@ def facts(brief: dict) -> list[str]:
                    "adds no yield, so stop watering; harvest when the grain is dry."),
     }.get(action, "no water decision yet.")
     lines = [f"DECISION (from the water balance, do not change it): {decision}"]
+    # Straight under the decision, because it changes what every reading below
+    # means: a field read short after half of it was cut is not a thirsty field.
+    if brief.get("farmer_notes"):
+        lines.append("WHAT THE FARMER TOLD US about this field, in their own words; weigh it "
+                     "before the readings below and never contradict it: "
+                     + "; ".join(brief["farmer_notes"]) + ".")
     lines.append(f"Field: {info.get('crop')}"
                  + (f", {info['acres']:g} acres" if info.get("acres") else "")
                  + f", {info.get('watered_by')}"
@@ -694,6 +713,11 @@ def field_brief(settings, farmer, item, events, today: date) -> dict | None:
     satellite = _greenness(item)
     if satellite:
         brief["satellite_greenness"] = satellite
+    notes = [e for e in events if e.kind == "note" and e.voided_at is None
+             and e.note and (today - e.day).days <= NOTE_DAYS]
+    if notes:
+        brief["farmer_notes"] = [f"{e.day.isoformat()}: {e.note}"
+                                 for e in sorted(notes, key=lambda e: (e.day, e.id))[-3:]]
     log_lines = [f"{e.day.isoformat()} {e.kind}"
                  + (f" {e.inches:g} in" if e.inches is not None else "")
                  for e in sorted(events, key=lambda e: e.day)

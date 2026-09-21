@@ -141,6 +141,10 @@ COMMANDS: dict[str, tuple[str, ...]] = {
     "aphid": ("pulgon", "pulgones", "pulgon amarillo", "aphid", "aphids", "sugarcane aphid",
               "sca"),
     "maturity": ("ciclo", "hibrido", "maturity", "hybrid"),
+    # Something the readings cannot show: half the field cut, a corner replanted,
+    # a pump out. Deliberately narrow stems: "anota que regamos" is an irrigation,
+    # not a note, and must keep reaching the rules that read its day and inches.
+    "note": ("nota", "notas", "apunte", "aviso", "comentario", "note", "notes", "comment"),
     "undo": ("borrar", "borra", "undo", "deshacer", "quitar", "quita", "delete"),
     "menu": ("menu", "salir", "exit", "inicio"),
     "lang_es": ("espanol", "spanish", "en espanol"),

@@ -82,7 +82,7 @@ CREATE TABLE IF NOT EXISTS events (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     field_id   TEXT NOT NULL REFERENCES fields(id),
     day        TEXT NOT NULL,
-    kind       TEXT NOT NULL,                  -- planted | irrigated | rain | harvested | photo | scouting
+    kind       TEXT NOT NULL,                  -- planted | irrigated | rain | harvested | photo | scouting | note
     inches     REAL,
     note       TEXT NOT NULL DEFAULT '',
     source     TEXT NOT NULL,                  -- sms | ticket | team
@@ -123,8 +123,12 @@ CREATE TABLE IF NOT EXISTS alerts (
 );
 """
 
-#: ``scouting`` is a pest count; its ``note`` holds the count as JSON.
-EVENT_KINDS = ("planted", "irrigated", "rain", "harvested", "photo", "scouting")
+#: ``scouting`` is a pest count; its ``note`` holds the count as JSON. ``note`` is
+#: something the farmer wants weighed that no reading can show, in their own words.
+EVENT_KINDS = ("planted", "irrigated", "rain", "harvested", "photo", "scouting", "note")
+
+#: Kinds where a second report on the same day is a second thing, not a correction.
+KEPT_TOGETHER = ("photo", "note")
 
 #: Columns added after the first databases were made. SQLite cannot bring an
 #: existing table forward through CREATE TABLE IF NOT EXISTS, so each one is
@@ -398,11 +402,12 @@ def add_event(conn: sqlite3.Connection, field_id: str, day: date, kind: str, *,
     """Record one planting, irrigation, rain reading, harvest or photo.
 
     A second report of the same kind on the same day replaces the first: a
-    farmer who says "4 inches" and later "no, 3" means 3.
+    farmer who says "4 inches" and later "no, 3" means 3. Photos and notes are
+    the exception: two things said in one day are two things, not a correction.
     """
     if kind not in EVENT_KINDS:
         raise ValueError(f"unknown event kind {kind!r}")
-    if kind != "photo":
+    if kind not in KEPT_TOGETHER:
         conn.execute("UPDATE events SET voided_at = ? WHERE field_id = ? AND day = ? "
                      "AND kind = ? AND voided_at IS NULL",
                      (now_iso(), field_id, day.isoformat(), kind))

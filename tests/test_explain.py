@@ -504,3 +504,13 @@ def test_a_field_in_mexico_names_the_world_sources(settings, conn, farm) -> None
     assert "NASA POWER" in page and "SoilGrids" in page
     assert "gridMET" not in page and "USDA SSURGO" not in page
     assert "El mapa de suelos (SoilGrids)" in page and "La red de clima (NASA POWER)" in page
+
+
+def test_the_page_shows_what_the_farmer_told_us_about_the_field(settings, farm,
+                                                                phone: Phone) -> None:
+    """A note stands beside the numbers it explains, so nobody reads the drop as thirst."""
+    phone("NOTA corté la mitad del campo el lunes")
+    phone("si")
+    page = _built(settings, farm)
+    assert "corté la mitad del campo el lunes" in page
+    assert "no por falta de agua" in page       # why the reading looks the way it does

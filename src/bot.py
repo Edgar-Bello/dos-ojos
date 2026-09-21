@@ -57,6 +57,8 @@ SLOTS: dict[str, tuple[str, ...]] = {
 MULTI = ("irrigated", "rain")
 #: Actions read back for a yes or a no before they are stored.
 CONFIRMED = ("irrigated", "rain", "harvested", "planted", "ticket")
+#: Shorter than this a note is the field's name or a slip, and is asked again.
+MIN_NOTE = 4
 
 _NONE_WORDS = {"nada", "none", "no", "ninguno", "ninguna", "nunca", "never", "todavia no",
                "not yet", "no ha", "no hemos regado", "no he regado", "no se ha regado",
@@ -200,7 +202,7 @@ class Turn:
     def _to_idle(self) -> None:
         self.f.state = "idle"
         for key in ("action", "pick", "photos", "checkin", "field", "first", "aphid",
-                    "sorghum", "maturity_only", "plan_only", "crop_only", "for"):
+                    "sorghum", "maturity_only", "plan_only", "crop_only", "for", "note"):
             self.ctx.pop(key, None)
 
     def _flag_for_team(self) -> None:
@@ -897,6 +899,8 @@ class Turn:
                        inches=text.inches(action["inches"]))
         if kind == "harvested":
             return say("readback_harvested", self.lang, fields=names, day=when)
+        if kind == "note":
+            return say("readback_note", self.lang, fields=names, what=action["note"])
         record = self._field(action["fields"][0])
         crop = text.crop_name(action.get("crop") or record.crop, self.lang,
                               action.get("crop_name") or record.crop_name)
@@ -973,6 +977,11 @@ class Turn:
                          "prompt": "more_irrigation", "then": "history", "none_ok": "history",
                          "count": count})
             self._ask("a:day")
+            return
+        if kind == "note":
+            self.say("note_saved", field=self._names(action["fields"]))
+            self._to_idle()
+            self._resume()
             return
         self.say("saved")
         if kind in ("irrigated", "ticket") and len(action["fields"]) == 1:
@@ -1059,6 +1068,8 @@ class Turn:
             self._start("drone", window="flight", prompt="ask_flight_day", **preset)
         elif command in ("plan", "crop"):
             self._for_field(command)
+        elif command == "note":
+            self._note(self._after_command(parse.COMMANDS["note"]))
         elif command == "explain":
             self._explain()
         elif command == "map":
@@ -1103,8 +1114,82 @@ class Turn:
             return
         self._for_field_then(self.ctx.pop("for", "plan"), chosen)
 
+    def _after_command(self, stems: tuple[str, ...]) -> str:
+        """Whatever the farmer wrote after the command word, accents and all.
+
+        Read off the original text, not the normalized one, because this is
+        stored and read back to them in their own words.
+        """
+        said = self.body.split()
+        for i, word in enumerate(said):
+            if parse.normalize(word).strip(",:.") in stems:
+                return " ".join(said[i + 1:]).strip(" :,-—")
+        return ""
+
+    def _note(self, words: str) -> None:
+        """NOTE: something the farmer knows that no reading of the field can show.
+
+        The satellite cannot see that half the field was cut, and the drone
+        cannot see that a corner was replanted, so a crop reading short is not
+        always thirst. What the farmer says here is put in front of the advice
+        before it is written, and stands on the field's own page.
+        """
+        records = self.fields()
+        if not records:
+            self.say("no_fields")
+            return
+        ids, _ = self._named_fields(self.norm, multi=False)
+        chosen = next((r for r in records if r.id in ids), None)
+        if chosen is None and len(records) == 1:
+            chosen = records[0]
+        if chosen is None:
+            self.ctx["for"] = "note"
+            if words:
+                self.ctx["note"] = words
+            self._ask("field:pick")
+            return
+        self._note_for(chosen, words)
+
+    def _note_for(self, record: FieldRow, words: str) -> None:
+        """Read a note back for a yes, or ask for it when the text was only the field."""
+        self.ctx["field"] = record.id
+        said = words.split()
+        name = set(parse.words(record.name))
+        while said and parse.normalize(said[0]).strip(",:.") in name:
+            said.pop(0)                        # "NOTA Norte coseché la mitad"
+        words = " ".join(said)
+        if len(words) < MIN_NOTE:
+            self._ask("note:text")
+            return
+        self._begin({"kind": "note", "fields": [record.id], "note": words,
+                     "day": self.today.isoformat()})
+        self._ask("confirm")
+
+    def _on_note_text(self) -> None:
+        record = self._field()
+        if record is None:
+            self._to_idle()
+            self.say("menu")
+            return
+        words = self.body.strip()
+        # This is the one question whose answer is meant to be free words, so a
+        # command word inside a sentence is part of the note: "corté la mitad el
+        # viernes" is what they cut, not a COSECHA that would record the whole
+        # field harvested. Only a message that is nothing but a command is one.
+        command = parse.command(words)
+        if command and command != "note" and len(parse.words(words)) <= 2:
+            self._interrupt(command)
+            return
+        if len(words) < MIN_NOTE:
+            self._retry("note_again")
+            return
+        self._note_for(record, words)
+
     def _for_field_then(self, then: str, record: FieldRow) -> None:
         self.ctx["field"] = record.id
+        if then == "note":
+            self._note_for(record, self.ctx.pop("note", ""))
+            return
         if then == "crop":
             self.ctx["crop_only"] = True
             self._ask("f:crop")
@@ -1371,8 +1456,11 @@ class Turn:
         kind = {"irrigated": ("riego", "watering"), "rain": ("lluvia", "rain"),
                 "harvested": ("cosecha", "harvest"), "planted": ("siembra", "planting"),
                 "photo": ("foto", "photo"),
+                "note": ("nota", "note"),
                 "scouting": ("conteo de pulgón", "aphid count")}[event.kind]
         what = f"{text.pick(kind, self.lang)} {record.name} {self._day(event.day.isoformat())}"
+        if event.kind == "note" and event.note:
+            what += f': "{event.note}"'        # its own words, so the right one is removed
         if event.inches is not None:
             what += f", {text.inches(event.inches)} {'pulg' if self.lang == 'es' else 'in'}"
         self._begin({"kind": "undo", "event": event.id, "what": what, "fields": [event.field_id]})
@@ -1508,6 +1596,8 @@ class Turn:
             return self._readback(action)
         if state == "photo":
             return say("photo_kind", lang)
+        if state == "note:text":
+            return say("note_what", lang, field=name)
         if state == "sorghum:field":
             options = [f"{i} {f.name}" for i, f in enumerate(self._sorghum_fields(), start=1)]
             return say("pick_sorghum", lang, options="\n".join(options))

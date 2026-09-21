@@ -349,6 +349,20 @@ T: dict[str, tuple[str, str]] = {
                          "Got it: {crop} planted in {fields} {day}. Correct? YES or NO"),
     "readback_undo": ("¿Quito esto: {what}? SI o NO", "Remove this: {what}? YES or NO"),
     "saved": ("Anotado.", "Saved."),
+    # --- what the farmer knows and the readings cannot show ----------------------
+    "note_what": ("¿Qué debemos saber de {field}? Escríbalo con sus palabras. Lo tomamos en "
+                  "cuenta antes de decirle qué hacer. Ej: coseché la mitad el lunes.",
+                  "What should we know about {field}? Write it in your own words. We weigh it "
+                  "before telling you what to do. E.g.: I cut half of it on Monday."),
+    "note_again": ("No alcancé a leer la nota. Escríbala con un poco más de detalle, por favor.",
+                   "I couldn't read that note. Please write it with a little more detail."),
+    # Straight quotes on purpose: « » are not in the GSM alphabet and reach the
+    # phone as question marks around the farmer's own words.
+    "readback_note": ('Anoté de {fields}: "{what}". ¿Correcto? SI o NO',
+                      'Noted about {fields}: "{what}". Correct? YES or NO'),
+    "note_saved": ("Anotado. Lo tomamos en cuenta la próxima vez que le digamos qué hacer en "
+                   "{field}.",
+                   "Saved. We'll weigh it next time we tell you what to do on {field}."),
     "date_pick": ("¿Qué fecha es?\n1 {a}\n2 {b}\nResponda 1 o 2.",
                   "Which date?\n1 {a}\n2 {b}\nReply 1 or 2."),
     "date_future": ("El {day} todavía no llega. ¿Qué día fue?",
@@ -507,13 +521,14 @@ T: dict[str, tuple[str, str]] = {
                    "can."),
     "help": ("Dos Ojos. Mande:\n"
              "AGUA - cómo van sus campos\n"
-             "PORQUE - archivo con gráficas\n"
+             "PORQUE - las gráficas\n"
              "REGUE fecha pulgadas\n"
              "LLUVIA pulgadas\n"
-             "SEMBRE - anotar la siembra\n"
-             "COSECHA - anotar la cosecha\n"
+             "SEMBRE - la siembra\n"
+             "COSECHA - la cosecha\n"
+             "NOTA - contarnos algo del campo\n"
              "ETAPA - cómo va el sorgo\n"
-             "PULGON - anotar pulgón amarillo\n"
+             "PULGON - pulgón amarillo\n"
              "DRON - fotos del dron\n"
              "PLAN - qué usa en un campo\n"
              "CULTIVO - cambiar el cultivo\n"
@@ -529,6 +544,7 @@ T: dict[str, tuple[str, str]] = {
              "RAIN inches\n"
              "PLANTED - log the planting\n"
              "HARVESTED - log the harvest\n"
+             "NOTE - tell us about the field\n"
              "STAGE - how the sorghum is doing\n"
              "APHID - log sugarcane aphid\n"
              "DRONE - drone photos\n"

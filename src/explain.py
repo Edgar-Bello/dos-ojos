@@ -292,6 +292,12 @@ S = {
         "The dotted line at the end is where it goes if no rain comes. Below, every irrigation "
         "you told us about and every rain."),
     "log": ("Lo que usted nos dijo", "What you told us"),
+    "notes_body": ("Esto nos lo contó usted, y se toma en cuenta antes de darle la "
+                   "recomendación. El satélite y el dron no pueden verlo: si cortó media "
+                   "parcela, lo que queda se ve más bajo por eso, no por falta de agua.",
+                   "You told us this, and it is weighed before the recommendation is written. "
+                   "The satellite and the drone cannot see it: if you cut half a field, what "
+                   "is left reads shorter for that reason, not for want of water."),
     "log_body": ("Estas son las fechas con las que se hizo la cuenta. Si alguna está mal, "
                  "mándenos el dato corregido y la cuenta cambia sola.",
                  "These are the dates the sums were made with. If one is wrong, text us the "
@@ -1085,6 +1091,13 @@ def _log(events: list[Event], lang: str, today: date) -> list[str]:
     """Every date the sums used, so a wrong one is easy to spot and correct."""
     shown = [e for e in events if e.kind in SHOWN_KINDS and e.voided_at is None]
     parts = [f"<h2>{_esc(_('log', lang))}</h2>"]
+    # The farmer's own words first: they say why the readings below look as they do.
+    said = [e for e in events if e.kind == "note" and e.voided_at is None and e.note]
+    if said:
+        parts.append(f"<p>{_esc(_('notes_body', lang))}</p>")
+        parts.append("<ul>" + "".join(
+            f"<li>{_esc(text.day(e.day, lang, today))}: “{_esc(e.note)}”</li>"
+            for e in sorted(said, key=lambda e: (e.day, e.id), reverse=True)[:5]) + "</ul>")
     if not shown:
         parts.append(f"<p>{_esc(_('log_empty', lang))}</p>")
         return parts

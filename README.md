@@ -37,6 +37,7 @@ After that a farmer texts when something happens:
 | `REGUE hoy 4` / `WATERED 9/12 4` | An irrigation (the day and inches are optional) |
 | `LLUVIA 1.2` / `RAIN 1.2` | A rain gauge reading, for all fields unless one is named |
 | `COSECHA` / `HARVESTED` | A harvest. The bot then suggests a flight over bare soil |
+| `NOTA` / `NOTE` | Something no reading can show, in their own words: half the field cut, a corner replanted, a pump out. Weighed before the next recommendation |
 | `SEMBRE sorgo` / `PLANTED` | A new crop and its planting date |
 | `DRON` / `DRONE` | A link to upload a flight's photos (satellite-only farmers are told how to switch) |
 | `PORQUE` / `WHY` | A link to a page showing how that answer was worked out, charts and all |
@@ -187,10 +188,18 @@ Three parts of Dos Ojos are AI, and none of them needs the internet or a paid ke
   a la huerta antier como 2 pulgadas") goes to a language model running on the server
   itself (Ollama with Llama 3.2 3B). It decides what the farmer means and which field;
   the rules read the day and the amount; the usual YES/NO read-back guards the record.
+- **Weighing what only the farmer knows** (`NOTA` / `NOTE`, or just saying it). A field
+  with half of it cut reads short from orbit and from a drone, and neither can tell that
+  from thirst. The farmer says so in their own words; the note is read back for a yes,
+  kept with the text it came from, and put in front of the model *above* every reading,
+  with the instruction to read the rest in its light and never contradict it. On the
+  same field, the same day, the model went from "the low NDVI means drought, watch for
+  it" to "no water needed yet; half the field is still standing, as you told us on 14
+  September". It also stands on the WHY page, beside the numbers it explains.
 - **Writing the recommendation.** The model reads everything known about a field (the
   water balance, satellite greenness against normal, the sorghum stage, drone, tree
-  and thermal findings, the farmer's log) and writes what to do and what to look at
-  first. The water balance fixes the decision; the text is checked before it goes out
+  and thermal findings, the farmer's own notes and log) and writes what to do and what
+  to look at first. The water balance fixes the decision; the text is checked before it goes out
   (the decision's day is in it, every number and date comes from the readings, it fits
   two texts) and the water numbers' own answer goes instead when it fails.
 
