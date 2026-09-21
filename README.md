@@ -8,7 +8,7 @@ data, and what the farmer texts about their own field.
 A farmer who owns nothing but a phone gets the whole satellite side. A farmer
 who can fly a drone gets a second pair of eyes at 60 metres. Hence the name.
 
-Edgar Bello and Daniel Bello.
+Edgar Bello and Eduardo Bello.
 
 ## The three halves
 
