@@ -12,9 +12,10 @@ citation, the DOI, the licence and exactly what was changed to make it smaller.
 | `Edgar_Field_citrus_photos_USDA_2021_public/` | 46 raw drone photos of a citrus grove at Fort Pierce, flown 12 May 2021 (US public domain), each keeping its GPS position and heading | Photogrammetry from scratch: 46 photos in, a map and 206 trees out |
 | `Edgar_Field_thermal_frames_TERRAREF_2018_public/` | 2,716 real radiometric thermal frames of sorghum, scanned 20 May 2018 (public domain), quarter width, 130 MB instead of 3.3 GB | The thermal demo: the temperatures and each frame's ground position are unchanged |
 
-The names are the two of us because these are what we upload when we show the
-system to someone: each of us plays a farmer with a field. The farmers are made
-up and their numbers are fictional 555 ones; the fields are real and public.
+The names on the files are just who hands the upload over in a demo. `Dan
+Example`, the farmer in the drone demo, is invented and sits on a fictional 555
+number, as every farmer in every demo does. The fields underneath them are real,
+public and published.
 
 ## Using them
 
