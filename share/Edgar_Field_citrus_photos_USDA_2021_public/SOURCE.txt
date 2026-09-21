@@ -1,0 +1,13 @@
+FREE PUBLIC DATA, NOT A DOS OJOS FARM
+
+46 drone photos of a citrus grove ('Bingo' mandarin rootstock trial), USDA-ARS
+U.S. Horticultural Research Laboratory, Picos Road farm, Fort Pierce, Florida
+(27.4371, -80.4267). DJI Phantom 4 Pro at 46 m, 80% side and 70% forward overlap,
+flown May 12, 2021.
+
+Niedz, R. P., and Bowman, K. D. (2024). UAV image and ground data of citrus
+'Bingo' mandarin hybrid rootstock trial. Ag Data Commons.
+doi:10.15482/USDA.ADC/26946823.v1. U.S. Public Domain.
+
+These copies are half the original width (2736 x 1824) so they upload quickly;
+each keeps its GPS position, height and camera heading.

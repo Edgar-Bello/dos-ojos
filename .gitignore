@@ -33,3 +33,8 @@ public_demo/*/workspace/data/
 *.laz
 *.ply
 *.mp4
+
+# share/ is the exception to the rules above: the hand-sized public datasets a
+# reviewer can upload straight through the web pages, already shrunk to fit.
+# Each folder carries its own SOURCE.txt with the citation and licence.
+!share/**

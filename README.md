@@ -35,7 +35,7 @@ instead of eyeballing it.
 
 `public_demo/` holds one folder per dataset. Each has a `SOURCE.md` with the
 citation, the DOI, the licence, exactly what was downloaded, and what the run
-came to. The imagery itself is not in this repository (about 12 GB); the
+came to. The full-size imagery is not in this repository (about 12 GB); the
 `SOURCE.md` says where to get it.
 
 | Dataset | What it gave us |
@@ -44,6 +44,19 @@ came to. The imagery itself is not in this repository (about 12 GB); the
 | USDA-ARS citrus, Fort Pierce (doi:10.15482/USDA.ADC/26946823, public domain) | 206 trees measured by hand: height, width, health |
 | TERRA-REF Maricopa (doi:10.5061/dryad.4b8gtht99, public domain) | 2,719 real radiometric thermal frames of sorghum |
 | USDA Cropland Data Layer, USGS 3DEP lidar | Real Valley fields of four crops, and their ground |
+
+## Where the dataset is
+
+**`share/`.** The three datasets themselves, shrunk to a size that uploads over
+a home connection and ready to run: Purdue's finished drone map, the 46 raw
+citrus photos, and 2,716 of the 2,719 radiometric thermal frames. 218 MB in
+all, against 12 GB for the originals, and enough to put the drone,
+photogrammetry and thermal paths through end to end without downloading
+anything first.
+
+Each folder carries its own `SOURCE.txt` with the citation, the DOI, the licence
+and exactly what was done to make it smaller. Temperatures and ground positions
+are unchanged. See [share/README.md](share/README.md) for what feeds what.
 
 ## Some results worth checking
 
@@ -84,4 +97,5 @@ then the water checkbook's, as it was before.
   field outlines stay on the farm's own computer. Every phone number in this
   repository is a fictional 555 test number.
 - **Keys.** `sms.env.example` shows the shape; the real file is git-ignored.
-- **The public imagery**, for size. See `public_demo/*/SOURCE.md`.
+- **The full-size public imagery**, for size. `share/` carries a shrunk copy you
+  can run today; `public_demo/*/SOURCE.md` says where each original lives.

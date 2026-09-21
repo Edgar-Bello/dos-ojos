@@ -1,0 +1,14 @@
+FREE PUBLIC DATA, NOT A DOS OJOS FARM
+
+2,716 thermal camera frames of a sorghum field: the TERRA-REF Field Scanalyzer at
+the University of Arizona Maricopa Agricultural Center, Maricopa, Arizona,
+scanned May 20, 2018 from 9:22 to 10:47 AM. Sorghum sown April 20, 2018.
+
+LeBauer, D.S. et al. (2020). TERRA-REF, An Open Reference Data Set From High
+Resolution Genomics, Phenomics, and Imaging Sensors. Dryad.
+doi:10.5061/dryad.4b8gtht99. Public domain.
+
+Each frame here is a quarter of the original width and height (1 cm a pixel
+instead of 3 mm) and losslessly compressed, so the whole scan is 130 MB instead
+of 3.3 GB. The temperatures and each frame's place on the ground are unchanged.
+Three frames at the very end of the original download were cut off and are left out.
