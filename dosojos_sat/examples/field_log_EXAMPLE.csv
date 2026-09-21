@@ -1,0 +1,18 @@
+field_id,date,event,inches,notes
+rgv-001,2026-03-20,irrigated,,EXAMPLE - made up to demo the checkbook; blank inches = a full irrigation
+rgv-001,2026-04-25,irrigated,,EXAMPLE
+rgv-001,2026-05-28,irrigated,,EXAMPLE
+rgv-001,2026-06-30,irrigated,,EXAMPLE
+rgv-001,2026-08-04,irrigated,,EXAMPLE
+rgv-001,2026-08-28,irrigated,,EXAMPLE
+rgv-001,2026-09-09,rain,1.10,EXAMPLE farm rain gauge reading
+rgv-002,2026-02-26,planted,,EXAMPLE
+rgv-002,2026-04-06,irrigated,,EXAMPLE
+rgv-002,2026-05-04,irrigated,,EXAMPLE
+rgv-002,2026-05-26,irrigated,,EXAMPLE around boot
+rgv-002,2026-07-16,harvested,,EXAMPLE
+rgv-002,2026-07-20,planted,,EXAMPLE ratoon crop from the stubble
+rgv-002,2026-08-18,irrigated,,EXAMPLE
+rgv-003,2026-07-10,irrigated,5,EXAMPLE - 5 inches delivered by the district
+rgv-003,2026-08-12,irrigated,5,EXAMPLE
+rgv-003,2026-09-03,irrigated,5,EXAMPLE

@@ -1,0 +1,75 @@
+{
+  "type": "FeatureCollection",
+  "name": "dosojos_rgv_starter_fields",
+  "crs": { "type": "name", "properties": { "name": "urn:ogc:def:crs:OGC:1.3:CRS84" } },
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "rgv-001",
+        "name": "Llano Grande West",
+        "crop": "sugarcane",
+        "acres": 60,
+        "irrigation": "furrow"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [-97.976100, 26.202737],
+            [-97.972496, 26.202737],
+            [-97.972496, 26.207263],
+            [-97.977504, 26.207263],
+            [-97.977504, 26.204100],
+            [-97.976100, 26.202737]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "rgv-002",
+        "name": "Mercedes North 40",
+        "crop": "grain sorghum",
+        "acres": 40,
+        "irrigation": "furrow",
+        "water_enters": "N"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [-97.914013, 26.216188],
+            [-97.909987, 26.216188],
+            [-97.909987, 26.219812],
+            [-97.914013, 26.219812],
+            [-97.914013, 26.216188]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "rgv-003",
+        "name": "Weslaco Citrus Block C",
+        "crop": "citrus",
+        "acres": 28,
+        "irrigation": "flood"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [-97.957402, 26.186174],
+            [-97.954598, 26.186174],
+            [-97.954598, 26.189826],
+            [-97.957402, 26.189826],
+            [-97.957402, 26.186174]
+          ]
+        ]
+      }
+    }
+  ]
+}
