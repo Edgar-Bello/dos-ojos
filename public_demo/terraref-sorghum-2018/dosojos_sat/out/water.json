@@ -1,0 +1,136 @@
+{
+  "as_of": "2018-05-20",
+  "generated": "2026-09-17T19:49:06+00:00",
+  "field_log": "C:\\Users\\edgar\\Projects\\Dos_Ojos\\public_demo\\terraref-sorghum-2018\\dosojos_sat\\field_log.csv",
+  "fields": [
+    {
+      "field_id": "PUBLIC-terraref-mac",
+      "name": "FREE DATA TERRA-REF MAC",
+      "crop": "sorghum",
+      "crop_model": "sorghum",
+      "as_of": "2018-05-20",
+      "status": "water now",
+      "days_left": 0,
+      "days_range": null,
+      "water_by": "2018-05-20",
+      "water_left_in": 0.1,
+      "until_stress_in": 0.0,
+      "capacity_in": 2.1,
+      "stress_point_in": 0.72,
+      "pct_left": 0.048,
+      "root_depth_in": 11.8,
+      "kc": 0.3,
+      "eto_in_day": 0.31,
+      "use_in_day": 0.09,
+      "refill_net_in": 2.0,
+      "refill_gross_in": 2.22,
+      "method": "drip",
+      "efficiency": 0.9,
+      "start": "2018-04-20",
+      "start_reason": "planted 2018-04-20",
+      "last_irrigation": null,
+      "last_rain": null,
+      "stressed_days_30": 13,
+      "weather_through": "2018-05-20",
+      "last_image": "2018-05-20",
+      "soil": {
+        "name": "Casa Grande clay loam",
+        "source": "ssurgo",
+        "awc_in_per_ft": 1.4,
+        "texture": "clay loam",
+        "intake": "moderate",
+        "hydgrp": "C",
+        "drainage": "Well drained"
+      },
+      "sensitive": null,
+      "confidence": "medium",
+      "notes": [
+        "no irrigation logged since the start; if the field was watered, add the dates to field_log.csv"
+      ],
+      "rank": 1,
+      "stage": {
+        "planted": "2018-04-20",
+        "as_of": "2018-05-20",
+        "maturity": "medium",
+        "maturity_assumed": true,
+        "gdu": 830,
+        "days_after_planting": 30,
+        "stage": "five_leaf",
+        "stage_label": "five-leaf",
+        "next_stage": "panicle_initiation",
+        "next_gdu": 1144,
+        "next_date": "2018-05-31",
+        "gdu_per_day": 30.3,
+        "critical": false,
+        "critical_in_days": 11,
+        "aphid_threshold_pct": 20,
+        "watch": [
+          "sugarcane_aphid"
+        ],
+        "coverage": 1.0,
+        "milestones": [
+          {
+            "stage": "emergence",
+            "gdu": 200,
+            "date": "2018-04-28"
+          },
+          {
+            "stage": "three_leaf",
+            "gdu": 500,
+            "date": "2018-05-09"
+          },
+          {
+            "stage": "four_leaf",
+            "gdu": 575,
+            "date": "2018-05-11"
+          },
+          {
+            "stage": "five_leaf",
+            "gdu": 660,
+            "date": "2018-05-15"
+          },
+          {
+            "stage": "panicle_initiation",
+            "gdu": 1144,
+            "date": "2018-05-31"
+          },
+          {
+            "stage": "flag_leaf",
+            "gdu": 1378,
+            "date": "2018-06-08"
+          },
+          {
+            "stage": "boot",
+            "gdu": 1716,
+            "date": "2018-06-19"
+          },
+          {
+            "stage": "heading",
+            "gdu": 1820,
+            "date": "2018-06-22"
+          },
+          {
+            "stage": "flowering",
+            "gdu": 1922,
+            "date": "2018-06-26"
+          },
+          {
+            "stage": "soft_dough",
+            "gdu": 2260,
+            "date": "2018-07-07"
+          },
+          {
+            "stage": "hard_dough",
+            "gdu": 2636,
+            "date": "2018-07-19"
+          },
+          {
+            "stage": "black_layer",
+            "gdu": 3016,
+            "date": "2018-08-01"
+          }
+        ]
+      }
+    }
+  ]
+}

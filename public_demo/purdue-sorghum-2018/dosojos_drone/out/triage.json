@@ -1,0 +1,102 @@
+{
+  "season": 2018,
+  "satellite_generated": "2026-09-16T07:21:58+00:00",
+  "generated": "2026-09-16T07:23:40+00:00",
+  "drone_concern_share": 0.1,
+  "water_as_of": "2018-07-10",
+  "fields": [
+    {
+      "field_id": "PUBLIC-purdue-f54",
+      "name": "FREE DATA Purdue f54",
+      "crop": "sorghum trials",
+      "score": 0.0,
+      "flagged": false,
+      "water_stress": false,
+      "n_consecutive_low": 0,
+      "latest_ndvi": 0.8629,
+      "baseline_median": 0.6672,
+      "percentile": 76.2,
+      "robust_z": 0.78,
+      "last_observation_date": "2018-07-07",
+      "baseline_confidence": "high",
+      "n_observations": 22,
+      "trigger": "none",
+      "shortfall_pct": 4.9,
+      "note": "within its normal range",
+      "drone": {
+        "flight_id": "PUBLIC-purdue-20180710",
+        "flown_on": "2018-07-10",
+        "unit_type": "row_segment",
+        "n_trees": 3971,
+        "n_judged": 2803,
+        "n_healthy": 2409,
+        "n_stressed": 158,
+        "n_dead": 2,
+        "n_missing": 234,
+        "share_problem": 0.1406,
+        "median_canopy_volume": 0.8955,
+        "mean_ExG": 0.2508,
+        "source": "Purdue University, PURR doi:10.4231/MY7W-FH43, CC0"
+      },
+      "agreement": "drone_only",
+      "water": {
+        "rank": 1,
+        "status": "ok for now",
+        "days_left": 13,
+        "days_range": [
+          9,
+          18
+        ],
+        "water_by": "2018-07-23",
+        "water_left_in": 6.69,
+        "until_stress_in": 2.7,
+        "refill_net_in": 4.5,
+        "refill_gross_in": null,
+        "method": "none",
+        "confidence": "high",
+        "sensitive": "grain sorghum reaches boot to flowering now (day 63 after planting): the stage that can least afford to run dry",
+        "as_of": "2018-07-10",
+        "soil": {
+          "name": "Chalmers silty clay loam",
+          "source": "ssurgo",
+          "awc_in_per_ft": 2.32,
+          "texture": "clay loam",
+          "intake": "moderate",
+          "hydgrp": "B/D",
+          "drainage": "Poorly drained"
+        }
+      },
+      "irrigation": {
+        "flight_id": "PUBLIC-purdue-20180710",
+        "flow": "N to S",
+        "along_pct": 0.454,
+        "cross_pct": 0.11,
+        "sd_cm": 3.24,
+        "within_tolerance": 0.681,
+        "cut_yd3_per_acre": 56.0,
+        "ground_source": "lidar",
+        "linked": [],
+        "advice": [
+          {
+            "topic": "low spot",
+            "finding": "Low spot L1 in the north-west corner: 286 m2 down to 13 cm below the plane.",
+            "advice": "Water can stand here after heavy rain: waterlogging and salt build-up. Fill it or open a drain.",
+            "priority": 2
+          },
+          {
+            "topic": "low spot",
+            "finding": "Low spot L2 in the south-east corner: 102 m2 down to 6 cm below the plane.",
+            "advice": "Water can stand here after heavy rain: waterlogging and salt build-up. Fill it or open a drain.",
+            "priority": 2
+          },
+          {
+            "topic": "cause",
+            "finding": "The flagged spots follow neither the ground nor the row ends (14% on the tail of the rows against 14% elsewhere; 11% on the high ground against 14% elsewhere).",
+            "advice": "The ground is an unlikely cause. Look at pests, disease, nutrients, salt or the stand itself.",
+            "priority": 2
+          }
+        ]
+      }
+    }
+  ]
+}

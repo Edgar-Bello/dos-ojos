@@ -1,0 +1,12 @@
+{
+  "flights": {
+    "PUBLIC-purdue-20180710": {
+      "field_id": "PUBLIC-purdue-f54",
+      "flown_on": "2018-07-10",
+      "crop": "sorghum, 18-hybrid trial",
+      "notes": "Hybrid Calibration trial, 72 plots of 18 commercial hybrids x 4 reps. Not a Dos Ojos flight.",
+      "source": "Purdue University, PURR doi:10.4231/MY7W-FH43, CC0",
+      "row_spacing_m": 0.762
+    }
+  }
+}

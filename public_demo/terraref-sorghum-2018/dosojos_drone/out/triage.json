@@ -1,0 +1,55 @@
+{
+  "season": 2018,
+  "satellite_generated": "2026-09-17T19:48:24+00:00",
+  "generated": "2026-09-17T19:53:47+00:00",
+  "drone_concern_share": 0.1,
+  "water_as_of": "2018-05-20",
+  "fields": [
+    {
+      "field_id": "PUBLIC-terraref-mac",
+      "name": "FREE DATA TERRA-REF MAC",
+      "crop": "sorghum",
+      "score": 2.3,
+      "flagged": false,
+      "water_stress": false,
+      "n_consecutive_low": 0,
+      "latest_ndvi": 0.1144,
+      "baseline_median": 0.1198,
+      "percentile": 75.0,
+      "robust_z": -0.09,
+      "last_observation_date": "2018-05-20",
+      "baseline_confidence": "low",
+      "n_observations": 40,
+      "trigger": "none",
+      "shortfall_pct": 3.2,
+      "note": "mildly below its median for 2 observations, latest at the 75th percentile, within tolerance; baseline here is thin",
+      "drone": null,
+      "agreement": "satellite_only",
+      "water": {
+        "rank": 1,
+        "status": "water now",
+        "days_left": 0,
+        "days_range": null,
+        "water_by": "2018-05-20",
+        "water_left_in": 0.1,
+        "until_stress_in": 0.0,
+        "refill_net_in": 2.0,
+        "refill_gross_in": 2.22,
+        "method": "drip",
+        "confidence": "medium",
+        "sensitive": null,
+        "as_of": "2018-05-20",
+        "soil": {
+          "name": "Casa Grande clay loam",
+          "source": "ssurgo",
+          "awc_in_per_ft": 1.4,
+          "texture": "clay loam",
+          "intake": "moderate",
+          "hydgrp": "C",
+          "drainage": "Well drained"
+        }
+      },
+      "irrigation": null
+    }
+  ]
+}

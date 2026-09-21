@@ -1,0 +1,2 @@
+flight_id,method,n_units,n_healthy,n_stressed,n_dead,n_missing,share_healthy,share_stressed,share_dead,share_missing,n_no_data,n_edge
+PUBLIC-usda-bingo-20210512,watershed,324,301,4,19,0,0.9290123456790124,0.012345679012345678,0.05864197530864197,0.0,0,0

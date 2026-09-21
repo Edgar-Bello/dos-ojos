@@ -1,0 +1,27 @@
+{
+  "flight_id": "PUBLIC-usda-bingo-20210512",
+  "field_id": "PUBLIC-usda-bingo",
+  "folder": "C:\\Users\\edgar\\Projects\\Dos_Ojos\\public_demo\\usda-citrus-bingo-2021\\dosojos_drone\\data\\raw\\PUBLIC-usda-bingo-20210512",
+  "n_images": 46,
+  "n_with_gps": 46,
+  "bounds_wgs84": [
+    -80.42684561111112,
+    27.436435694444445,
+    -80.42663547222223,
+    27.437774944444445
+  ],
+  "gsd_cm": 1.252383676582761,
+  "footprint_m": [
+    68.53043478260868,
+    45.68695652173912
+  ],
+  "mean_spacing_m": 10.330821560542805,
+  "forward_overlap": 0.781892599931191,
+  "alt_mean_m": 4.398956521739132,
+  "alt_variation": 0.045465327745710264,
+  "duration_s": 144.0,
+  "camera": "FC6310",
+  "usable": true,
+  "warnings": [],
+  "coverage": null
+}

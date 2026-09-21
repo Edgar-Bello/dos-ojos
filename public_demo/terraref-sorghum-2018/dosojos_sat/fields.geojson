@@ -1,0 +1,27 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "PUBLIC-terraref-mac",
+        "name": "FREE DATA TERRA-REF MAC",
+        "crop": "sorghum",
+        "irrigation": "drip",
+        "note": "Public research data (TERRA-REF, Maricopa Agricultural Center, Arizona; public domain), not a Dos Ojos field and not the Rio Grande Valley. The outline is the field scanner's own strip, drawn from USGS aerial imagery, not supplied by TERRA-REF. It is 24 m wide, which is two Sentinel-2 pixels: read the satellite side as an illustration, not a measurement."
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [-111.975050, 33.074700],
+            [-111.974780, 33.074700],
+            [-111.974780, 33.078050],
+            [-111.975050, 33.078050],
+            [-111.975050, 33.074700]
+          ]
+        ]
+      }
+    }
+  ]
+}

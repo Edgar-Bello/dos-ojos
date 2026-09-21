@@ -1,0 +1,23 @@
+{
+  "field_id": "PUBLIC-purdue-f54",
+  "flight_id": "PUBLIC-purdue-20180710",
+  "flown_on": "2018-07-10",
+  "method": "rows",
+  "unit_type": "row_segment",
+  "n_trees": 3971,
+  "n_healthy": 2409,
+  "n_stressed": 158,
+  "n_dead": 2,
+  "n_missing": 234,
+  "n_not_assessed": 1168,
+  "n_judged": 2803,
+  "share_stressed": 0.0564,
+  "share_dead": 0.0007,
+  "share_missing": 0.0835,
+  "share_problem": 0.1406,
+  "median_canopy_volume": 0.8955,
+  "mean_ExG": 0.2508,
+  "n_blocks": 72,
+  "source": "Purdue University, PURR doi:10.4231/MY7W-FH43, CC0",
+  "generated": "2026-09-16T07:23:24+00:00"
+}

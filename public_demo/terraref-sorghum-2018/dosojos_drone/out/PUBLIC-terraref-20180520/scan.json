@@ -1,0 +1,375 @@
+{
+  "frames": 2716,
+  "frames_skipped": 3,
+  "unit": "kelvin",
+  "cell_m": 0.05,
+  "crs": "EPSG:32612",
+  "bounds": [
+    408991.1864136547,
+    3660096.631402449,
+    409015.20975936786,
+    3660179.229719239
+  ],
+  "shape": [
+    1652,
+    481
+  ],
+  "started": "2018-05-20T09:22:56-07:00",
+  "ended": "2018-05-20T10:47:03-07:00",
+  "minutes": 84.1,
+  "drift_c": 5.86,
+  "drift_window_s": 420.0,
+  "levelled_c": 0.45,
+  "levelled_worst_c": 2.75,
+  "camera_pattern_c": 4.57,
+  "leaf_rule_c": 3.0,
+  "ground_m2": 1874.9,
+  "measured_m2": 1087.2,
+  "leaf_m2": 337.8,
+  "canopy_median_c": 35.68,
+  "warming": [
+    {
+      "minute": 0,
+      "canopy_c": 31.04
+    },
+    {
+      "minute": 1,
+      "canopy_c": 31.22
+    },
+    {
+      "minute": 2,
+      "canopy_c": 31.36
+    },
+    {
+      "minute": 3,
+      "canopy_c": 31.57
+    },
+    {
+      "minute": 4,
+      "canopy_c": 31.65
+    },
+    {
+      "minute": 5,
+      "canopy_c": 31.62
+    },
+    {
+      "minute": 6,
+      "canopy_c": 31.69
+    },
+    {
+      "minute": 7,
+      "canopy_c": 31.96
+    },
+    {
+      "minute": 8,
+      "canopy_c": 32.13
+    },
+    {
+      "minute": 9,
+      "canopy_c": 32.43
+    },
+    {
+      "minute": 10,
+      "canopy_c": 32.69
+    },
+    {
+      "minute": 11,
+      "canopy_c": 32.91
+    },
+    {
+      "minute": 12,
+      "canopy_c": 32.9
+    },
+    {
+      "minute": 13,
+      "canopy_c": 32.91
+    },
+    {
+      "minute": 14,
+      "canopy_c": 33.0
+    },
+    {
+      "minute": 15,
+      "canopy_c": 33.07
+    },
+    {
+      "minute": 16,
+      "canopy_c": 33.09
+    },
+    {
+      "minute": 17,
+      "canopy_c": 33.19
+    },
+    {
+      "minute": 18,
+      "canopy_c": 33.43
+    },
+    {
+      "minute": 19,
+      "canopy_c": 33.61
+    },
+    {
+      "minute": 20,
+      "canopy_c": 33.6
+    },
+    {
+      "minute": 21,
+      "canopy_c": 33.56
+    },
+    {
+      "minute": 22,
+      "canopy_c": 33.61
+    },
+    {
+      "minute": 23,
+      "canopy_c": 33.61
+    },
+    {
+      "minute": 24,
+      "canopy_c": 33.5
+    },
+    {
+      "minute": 25,
+      "canopy_c": 33.53
+    },
+    {
+      "minute": 26,
+      "canopy_c": 33.5
+    },
+    {
+      "minute": 27,
+      "canopy_c": 33.48
+    },
+    {
+      "minute": 28,
+      "canopy_c": 33.61
+    },
+    {
+      "minute": 29,
+      "canopy_c": 33.47
+    },
+    {
+      "minute": 30,
+      "canopy_c": 33.48
+    },
+    {
+      "minute": 31,
+      "canopy_c": 33.61
+    },
+    {
+      "minute": 32,
+      "canopy_c": 33.62
+    },
+    {
+      "minute": 33,
+      "canopy_c": 33.58
+    },
+    {
+      "minute": 34,
+      "canopy_c": 33.63
+    },
+    {
+      "minute": 35,
+      "canopy_c": 33.73
+    },
+    {
+      "minute": 36,
+      "canopy_c": 33.87
+    },
+    {
+      "minute": 37,
+      "canopy_c": 33.86
+    },
+    {
+      "minute": 38,
+      "canopy_c": 34.02
+    },
+    {
+      "minute": 39,
+      "canopy_c": 34.21
+    },
+    {
+      "minute": 40,
+      "canopy_c": 34.42
+    },
+    {
+      "minute": 41,
+      "canopy_c": 34.5
+    },
+    {
+      "minute": 42,
+      "canopy_c": 34.58
+    },
+    {
+      "minute": 43,
+      "canopy_c": 34.67
+    },
+    {
+      "minute": 44,
+      "canopy_c": 34.95
+    },
+    {
+      "minute": 45,
+      "canopy_c": 34.94
+    },
+    {
+      "minute": 46,
+      "canopy_c": 34.89
+    },
+    {
+      "minute": 47,
+      "canopy_c": 35.15
+    },
+    {
+      "minute": 48,
+      "canopy_c": 35.19
+    },
+    {
+      "minute": 49,
+      "canopy_c": 35.2
+    },
+    {
+      "minute": 50,
+      "canopy_c": 35.31
+    },
+    {
+      "minute": 51,
+      "canopy_c": 35.59
+    },
+    {
+      "minute": 52,
+      "canopy_c": 35.67
+    },
+    {
+      "minute": 53,
+      "canopy_c": 35.69
+    },
+    {
+      "minute": 54,
+      "canopy_c": 35.67
+    },
+    {
+      "minute": 55,
+      "canopy_c": 35.69
+    },
+    {
+      "minute": 56,
+      "canopy_c": 35.69
+    },
+    {
+      "minute": 57,
+      "canopy_c": 35.67
+    },
+    {
+      "minute": 58,
+      "canopy_c": 35.66
+    },
+    {
+      "minute": 59,
+      "canopy_c": 35.65
+    },
+    {
+      "minute": 60,
+      "canopy_c": 35.65
+    },
+    {
+      "minute": 61,
+      "canopy_c": 35.65
+    },
+    {
+      "minute": 62,
+      "canopy_c": 35.58
+    },
+    {
+      "minute": 63,
+      "canopy_c": 35.58
+    },
+    {
+      "minute": 64,
+      "canopy_c": 35.65
+    },
+    {
+      "minute": 65,
+      "canopy_c": 35.66
+    },
+    {
+      "minute": 66,
+      "canopy_c": 35.79
+    },
+    {
+      "minute": 67,
+      "canopy_c": 35.82
+    },
+    {
+      "minute": 68,
+      "canopy_c": 36.02
+    },
+    {
+      "minute": 69,
+      "canopy_c": 36.27
+    },
+    {
+      "minute": 70,
+      "canopy_c": 36.25
+    },
+    {
+      "minute": 71,
+      "canopy_c": 36.24
+    },
+    {
+      "minute": 72,
+      "canopy_c": 36.4
+    },
+    {
+      "minute": 73,
+      "canopy_c": 36.47
+    },
+    {
+      "minute": 74,
+      "canopy_c": 36.48
+    },
+    {
+      "minute": 75,
+      "canopy_c": 36.58
+    },
+    {
+      "minute": 76,
+      "canopy_c": 36.65
+    },
+    {
+      "minute": 77,
+      "canopy_c": 36.65
+    },
+    {
+      "minute": 78,
+      "canopy_c": 36.6
+    },
+    {
+      "minute": 79,
+      "canopy_c": 36.62
+    },
+    {
+      "minute": 80,
+      "canopy_c": 36.6
+    },
+    {
+      "minute": 81,
+      "canopy_c": 36.47
+    },
+    {
+      "minute": 82,
+      "canopy_c": 36.4
+    },
+    {
+      "minute": 83,
+      "canopy_c": 36.2
+    },
+    {
+      "minute": 84,
+      "canopy_c": 36.11
+    }
+  ],
+  "notes": [
+    "the crop warmed 5.9 C between the first frame and the last, over 84 minutes, and the camera's own reading wanders as it works. Both are taken out by lining every frame up with the frames it overlaps, a 0.4 C move for the middling frame and 2.8 C for the worst. What that costs: anything that ran hot over a stretch wider than the camera's own view is levelled away with it, so a whole field running hot has to be read from the checkbook, not from here."
+  ]
+}

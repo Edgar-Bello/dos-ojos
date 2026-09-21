@@ -1,0 +1,110 @@
+{
+  "flight_id": "PUBLIC-rgv-corn-1-lidar",
+  "field_id": "PUBLIC-rgv-corn-1",
+  "ground_source": "lidar",
+  "method": null,
+  "cell_m": 2.0,
+  "area_m2": 177248.0,
+  "slope_pct": 0.04,
+  "downhill": "E",
+  "row_bearing_deg": null,
+  "flow": null,
+  "flow_source": null,
+  "along_pct": null,
+  "cross_pct": null,
+  "cross_low_side": null,
+  "sd_cm": 2.69,
+  "relief_cm": 10.9,
+  "within_tolerance": 0.724,
+  "within_5cm": 0.939,
+  "cut_m3": 1932.6,
+  "cut_yd3_per_acre": 57.7,
+  "curvature_cm": 3.5,
+  "curvature_kind": "dome",
+  "spots": [
+    {
+      "label": "H1",
+      "kind": "high",
+      "area_m2": 1952.0,
+      "mean_cm": 4.8,
+      "peak_cm": 6.7,
+      "where": "east side",
+      "n_units": 0,
+      "problem_share": null,
+      "linked": false
+    },
+    {
+      "label": "H2",
+      "kind": "high",
+      "area_m2": 1700.0,
+      "mean_cm": 5.0,
+      "peak_cm": 7.3,
+      "where": "middle",
+      "n_units": 0,
+      "problem_share": null,
+      "linked": false
+    },
+    {
+      "label": "H3",
+      "kind": "high",
+      "area_m2": 1032.0,
+      "mean_cm": 5.3,
+      "peak_cm": 7.6,
+      "where": "south side",
+      "n_units": 0,
+      "problem_share": null,
+      "linked": false
+    },
+    {
+      "label": "L1",
+      "kind": "low",
+      "area_m2": 2360.0,
+      "mean_cm": -5.0,
+      "peak_cm": -7.8,
+      "where": "north-west corner",
+      "n_units": 0,
+      "problem_share": null,
+      "linked": false
+    }
+  ],
+  "links": [],
+  "field_problem_share": null,
+  "n_judged": 0,
+  "advice": [
+    {
+      "topic": "leveling",
+      "finding": "Mostly even: 72% within 3 cm of a smooth plane (spread 2.7 cm).",
+      "advice": "A touch-up with a land plane at the next preparation would even out the water.",
+      "priority": 2
+    },
+    {
+      "topic": "low spot",
+      "finding": "Low spot L1 in the north-west corner: 2,360 m2 down to 8 cm below the plane.",
+      "advice": "Water stands here: risk of waterlogging, scald and salt build-up. Fill it when leveling, or open a drain.",
+      "priority": 2
+    },
+    {
+      "topic": "high spot",
+      "finding": "High spot H1 in the east side: 1,952 m2 standing up to 7 cm above the plane.",
+      "advice": "Water may skirt it; watch it at the next irrigation.",
+      "priority": 3
+    },
+    {
+      "topic": "high spot",
+      "finding": "High spot H2 in the middle: 1,700 m2 standing up to 7 cm above the plane.",
+      "advice": "Water may skirt it; watch it at the next irrigation.",
+      "priority": 3
+    },
+    {
+      "topic": "high spot",
+      "finding": "High spot H3 in the south side: 1,032 m2 standing up to 8 cm above the plane.",
+      "advice": "Water may skirt it; watch it at the next irrigation.",
+      "priority": 3
+    }
+  ],
+  "notes": [
+    "ground judged over the field less a 3 m headland",
+    "no crop flags to compare with the ground; a drone flight of the crop, run through 'flag', shows whether the stress follows it"
+  ],
+  "shares": {}
+}

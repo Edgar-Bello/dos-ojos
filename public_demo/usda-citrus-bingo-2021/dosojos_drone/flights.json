@@ -1,0 +1,18 @@
+{
+  "flights": {
+    "PUBLIC-usda-bingo-20210512": {
+      "field_id": "PUBLIC-usda-bingo",
+      "flown_on": "2021-05-12",
+      "crop": "citrus (Bingo mandarin, planted 2018)",
+      "notes": "Rootstock trial, 206 trees in 4 rows; per-tree height, width and health measured April 2021. Not a Dos Ojos flight.",
+      "source": "USDA-ARS Fort Pierce FL, Ag Data Commons doi:10.15482/USDA.ADC/26946823, public domain"
+    },
+    "PUBLIC-usda-bingo-20210512-medium": {
+      "field_id": "PUBLIC-usda-bingo",
+      "flown_on": "2021-05-12",
+      "crop": "citrus (Bingo mandarin, planted 2018)",
+      "notes": "The same 46 photos at half size, built at --pc-quality medium (the Edgar Field demo run, 2026-09-19). Kept here only as training data for the tree model. Not a Dos Ojos flight.",
+      "source": "USDA-ARS Fort Pierce FL, Ag Data Commons doi:10.15482/USDA.ADC/26946823, public domain"
+    }
+  }
+}

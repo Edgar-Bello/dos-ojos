@@ -1,0 +1,21 @@
+{
+  "points": 201393,
+  "source_points": 9631390,
+  "cube_m": 0.334,
+  "scale_m": 0.0031323437499959253,
+  "middle": [
+    556653.5385,
+    3034979.242,
+    -40.840500000000006
+  ],
+  "size_m": [
+    91.2,
+    200.5,
+    6.2
+  ],
+  "ground_m": -2.76,
+  "top_m": 2.68,
+  "plants_top_m": 2.7,
+  "crs": "PROJCS[\"unknown\",GEOGCS[\"unknown\",DATUM[\"WGS_1984\",SPHEROID[\"WGS 84\",6378137,298.257223563,AUTHORITY[\"EPSG\",\"7030\"]],AUTHORITY[\"EPSG\",\"6326\"]],PRIMEM[\"Greenwich\",0,AUTHORITY[\"EPSG\",\"8901\"]],UNIT[\"degree\",0.0174532925199433,AUTHORITY[\"EPSG\",\"9122\"]]],PROJECTION[\"Transverse_Mercator\"],PARAMETER[\"latitude_of_origin\",0],PARAMETER[\"central_meridian\",-81],PARAMETER[\"scale_factor\",0.9996],PARAMETER[\"false_easting\",500000],PARAMETER[\"false_northing\",0],UNIT[\"metre\",1,AUTHORITY[\"EPSG\",\"9001\"]],AXIS[\"Easting\",EAST],AXIS[\"Northing\",NORTH]]",
+  "source": "C:\\Users\\edgar\\Projects\\Dos_Ojos\\public_demo\\usda-citrus-bingo-2021\\dosojos_drone\\data\\odm\\PUBLIC-usda-bingo-20210512\\odm_georeferencing\\odm_georeferenced_model.laz"
+}

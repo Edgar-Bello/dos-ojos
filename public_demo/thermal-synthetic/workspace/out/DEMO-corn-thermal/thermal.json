@@ -1,0 +1,36 @@
+{
+  "flight_id": "DEMO-corn-thermal",
+  "field_id": "PUBLIC-rgv-corn-1",
+  "unit": "celsius",
+  "cell_m": 0.25,
+  "canopy_m2": 120109.8,
+  "canopy_median_c": 31.01,
+  "canopy_spread_c": 0.35,
+  "warm_share": 0.0174,
+  "patches": [
+    {
+      "label": 50,
+      "area_m2": 2795.0,
+      "canopy_m2": 1841.8,
+      "mean_c": 34.5,
+      "peak_c": 35.65,
+      "above_c": 3.49,
+      "z": 9.86,
+      "where": "north-east corner",
+      "compact": 0.57,
+      "problem_share": null,
+      "n_units": 0,
+      "ground": null,
+      "chance": 0.85,
+      "signs": [
+        "runs 3.5 C above the rest of the canopy - a degree or two is ordinary variation; three is a plant that has stopped drinking",
+        "covers 2795 m2 - large enough to be worth walking out to",
+        "is a blob rather than a streak along the rows - water problems follow the rows and the slope; an infestation spreads outwards",
+        "is hot while the field still has water - a thirsty field runs hot all over, not in patches"
+      ]
+    }
+  ],
+  "notes": [
+    "no flags_rows.geojson, so nobody checked whether the colour camera sees damage in these patches too; run 'flag' first for a better score."
+  ]
+}

@@ -1,0 +1,43 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "PUBLIC-purdue-f54",
+        "name": "FREE DATA Purdue f54",
+        "crop": "sorghum trials",
+        "acres": 13.1,
+        "irrigation": "none",
+        "note": "Public research data (Purdue University, CC0), not a Dos Ojos field. The dataset records no irrigation; treating it as rainfed is our assumption."
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              -86.98886328567026,
+              40.47549728832253
+            ],
+            [
+              -86.98886264257915,
+              40.47938920104153
+            ],
+            [
+              -86.99031380247618,
+              40.47938933176332
+            ],
+            [
+              -86.99031436177471,
+              40.47549741902645
+            ],
+            [
+              -86.98886328567026,
+              40.47549728832253
+            ]
+          ]
+        ]
+      }
+    }
+  ]
+}

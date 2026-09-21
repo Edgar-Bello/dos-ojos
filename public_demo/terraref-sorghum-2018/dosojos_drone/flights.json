@@ -1,0 +1,12 @@
+{
+  "flights": {
+    "PUBLIC-terraref-20180520": {
+      "field_id": "PUBLIC-terraref-mac",
+      "flown_on": "2018-05-20",
+      "crop": "sorghum, variety trial",
+      "notes": "Season 6 sorghum, planted 2018-04-20. FLIR SC615 on the gantry, 2,719 frames over 84 minutes. Not a Dos Ojos flight, and not a drone.",
+      "source": "public: TERRA-REF field scanner, Maricopa AZ (doi:10.5061/dryad.4b8gtht99, public domain)",
+      "row_spacing_m": 0.762
+    }
+  }
+}

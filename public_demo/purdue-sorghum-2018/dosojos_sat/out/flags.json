@@ -1,0 +1,26 @@
+{
+  "season": 2018,
+  "generated": "2026-09-16T07:21:58+00:00",
+  "fields": [
+    {
+      "field_id": "PUBLIC-purdue-f54",
+      "name": "FREE DATA Purdue f54",
+      "crop": "sorghum trials",
+      "score": 0.0,
+      "flagged": false,
+      "water_stress": false,
+      "n_consecutive_low": 0,
+      "latest_ndvi": 0.8629,
+      "baseline_median": 0.6672,
+      "percentile": 76.2,
+      "robust_z": 0.78,
+      "last_observation_date": "2018-07-07",
+      "baseline_confidence": "high",
+      "n_observations": 22,
+      "trigger": "none",
+      "shortfall_pct": 4.9,
+      "note": "within its normal range"
+    }
+  ],
+  "as_of": "2018-07-10"
+}

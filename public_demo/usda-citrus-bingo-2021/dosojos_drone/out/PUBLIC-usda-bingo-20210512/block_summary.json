@@ -1,0 +1,23 @@
+{
+  "field_id": "PUBLIC-usda-bingo",
+  "flight_id": "PUBLIC-usda-bingo-20210512",
+  "flown_on": "2021-05-12",
+  "method": "watershed",
+  "unit_type": "crown",
+  "n_trees": 324,
+  "n_healthy": 301,
+  "n_stressed": 4,
+  "n_dead": 19,
+  "n_missing": 0,
+  "n_not_assessed": 0,
+  "n_judged": 324,
+  "share_stressed": 0.0123,
+  "share_dead": 0.0586,
+  "share_missing": 0.0,
+  "share_problem": 0.071,
+  "median_canopy_volume": 3.7135,
+  "mean_ExG": 0.3388,
+  "n_blocks": null,
+  "source": "USDA-ARS Fort Pierce FL, Ag Data Commons doi:10.15482/USDA.ADC/26946823, public domain",
+  "generated": "2026-09-16T07:41:42+00:00"
+}

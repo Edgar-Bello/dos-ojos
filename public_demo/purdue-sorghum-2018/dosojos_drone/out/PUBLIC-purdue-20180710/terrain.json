@@ -1,0 +1,181 @@
+{
+  "flight_id": "PUBLIC-purdue-20180710",
+  "field_id": "PUBLIC-purdue-f54",
+  "ground_source": "lidar",
+  "method": "none",
+  "cell_m": 0.499,
+  "area_m2": 3455.9,
+  "slope_pct": 0.468,
+  "downhill": "S",
+  "row_bearing_deg": 0.0,
+  "flow": "N to S",
+  "flow_source": "slope",
+  "along_pct": 0.454,
+  "cross_pct": 0.11,
+  "cross_low_side": "W",
+  "sd_cm": 3.24,
+  "relief_cm": 13.9,
+  "within_tolerance": 0.681,
+  "within_5cm": 0.892,
+  "cut_m3": 36.6,
+  "cut_yd3_per_acre": 56.0,
+  "curvature_cm": 10.5,
+  "curvature_kind": "dome",
+  "spots": [
+    {
+      "label": "H1",
+      "kind": "high",
+      "area_m2": 84.3,
+      "mean_cm": 5.0,
+      "peak_cm": 5.7,
+      "where": "south-west corner",
+      "n_units": 73,
+      "problem_share": 0.2192,
+      "linked": false
+    },
+    {
+      "label": "H2",
+      "kind": "high",
+      "area_m2": 70.2,
+      "mean_cm": 4.3,
+      "peak_cm": 4.5,
+      "where": "middle",
+      "n_units": 49,
+      "problem_share": 0.0,
+      "linked": false
+    },
+    {
+      "label": "L1",
+      "kind": "low",
+      "area_m2": 285.6,
+      "mean_cm": -6.8,
+      "peak_cm": -12.8,
+      "where": "north-west corner",
+      "n_units": 229,
+      "problem_share": 0.1135,
+      "linked": false
+    },
+    {
+      "label": "L2",
+      "kind": "low",
+      "area_m2": 102.2,
+      "mean_cm": -5.0,
+      "peak_cm": -6.1,
+      "where": "south-east corner",
+      "n_units": 81,
+      "problem_share": 0.0494,
+      "linked": false
+    }
+  ],
+  "links": [
+    {
+      "place": "tail of the rows",
+      "n_in": 948,
+      "problems_in": 132,
+      "share_in": 0.1392,
+      "share_out": 0.1412,
+      "ratio": 0.99,
+      "p_value": 0.578165,
+      "linked": false
+    },
+    {
+      "place": "head of the rows",
+      "n_in": 943,
+      "problems_in": 130,
+      "share_in": 0.1379,
+      "share_out": 0.1419,
+      "ratio": 0.97,
+      "p_value": 0.635688,
+      "linked": false
+    },
+    {
+      "place": "high ground",
+      "n_in": 341,
+      "problems_in": 39,
+      "share_in": 0.1144,
+      "share_out": 0.1442,
+      "ratio": 0.79,
+      "p_value": 0.944406,
+      "linked": false
+    },
+    {
+      "place": "low ground",
+      "n_in": 427,
+      "problems_in": 41,
+      "share_in": 0.096,
+      "share_out": 0.1486,
+      "ratio": 0.65,
+      "p_value": 0.998925,
+      "linked": false
+    }
+  ],
+  "field_problem_share": 0.1406,
+  "n_judged": 2803,
+  "advice": [
+    {
+      "topic": "low spot",
+      "finding": "Low spot L1 in the north-west corner: 286 m2 down to 13 cm below the plane.",
+      "advice": "Water can stand here after heavy rain: waterlogging and salt build-up. Fill it or open a drain.",
+      "priority": 2
+    },
+    {
+      "topic": "low spot",
+      "finding": "Low spot L2 in the south-east corner: 102 m2 down to 6 cm below the plane.",
+      "advice": "Water can stand here after heavy rain: waterlogging and salt build-up. Fill it or open a drain.",
+      "priority": 2
+    },
+    {
+      "topic": "cause",
+      "finding": "The flagged spots follow neither the ground nor the row ends (14% on the tail of the rows against 14% elsewhere; 11% on the high ground against 14% elsewhere).",
+      "advice": "The ground is an unlikely cause. Look at pests, disease, nutrients, salt or the stand itself.",
+      "priority": 2
+    },
+    {
+      "topic": "leveling",
+      "finding": "Mostly even: 68% within 3 cm of a smooth plane (spread 3.2 cm).",
+      "advice": "Not a watering problem here, but low ground can pond after heavy rain; smoothing it at the next preparation helps drainage.",
+      "priority": 3
+    },
+    {
+      "topic": "method",
+      "finding": "Rainfed: no irrigation water to spread, so the ground matters for drainage only.",
+      "advice": "Leveling findings above are about drainage and any future furrow use.",
+      "priority": 3
+    }
+  ],
+  "notes": [
+    "ground judged over the rows' footprint"
+  ],
+  "shares": {
+    "head": {
+      "n": 943,
+      "share": 0.1379,
+      "label": "head of rows"
+    },
+    "middle": {
+      "n": 912,
+      "share": 0.1447,
+      "label": "middle"
+    },
+    "tail": {
+      "n": 948,
+      "share": 0.1392,
+      "label": "tail of rows"
+    },
+    "high ground": {
+      "n": 341,
+      "share": 0.1144,
+      "label": "high ground"
+    },
+    "level ground": {
+      "n": 2035,
+      "share": 0.1543,
+      "label": "level ground"
+    },
+    "low ground": {
+      "n": 427,
+      "share": 0.096,
+      "label": "low ground"
+    }
+  }
+}

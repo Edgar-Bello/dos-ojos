@@ -1,0 +1,16 @@
+{
+  "flights": {
+    "PUBLIC-rgv-corn-1-lidar": {
+      "field_id": "PUBLIC-rgv-corn-1",
+      "flown_on": "2019-01-01",
+      "notes": "Ground from airborne lidar, not a drone flight: 2 m cells, older than the crop.",
+      "source": "USGS 3DEP lidar TX_South_B8_2018, flown 2019 (public domain)"
+    },
+    "PUBLIC-rgv-cotton-1-lidar": {
+      "field_id": "PUBLIC-rgv-cotton-1",
+      "flown_on": "2019-01-01",
+      "notes": "Ground from airborne lidar, not a drone flight: 2 m cells, older than the crop.",
+      "source": "USGS 3DEP lidar TX_South_B8_2018, flown 2019 (public domain)"
+    }
+  }
+}

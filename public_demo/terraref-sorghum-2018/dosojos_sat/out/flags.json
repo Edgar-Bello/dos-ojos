@@ -1,0 +1,26 @@
+{
+  "season": 2018,
+  "generated": "2026-09-17T19:48:24+00:00",
+  "fields": [
+    {
+      "field_id": "PUBLIC-terraref-mac",
+      "name": "FREE DATA TERRA-REF MAC",
+      "crop": "sorghum",
+      "score": 2.3,
+      "flagged": false,
+      "water_stress": false,
+      "n_consecutive_low": 0,
+      "latest_ndvi": 0.1144,
+      "baseline_median": 0.1198,
+      "percentile": 75.0,
+      "robust_z": -0.09,
+      "last_observation_date": "2018-05-20",
+      "baseline_confidence": "low",
+      "n_observations": 40,
+      "trigger": "none",
+      "shortfall_pct": 3.2,
+      "note": "mildly below its median for 2 observations, latest at the 75th percentile, within tolerance; baseline here is thin"
+    }
+  ],
+  "as_of": "2018-05-20"
+}
