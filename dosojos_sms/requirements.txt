@@ -1,0 +1,4 @@
+# Installed into the satellite half's environment (dosojos_sat/.venv), which already
+# has these. It reads outlines and runs the water checkbook through dosojos_sat.
+click>=8.1
+requests>=2.31

@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Farmers' data never lives in the repo: it goes to ../farm_data by default.
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+sms.env
+examples/demo_data/
+examples/demo_data_clean/
+examples/demo_data_drone/
+examples/demo_data_thermal/
+examples/try_satellite/
+examples/try_drone/
+examples/try_thermal/

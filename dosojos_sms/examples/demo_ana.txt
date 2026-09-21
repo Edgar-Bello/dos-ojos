@@ -1,0 +1,27 @@
+# EXAMPLE: a made-up grower on a pretend 555 number (956-555-0191), texting in English.
+# The field is REAL and PUBLIC but it is not a farm: it is the TERRA-REF field scanner's
+# own strip of grain sorghum at the Maricopa Agricultural Center in Arizona, planted
+# 2018-04-20 and harvested 2018-08-02 (public domain; see
+# public_demo/terraref-sorghum-2018/SOURCE.md). Used by setup_thermal_demo.cmd, which pins
+# that demo to the day the thermal camera ran over it, Sunday 20 May 2018.
+# She picks option 3, because that field is the one place we have a real thermal scan of.
+# TERRA-REF's own irrigation log is not in what we downloaded, so the watering dates below
+# are INVENTED to match a drip schedule in the Arizona desert.
+hello
+2
+Ana Example
+yes
+3
+Scanner Field
+2.3
+33.07640, -111.97492
+sorghum
+April 20
+yes
+4
+drip
+May 17 1
+yes
+May 10 1
+yes
+no

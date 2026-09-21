@@ -1,0 +1,19 @@
+# EXAMPLE: a made-up farmer on a pretend 555 number (956-555-0142), texting in Spanish.
+# Her field is a real grain sorghum field near Elsa from public USDA data
+# (demo_fields.geojson), planted Mar 12 and never irrigated (rainfed, "temporal").
+# Used by setup_sms_demo.cmd.
+# She has no drone, so she picks satellite only (option 1), and she doesn't know her
+# hybrid's maturity (4, not sure), so her growth stage is worked out as medium season.
+hola
+1
+Maria Ejemplo
+si
+1
+Sorgo Elsa
+50
+26.28407, -98.01321
+sorgo
+12 marzo
+si
+4
+temporal

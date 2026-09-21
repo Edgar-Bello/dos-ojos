@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dosojos-sms"
+version = "0.1.0"
+description = "Text-message front door for Dos Ojos: farmers register fields and irrigations by SMS"
+requires-python = ">=3.11,<3.13"
+dynamic = ["dependencies"]
+
+[project.scripts]
+dosojos-sms = "dosojos_sms.cli:cli"
+
+[tool.setuptools]
+packages = ["dosojos_sms"]
+package-dir = { "dosojos_sms" = "src" }
+
+[tool.setuptools.package-data]
+dosojos_sms = ["pages/*.html"]
+
+[tool.setuptools.dynamic]
+dependencies = { file = ["requirements.txt"] }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

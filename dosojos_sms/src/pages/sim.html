@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dos Ojos SMS simulator</title>
+<style>
+  :root { --ink: #1d2a22; --paper: #eef1ec; --green: #1a7f37; --them: #ffffff; --me: #1f6feb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: #d9dfd6; color: var(--ink);
+         display: flex; flex-direction: column; align-items: center; min-height: 100vh; }
+  header { width: 100%; background: var(--ink); color: #fff; padding: 10px 16px; display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+  header b { font-size: 17px; }
+  header .note { font-size: 13px; opacity: .85; }
+  .band { width: 100%; background: #0b5cad; color: #fff; font: 600 13px/1.3 system-ui, sans-serif; padding: 6px 10px; text-align: center; }
+  .phone { width: min(420px, 100vw); height: min(780px, calc(100vh - 110px)); margin: 16px 0; background: var(--paper);
+           border-radius: 28px; border: 10px solid #111; display: flex; flex-direction: column; overflow: hidden;
+           box-shadow: 0 10px 40px rgba(0,0,0,.35); }
+  .top { background: #fff; padding: 10px 14px; border-bottom: 1px solid #d6dbd3; display: flex; gap: 8px; align-items: center; }
+  .top input { flex: 1; font-size: 15px; padding: 6px 8px; border: 1px solid #c9d0c6; border-radius: 8px; }
+  .top button { font-size: 13px; }
+  #chat { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+  .msg { max-width: 82%; padding: 9px 12px; border-radius: 16px; font-size: 15px; line-height: 1.35; white-space: pre-wrap; word-wrap: break-word; }
+  .out { align-self: flex-start; background: var(--them); border-bottom-left-radius: 4px; box-shadow: 0 1px 2px rgba(0,0,0,.12); }
+  .in { align-self: flex-end; background: var(--me); color: #fff; border-bottom-right-radius: 4px; }
+  .in a { color: #fff; }
+  .meta { font-size: 11px; opacity: .6; margin-top: 3px; }
+  .photo { font-style: italic; opacity: .85; }
+  .picture { display: block; max-width: 100%; border-radius: 8px; margin-bottom: 6px; }
+  .composer { display: flex; gap: 6px; padding: 8px; background: #fff; border-top: 1px solid #d6dbd3; }
+  .composer input[type=text] { flex: 1; font-size: 16px; padding: 10px 12px; border-radius: 18px; border: 1px solid #c9d0c6; }
+  button { border: 0; border-radius: 18px; padding: 8px 12px; font-size: 16px; cursor: pointer; background: #e2e8e1; }
+  button.send { background: var(--green); color: #fff; font-weight: 700; }
+  input[type=file] { display: none; }
+  .hint { font-size: 12px; color: #55614f; padding: 0 12px 8px; background: #fff; }
+</style>
+</head>
+<body>
+<header><b>Dos Ojos</b><span class="note" id="mode"></span></header>
+<div class="band" id="band" hidden></div>
+<div class="phone">
+  <div class="top">
+    <span>&#128241;</span>
+    <input id="phone" list="phones" aria-label="phone number">
+    <datalist id="phones"></datalist>
+    <button id="newFarmer" title="another farmer">+ nuevo</button>
+  </div>
+  <div id="chat"></div>
+  <form class="composer" id="composer">
+    <button id="pin" type="button" title="send a location">&#128205;</button>
+    <label><button id="photoButton" type="button" title="send a photo">&#128247;</button><input type="file" id="photo" accept="image/*"></label>
+    <input type="text" id="text" placeholder="Mensaje" autocomplete="off" enterkeyhint="send">
+    <button class="send" id="send" type="submit" title="send">&#10148;</button>
+  </form>
+  <div class="hint">&#128205; sends the pin you paste (a Google Maps link or "26.15, -97.99"). &#128247; sends a photo as a picture message.</div>
+</div>
+<script>
+const DATA = __DATA__;
+const $ = id => document.getElementById(id);
+$("mode").textContent = DATA.twilio
+  ? "Simulator: these phones are pretend; texts to them are never sent."
+  : "Simulator: nothing is sent to real phones (Twilio is not set up).";
+if (DATA.banner) { $("band").textContent = DATA.banner; $("band").hidden = false; }
+DATA.phones.forEach(p => { const o = document.createElement("option"); o.value = p; $("phones").appendChild(o); });
+$("phone").value = localStorageGet("simPhone") || DATA.phones[DATA.phones.length - 1];
+let after = 0, timer = null, shown = new Set();
+
+function localStorageGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+function localStorageSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+
+function linkify(node, body) {
+  const parts = body.split(/(https?:\/\/[^\s]+)/g);
+  parts.forEach((part, i) => {
+    if (i % 2) { const a = document.createElement("a"); a.href = part; a.textContent = part; a.target = "_blank"; node.appendChild(a); }
+    else node.appendChild(document.createTextNode(part));
+  });
+}
+
+function show(message) {
+  if (shown.has(message.id)) return;       // a send and the timer can both fetch it
+  shown.add(message.id);
+  const bubble = document.createElement("div");
+  bubble.className = "msg " + message.direction;
+  const pictures = message.media.filter(m => /^https?:\/\//.test(m));
+  const files = message.media.filter(m => !/^https?:\/\//.test(m));
+  pictures.forEach(url => {          // a picture we sent: shown, and a tap opens it big
+    const link = document.createElement("a");
+    link.href = url; link.target = "_blank";
+    const img = document.createElement("img");
+    img.src = url; img.className = "picture"; img.alt = "";
+    link.appendChild(img);
+    bubble.appendChild(link);
+  });
+  if (files.length) {
+    const photo = document.createElement("div");
+    photo.className = "photo";
+    photo.textContent = "[" + files.join(", ") + "]";
+    bubble.appendChild(photo);
+  }
+  linkify(bubble, message.body);
+  if (message.direction === "out") {
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    meta.textContent = `${message.segments} SMS` + (message.status !== "kept" ? ` - ${message.status}` : "");
+    bubble.appendChild(meta);
+  }
+  $("chat").appendChild(bubble);
+  $("chat").scrollTop = $("chat").scrollHeight;
+}
+
+async function poll() {
+  const phone = $("phone").value.trim();
+  if (!phone) return;
+  try {
+    const response = await fetch(`/sim/messages?phone=${encodeURIComponent(phone)}&after=${after}`);
+    const data = await response.json();
+    data.messages.forEach(m => { show(m); after = Math.max(after, m.id); });
+  } catch (e) {}
+}
+
+function restart() {
+  after = 0; shown = new Set(); $("chat").innerHTML = ""; localStorageSet("simPhone", $("phone").value.trim());
+  clearInterval(timer); poll(); timer = setInterval(poll, 1500);
+}
+
+async function send(payload) {
+  const phone = $("phone").value.trim();
+  const response = await fetch("/sim/send", { method: "POST", headers: { "Content-Type": "application/json" },
+                                              body: JSON.stringify({ phone, ...payload }) });
+  const data = await response.json();
+  if (!data.ok) alert(data.error);
+  await poll();
+}
+
+$("composer").onsubmit = e => {
+  e.preventDefault();
+  const body = $("text").value;
+  if (!body.trim()) return;
+  $("text").value = "";
+  send({ body });
+};
+$("pin").onclick = () => {
+  // The default is the middle of the placeholder field "Mercedes North 40" (rgv-002).
+  const where = prompt("Google Maps link or coordinates (lat, lon):", "26.2180, -97.9120");
+  if (where) send({ body: where });
+};
+$("photoButton").onclick = () => $("photo").click();
+$("photo").onchange = () => {
+  const file = $("photo").files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => send({ body: $("text").value, photo: reader.result });
+  reader.readAsDataURL(file);
+  $("text").value = ""; $("photo").value = "";
+};
+$("newFarmer").onclick = () => {
+  const number = "+1956555" + String(100 + Math.floor(Math.random() * 100)).padStart(4, "0");
+  $("phone").value = number; restart();
+};
+$("phone").onchange = restart;
+restart();
+</script>
+</body>
+</html>

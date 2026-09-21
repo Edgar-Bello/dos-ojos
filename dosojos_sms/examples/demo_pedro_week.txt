@@ -1,0 +1,4 @@
+# EXAMPLE, after the daily run: Pedro asks about water, then reports a sugarcane aphid
+# count close to the threshold. Used by setup_sms_demo.cmd.
+AGUA
+PULGON 21 de 80

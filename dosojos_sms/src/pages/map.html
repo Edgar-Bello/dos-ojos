@@ -1,0 +1,148 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Dos Ojos</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+  html, body { margin: 0; height: 100%; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: #1d2a22; }
+  #map { position: absolute; inset: 0; }
+  .band { position: absolute; top: 0; left: 0; right: 0; z-index: 1001; background: #0b5cad; color: #fff;
+          font: 600 13px/1.3 system-ui, sans-serif; padding: 6px 10px; text-align: center; }
+  .help { position: absolute; left: 10px; right: 10px; top: 10px; z-index: 1000; background: rgba(255,255,255,.96);
+          border-radius: 12px; padding: 10px 14px; font-size: 16px; line-height: 1.35; box-shadow: 0 2px 10px rgba(0,0,0,.3); }
+  .has-band .help { top: 40px; }
+  .panel { position: absolute; left: 10px; right: 10px; bottom: 14px; z-index: 1000; background: #fff; border-radius: 14px;
+           padding: 12px 14px; box-shadow: 0 2px 14px rgba(0,0,0,.35); }
+  .area { font-size: 22px; font-weight: 700; color: #1d2a22; }
+  .warn { color: #a4400b; font-size: 15px; margin-top: 4px; }
+  .buttons { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  button { font-size: 17px; padding: 12px 16px; border-radius: 12px; border: 0; cursor: pointer; }
+  .secondary { background: #e9eee9; color: #1d2a22; }
+  .primary { background: #1a7f37; color: #fff; font-weight: 700; margin-left: auto; }
+  .primary:disabled { background: #9fbfa8; }
+  .corner { width: 20px; height: 20px; border-radius: 50%; background: #ffd400; border: 3px solid #1d2a22;
+            box-sizing: border-box; margin: -10px 0 0 -10px; }
+  .done { font-size: 19px; font-weight: 600; color: #1a7f37; }
+  .leaflet-control-layers { font-size: 15px; }
+  @media (min-width: 700px) { .help, .panel { right: auto; width: 440px; } }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div class="band" id="band" hidden></div>
+<div class="help" id="help"></div>
+<div class="panel" id="panel">
+  <div class="area" id="area"></div>
+  <div class="warn" id="warn"></div>
+  <div class="buttons">
+    <button class="secondary" id="undo"></button>
+    <button class="secondary" id="clear"></button>
+    <button class="secondary" id="me"></button>
+    <button class="primary" id="save" disabled></button>
+  </div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+const DATA = __DATA__;
+const S = DATA.strings;
+const $ = id => document.getElementById(id);
+document.documentElement.lang = DATA.lang;
+if (DATA.banner) { $("band").textContent = DATA.banner; $("band").hidden = false; document.body.classList.add("has-band"); }
+$("help").textContent = S.help;
+for (const key of ["undo", "clear", "me", "save"]) $(key).textContent = S[key];
+
+// Aerial imagery the world over, no key needed. The USGS National Map is sharper,
+// but it stops at the US border: a farmer in Veracruz was handed a blank white map.
+const imagery = L.tileLayer(
+  "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+  { maxNativeZoom: 18, maxZoom: 19, attribution: "Esri, Maxar, Earthstar Geographics" });
+const roads = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+  { maxNativeZoom: 19, maxZoom: 19, attribution: "&copy; OpenStreetMap" });
+const center = DATA.pin || [26.16, -97.99];          // the pin, else the middle of the Valley
+const map = L.map("map", { layers: [imagery], zoomControl: false }).setView(center, DATA.pin ? 16 : 10);
+L.control.zoom({ position: "topright" }).addTo(map);
+L.control.layers({ [S.imagery]: imagery, [S.roads]: roads }, null, { position: "topright" }).addTo(map);
+// A tile that never arrives leaves white squares and no way to tell why.
+let missing = 0;
+imagery.on("tileerror", () => { if (++missing === 6) $("help").textContent = S.no_tiles; });
+if (DATA.pin) L.circleMarker(DATA.pin, { radius: 7, color: "#d7263d", weight: 3 }).addTo(map).bindTooltip(S.pin);
+
+const shape = L.polygon([], { color: "#ffd400", weight: 3, fillOpacity: 0.18 }).addTo(map);
+let markers = [];
+
+function addCorner(latlng) {
+  const marker = L.marker(latlng, {
+    draggable: true, icon: L.divIcon({ className: "", html: '<div class="corner"></div>', iconSize: [0, 0] }),
+  }).addTo(map);
+  marker.on("drag", redraw);
+  markers.push(marker);
+  redraw();
+}
+
+// Area on a local flat projection; the server measures it again, properly, in UTM.
+function acres(points) {
+  if (points.length < 3) return 0;
+  const R = 6378137, rad = Math.PI / 180;
+  const lat0 = points.reduce((s, p) => s + p.lat, 0) / points.length * rad;
+  let twice = 0;
+  points.forEach((p, i) => {
+    const q = points[(i + 1) % points.length];
+    twice += (p.lng * rad * Math.cos(lat0) * R) * (q.lat * rad * R) - (q.lng * rad * Math.cos(lat0) * R) * (p.lat * rad * R);
+  });
+  return Math.abs(twice / 2) / 4046.8564224;
+}
+
+function redraw() {
+  const points = markers.map(m => m.getLatLng());
+  shape.setLatLngs(points);
+  const size = acres(points);
+  $("area").textContent = points.length < 3 ? S.tap : S.acres.replace("{acres}", size.toFixed(1));
+  $("save").disabled = points.length < 3;
+  $("warn").textContent = "";
+}
+
+map.on("click", e => addCorner(e.latlng));
+$("undo").onclick = () => { const m = markers.pop(); if (m) map.removeLayer(m); redraw(); };
+$("clear").onclick = () => { markers.forEach(m => map.removeLayer(m)); markers = []; redraw(); };
+$("me").onclick = () => navigator.geolocation
+  ? navigator.geolocation.getCurrentPosition(p => map.setView([p.coords.latitude, p.coords.longitude], 17),
+                                             () => alert(S.no_gps), { enableHighAccuracy: true, timeout: 15000 })
+  : alert(S.no_gps);
+
+$("save").onclick = async () => {
+  const points = markers.map(m => m.getLatLng());
+  const size = acres(points);
+  if (DATA.acres_said && Math.abs(size - DATA.acres_said) / DATA.acres_said > 0.25 &&
+      !confirm(S.check.replace("{said}", DATA.acres_said).replace("{acres}", size.toFixed(1)))) return;
+  $("save").disabled = true;
+  try {
+    const response = await fetch(location.pathname, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ coordinates: points.map(p => [p.lng, p.lat]) }),
+    });
+    const result = await response.json();
+    if (!result.ok) throw new Error(result.error || response.status);
+    $("panel").innerHTML = "";
+    const done = document.createElement("div");
+    done.className = "done";
+    done.textContent = S.saved.replace("{acres}", result.acres);
+    $("panel").appendChild(done);
+    markers.forEach(m => m.dragging.disable());
+    map.off("click");
+  } catch (error) {
+    $("warn").textContent = S.failed.replace("{error}", error.message);
+    $("save").disabled = false;
+  }
+};
+
+// A field drawn before: show it, ready to be corrected.
+if (DATA.outline && DATA.outline.type === "Polygon") {
+  DATA.outline.coordinates[0].slice(0, -1).forEach(([lng, lat]) => addCorner(L.latLng(lat, lng)));
+  map.fitBounds(shape.getBounds(), { padding: [60, 60] });
+}
+redraw();
+</script>
+</body>
+</html>

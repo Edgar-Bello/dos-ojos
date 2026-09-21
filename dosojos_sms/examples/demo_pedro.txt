@@ -1,0 +1,26 @@
+# EXAMPLE: a made-up farmer on a pretend 555 number (956-555-0165), texting in Spanish.
+# His field is a real grain sorghum field near Primera from public USDA data
+# (demo_fields.geojson), planted Feb 18, a medium-season hybrid, watered by furrows
+# from the west. Used by setup_sms_demo.cmd. He has no drone and picks satellite only
+# (option 1), like most growers will: everything sorghum-specific works without one.
+hola
+1
+Pedro Ejemplo
+si
+1
+Sorgo Primera
+57
+26.2066, -97.7762
+sorgo
+18 febrero
+si
+2
+surcos
+oeste
+5/6 4
+si
+4/15 4
+si
+3/20 4
+si
+no
