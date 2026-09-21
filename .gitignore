@@ -1,0 +1,35 @@
+# Nothing a farmer told us ever lives here. Their databases, phone numbers and
+# photos stay on the farm's own computer, in ../Dos_Ojos/farm_data and live_data.
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+farm_data/
+live_data/
+sms.env
+*.env
+!*.env.example
+
+# Environments and build leftovers
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# The public datasets are downloaded from their own repositories, not carried
+# here: about 12 GB of imagery. public_demo/*/SOURCE.md says where each one
+# comes from and how to fetch it.
+public_demo/*/download/
+public_demo/*/*/data/raw/
+public_demo/*/*/data/odm/
+public_demo/*/*/cache/
+public_demo/*/workspace/data/
+
+# Large derived rasters and point clouds: reproducible from the commands in
+# each SOURCE.md. The small result figures under out/ are kept.
+*.tif
+*.tiff
+*.las
+*.laz
+*.ply
+*.mp4
