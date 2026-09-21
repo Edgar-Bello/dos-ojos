@@ -1,0 +1,42 @@
+{
+  "flights": {
+    "bad-001": {
+      "field_id": "rgv-002",
+      "ground_elevation_m": 12.0
+    },
+    "chm-rows": {
+      "field_id": "rgv-002",
+      "flown_on": "2026-09-05",
+      "crop": "grain sorghum"
+    },
+    "chm-trees": {
+      "field_id": "rgv-003",
+      "flown_on": "2026-09-06",
+      "crop": "citrus"
+    },
+    "chm-water": {
+      "field_id": "rgv-002",
+      "flown_on": "2026-09-10",
+      "crop": "grain sorghum",
+      "notes": "Water not reaching the row tails and a high spot, planted on purpose",
+      "source": "Synthetic: tools/make_synthetic_field.py --water-pattern",
+      "row_spacing_m": 0.76
+    },
+    "demo-001": {
+      "field_id": "rgv-002",
+      "flown_on": "2026-09-05",
+      "crop": "grain sorghum",
+      "notes": "synthetic test flight",
+      "ground_elevation_m": 12.0
+    },
+    "tiny-001": {
+      "field_id": "rgv-002",
+      "ground_elevation_m": 12.0
+    },
+    "vid-001": {
+      "field_id": "rgv-002",
+      "crop": "grain sorghum",
+      "ground_elevation_m": 12.0
+    }
+  }
+}

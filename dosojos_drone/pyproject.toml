@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dosojos-drone"
+version = "0.1.0"
+description = "Drone post-processing for Rio Grande Valley crop-stress triage"
+requires-python = ">=3.11,<3.13"
+dynamic = ["dependencies"]
+
+[project.scripts]
+dosojos-drone = "dosojos_drone.cli:cli"
+
+[tool.setuptools]
+packages = ["dosojos_drone"]
+package-dir = { "dosojos_drone" = "src" }
+
+[tool.setuptools.dynamic]
+dependencies = { file = ["requirements.txt"] }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
